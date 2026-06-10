@@ -27,23 +27,24 @@ from typing import Any, Final, Protocol, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
-_F64 = npt.NDArray[np.float64]
-
 
 @runtime_checkable
 class SparseMatrix(Protocol):
-    """CSR-semantics sparse matrix."""
+    """CSR-semantics sparse matrix.
+
+    Arrays are backend arrays, typed ``Any`` like the ``ArrayBackend`` ops.
+    """
 
     @property
     def shape(self) -> tuple[int, int]:
         """Matrix dimensions."""
         ...
 
-    def matvec(self, x: _F64) -> _F64:
+    def matvec(self, x: Any) -> Any:
         """Matrix-vector product."""
         ...
 
-    def diagonal(self) -> _F64:
+    def diagonal(self) -> Any:
         """Return the main diagonal as a dense vector."""
         ...
 

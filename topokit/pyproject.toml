@@ -5,6 +5,7 @@ description = "Open-source topology optimization for engineers"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "LGPL-2.1-or-later"
+license-files = ["LICENSE"]
 authors = [{ name = "Peter Udvardi", email = "udvardi.peter98@gmail.com" }]
 dependencies = [
     "numpy>=2.2",

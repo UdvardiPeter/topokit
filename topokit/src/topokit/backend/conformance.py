@@ -46,10 +46,20 @@ class ArrayBackendConformance:
         assert z.dtype == np.float64
         assert not z.any()
 
+    def test_zeros_respects_dtype(self) -> None:
+        z = np.asarray(self.backend.zeros((2,), dtype=np.int64))
+        assert z.dtype == np.int64
+
     def test_einsum(self) -> None:
         a = self.backend.asarray([[1.0, 2.0], [3.0, 4.0]])
         v = self.backend.asarray([1.0, 1.0])
         np.testing.assert_allclose(np.asarray(self.backend.einsum("ij,j->i", a, v)), [3.0, 7.0])
+
+    def test_einsum_element_energy_contraction(self) -> None:
+        u = self.backend.asarray([[1.0, 2.0], [3.0, 4.0]])
+        k = self.backend.asarray([[2.0, 0.0], [0.0, 1.0]])
+        out = np.asarray(self.backend.einsum("ei,ij,ej->e", u, k, u))
+        np.testing.assert_allclose(out, [6.0, 34.0])
 
     def test_scatter_add_accumulates_duplicate_indices(self) -> None:
         target = self.backend.zeros((4,))
@@ -89,3 +99,12 @@ class ArrayBackendConformance:
             shape=(1, 1),
         )
         np.testing.assert_allclose(m.diagonal(), [4.0])
+
+    def test_diagonal(self) -> None:
+        m = self.backend.coo_to_csr(
+            self.backend.asarray([0, 1, 2, 0], dtype=np.int64),
+            self.backend.asarray([0, 1, 2, 2], dtype=np.int64),
+            self.backend.asarray([5.0, 6.0, 7.0, 9.0]),
+            shape=(3, 3),
+        )
+        np.testing.assert_allclose(np.asarray(m.diagonal()), [5.0, 6.0, 7.0])

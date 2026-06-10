@@ -31,24 +31,24 @@ def test_default_backend_is_numpy() -> None:
 
 
 def test_kernel_exact_backend_match() -> None:
-    register_kernel("assemble", "testbk", lambda: "fast")
-    assert get_kernel("assemble", "testbk")() == "fast"
+    register_kernel("_test_exact", "testbk", lambda: "fast")
+    assert get_kernel("_test_exact", "testbk")() == "fast"
 
 
 def test_kernel_falls_back_to_generic() -> None:
-    register_kernel("filter", "generic", lambda: "slow")
-    assert get_kernel("filter", "anything")() == "slow"
+    register_kernel("_test_fallback", "generic", lambda: "slow")
+    assert get_kernel("_test_fallback", "anything")() == "slow"
 
 
 def test_kernel_missing_raises() -> None:
-    with pytest.raises(KernelError, match="nope"):
-        get_kernel("nope", "numpy")
+    with pytest.raises(KernelError, match="_test_missing"):
+        get_kernel("_test_missing", "numpy")
 
 
 def test_kernel_duplicate_raises() -> None:
-    register_kernel("dup", "generic", lambda: 1)
-    with pytest.raises(KernelError, match="dup"):
-        register_kernel("dup", "generic", lambda: 2)
+    register_kernel("_test_dup", "generic", lambda: 1)
+    with pytest.raises(KernelError, match="_test_dup"):
+        register_kernel("_test_dup", "generic", lambda: 2)
 
 
 def test_numpy_backend_registered_as_builtin() -> None:
