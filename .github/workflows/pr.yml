@@ -28,4 +28,17 @@ jobs:
           path: .nx/cache
           key: nx-${{ runner.os }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.sha }}
           restore-keys: nx-${{ runner.os }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-
-      - run: npx nx affected -t lint typecheck boundaries test test-fd build
+      - name: Lint
+        run: npx nx affected -t lint
+      - name: Type check
+        run: npx nx affected -t typecheck
+      - name: Import boundaries
+        run: npx nx affected -t boundaries
+      - name: Unit tests
+        run: npx nx affected -t test
+      - name: FD gradient tests
+        run: npx nx affected -t test-fd
+      - name: Build
+        run: npx nx affected -t build
+      - name: Docs build
+        run: npx nx affected -t docs-build
