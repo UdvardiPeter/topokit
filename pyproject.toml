@@ -1,0 +1,10 @@
+[project]
+name = "topokit-workspace"
+version = "0.0.0"
+requires-python = ">=3.12"
+
+[dependency-groups]
+docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.27"]
+
+[tool.uv.workspace]
+members = ["topokit"]

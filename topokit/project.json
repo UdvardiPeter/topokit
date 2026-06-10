@@ -1,0 +1,76 @@
+{
+  "name": "topokit",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "topokit/src",
+  "targets": {
+    "lock": {
+      "executor": "@nxlv/python:lock",
+      "options": { "update": false }
+    },
+    "sync": {
+      "executor": "@nxlv/python:sync",
+      "options": {}
+    },
+    "add": {
+      "executor": "@nxlv/python:add",
+      "options": {}
+    },
+    "update": {
+      "executor": "@nxlv/python:update",
+      "options": {}
+    },
+    "remove": {
+      "executor": "@nxlv/python:remove",
+      "options": {}
+    },
+    "install": {
+      "executor": "@nxlv/python:install",
+      "options": { "silent": false, "args": "", "verbose": false, "debug": false }
+    },
+    "build": {
+      "executor": "@nxlv/python:build",
+      "outputs": ["{projectRoot}/dist"],
+      "options": {
+        "outputPath": "{projectRoot}/dist",
+        "publish": false,
+        "lockedVersions": true,
+        "bundleLocalDependencies": true
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "topokit",
+        "commands": ["uv run ruff check src tests", "uv run ruff format --check src tests"]
+      }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "topokit",
+        "commands": ["uv run ruff check --fix src tests", "uv run ruff format src tests"]
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "topokit", "command": "uv run mypy" }
+    },
+    "boundaries": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "topokit", "command": "uv run lint-imports" }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "topokit", "command": "uv run pytest -m 'not fd'" }
+    },
+    "test-fd": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "topokit", "command": "uv run pytest -m fd" }
+    }
+  },
+  "tags": [],
+  "release": {
+    "version": { "versionActions": "@nxlv/python/release/version-actions" }
+  }
+}

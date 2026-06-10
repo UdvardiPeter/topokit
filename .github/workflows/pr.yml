@@ -1,0 +1,31 @@
+name: PR
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: nrwl/nx-set-shas@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages --frozen
+      - uses: actions/cache@v4
+        with:
+          path: .nx/cache
+          key: nx-${{ runner.os }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.sha }}
+          restore-keys: nx-${{ runner.os }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-
+      - run: npx nx affected -t lint typecheck boundaries test test-fd build

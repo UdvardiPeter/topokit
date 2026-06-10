@@ -1,0 +1,23 @@
+{
+  "name": "topokit-workspace",
+  "version": "1.0.0",
+  "description": "Open-source topology optimization for engineers",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "LGPL-2.1-or-later",
+  "private": "true",
+  "devDependencies": {
+    "@nxlv/python": "^22.2.0",
+    "nx": "^22.7.5"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

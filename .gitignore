@@ -1,0 +1,21 @@
+# local-only planning docs (never commit)
+docs/plan/
+
+# node / nx
+node_modules/
+.nx/cache/
+.nx/workspace-data/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# os/editor
+.DS_Store
+site/

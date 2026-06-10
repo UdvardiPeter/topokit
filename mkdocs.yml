@@ -1,0 +1,21 @@
+site_name: TopoKit
+site_description: Open-source topology optimization for engineers
+repo_url: https://github.com/UdvardiPeter/topokit
+docs_dir: docs/content
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: deep orange
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [topokit/src]
+          options:
+            docstring_style: numpy
+nav:
+  - Home: index.md
+  - Contributing: contributing.md
+  - API reference: reference/api.md
