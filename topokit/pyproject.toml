@@ -44,6 +44,7 @@ convention = "numpy"
 strict = true
 files = ["src", "tests"]
 warn_unreachable = true
+cache_dir = "../.mypy_cache"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
