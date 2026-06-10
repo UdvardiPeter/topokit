@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
+"""Array-compute abstraction.
+
+Numerics modules are written against ``ArrayBackend`` instead of importing
+numpy directly, so GPU and AD backends can be added without changing them.
+The protocol stays minimal: ops are added when a module needs them.
+
+Performance-critical kernels can have backend-specific implementations.
+``get_kernel`` resolves by ``(name, backend_name)`` and falls back to the
+``"generic"`` implementation.
+
+Implementations live in their own modules; ``topokit.backend.numpy`` ships
+the default. The conformance suite for implementations is in
+``topokit.backend.conformance``.
+
+The plugin registry stores backend *instances* under the ``backends`` group.
+Entry points in the ``topokit.backends`` namespace must reference a
+module-level instance, not a class.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any, Final, Protocol, runtime_checkable
+
+import numpy as np
+import numpy.typing as npt
+
+
+@runtime_checkable
+class SparseMatrix(Protocol):
+    """CSR-semantics sparse matrix.
+
+    Arrays are backend arrays, typed ``Any`` like the ``ArrayBackend`` ops.
+    """
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Matrix dimensions."""
+        ...
+
+    def matvec(self, x: Any) -> Any:
+        """Matrix-vector product."""
+        ...
+
+    def diagonal(self) -> Any:
+        """Return the main diagonal as a dense vector."""
+        ...
+
+
+class ArrayBackend(Protocol):
+    """Minimal array op set the numerics need."""
+
+    @property
+    def name(self) -> str:
+        """Backend identifier, e.g. ``"numpy"``."""
+        ...
+
+    def asarray(self, data: Any, dtype: npt.DTypeLike = np.float64) -> Any:
+        """Convert ``data`` to a backend array.
+
+        May return ``data`` itself when it already has the requested dtype.
+        Callers must copy before mutating.
+        """
+        ...
+
+    def zeros(self, shape: tuple[int, ...], dtype: npt.DTypeLike = np.float64) -> Any:
+        """Zero-filled array."""
+        ...
+
+    def einsum(self, subscripts: str, *operands: Any) -> Any:
+        """Einstein summation."""
+        ...
+
+    def scatter_add(self, target: Any, indices: Any, values: Any) -> Any:
+        """Return a copy of ``target`` with ``values`` accumulated at ``indices``."""
+        ...
+
+    def gather(self, source: Any, indices: Any) -> Any:
+        """Take ``source[indices]``."""
+        ...
+
+    def coo_to_csr(self, rows: Any, cols: Any, vals: Any, shape: tuple[int, int]) -> SparseMatrix:
+        """Build a CSR matrix from COO triplets. Duplicate entries are summed."""
+        ...
+
+
+class KernelError(LookupError):
+    """Unknown kernel or conflicting kernel registration."""
+
+
+_KERNELS: dict[tuple[str, str], Callable[..., Any]] = {}
+
+
+def register_kernel(name: str, backend_name: str, fn: Callable[..., Any]) -> None:
+    """Register ``fn`` as the ``name`` kernel for ``backend_name``.
+
+    ``"generic"`` registers the fallback used by all backends.
+    Registrations are permanent: there is no unregister, and a duplicate
+    name for the same backend raises ``KernelError``.
+    """
+    key = (name, backend_name)
+    if key in _KERNELS:
+        raise KernelError(f"kernel {name!r} already registered for {backend_name!r}")
+    _KERNELS[key] = fn
+
+
+def get_kernel(name: str, backend_name: str) -> Callable[..., Any]:
+    """Resolve the ``name`` kernel for ``backend_name``, falling back to ``"generic"``."""
+    for key in ((name, backend_name), (name, "generic")):
+        if key in _KERNELS:
+            return _KERNELS[key]
+    raise KernelError(f"no kernel {name!r} for backend {backend_name!r} and no generic fallback")
+
+
+from topokit.backend.numpy import NumpyBackend  # noqa: E402
+
+_DEFAULT: Final = NumpyBackend()
+
+
+def default_backend() -> ArrayBackend:
+    """Return the process-wide default backend."""
+    return _DEFAULT
+
+
+__all__ = [
+    "ArrayBackend",
+    "KernelError",
+    "NumpyBackend",
+    "SparseMatrix",
+    "default_backend",
+    "get_kernel",
+    "register_kernel",
+]

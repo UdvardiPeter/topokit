@@ -34,6 +34,8 @@ class Registry:
     """Resolves components by ``(group, name)``.
 
     Entry points for a group are scanned once, on first access to that group.
+    Registrations are permanent; built-ins register at package import, so
+    reloading ``topokit`` raises on the duplicate.
     """
 
     def __init__(self) -> None:

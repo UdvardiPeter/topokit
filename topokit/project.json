@@ -29,13 +29,12 @@
       "options": { "silent": false, "args": "", "verbose": false, "debug": false }
     },
     "build": {
-      "executor": "@nxlv/python:build",
-      "outputs": ["{projectRoot}/dist"],
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist"],
       "options": {
-        "outputPath": "{projectRoot}/dist",
-        "publish": false,
-        "lockedVersions": true,
-        "bundleLocalDependencies": true
+        "cwd": "topokit",
+        "command": "uv build",
+        "env": { "SOURCE_DATE_EPOCH": "315532800" }
       }
     },
     "lint": {

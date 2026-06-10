@@ -1,5 +1,17 @@
 # API reference
 
+## topokit.backend
+
+::: topokit.backend
+
+## topokit.backend.numpy
+
+::: topokit.backend.numpy
+
+## topokit.backend.conformance
+
+::: topokit.backend.conformance
+
 ## topokit.registry
 
 ::: topokit.registry
