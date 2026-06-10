@@ -1,5 +1,9 @@
 # API reference
 
+## topokit.backend
+
+::: topokit.backend
+
 ## topokit.registry
 
 ::: topokit.registry

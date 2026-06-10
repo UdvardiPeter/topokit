@@ -12,6 +12,7 @@ Pre-alpha. Foundation layer only.
 
 | Module | State |
 |---|---|
+| `topokit.backend` array backend, kernel registry | done |
 | `topokit.registry` plugin registry | done |
 | `topokit.events` event bus | done |
 | `topokit.fields` field containers | done |

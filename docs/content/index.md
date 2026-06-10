@@ -16,6 +16,7 @@ field containers, gradient verification harness). Numerics land next.
 
 | Package | Contents |
 |---|---|
+| `topokit.backend` | array backend protocol, NumPy implementation, kernel registry |
 | `topokit.registry` | plugin resolution by group and name |
 | `topokit.events` | typed event bus for the optimization loop |
 | `topokit.fields` | validated field containers (design, element, nodal) |
