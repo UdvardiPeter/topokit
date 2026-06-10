@@ -103,8 +103,42 @@ class Mesh(Protocol):
         """Element centroids, shape ``(n_elements, dim)``."""
         ...
 
+    @property
+    def design(self) -> _Bool:
+        """Elements whose density is optimized."""
+        ...
+
+    @property
+    def solid(self) -> _Bool:
+        """Elements with fixed material."""
+        ...
+
+    @property
+    def void(self) -> _Bool:
+        """Elements removed from the system."""
+        ...
+
+    @property
+    def active_elements(self) -> _Bool:
+        """Elements that are part of the system (non-void)."""
+        ...
+
+    @property
+    def active_nodes(self) -> _Bool:
+        """Nodes referenced by at least one non-void element."""
+        ...
+
+    @property
+    def node_index_map(self) -> _I64:
+        """Node id to condensed id; ``-1`` for inactive nodes."""
+        ...
+
     def boundary_faces(self) -> BoundaryFaces:
-        """Faces of non-void elements not shared with another non-void element."""
+        """Faces of non-void elements not shared with another non-void element.
+
+        Must be deterministic and cheap on repeated calls; face ids
+        (indices into the arrays) are stable identifiers.
+        """
         ...
 
 
@@ -349,6 +383,25 @@ class StructuredGrid:
         out.flags.writeable = False
         return out
 
+    def to_grid(self, flat: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        """View a flat element array as the ``(nx, ny[, nz])`` grid.
+
+        Centralizes the x-fastest (Fortran-order) convention. Never reshape
+        element arrays manually; a forgotten ``order="F"`` scrambles fields
+        silently.
+        """
+        arr = np.asarray(flat)
+        if arr.shape != (self.n_elements,):
+            raise MeshError(f"expected flat shape ({self.n_elements},), got {arr.shape}")
+        return arr.reshape(self.shape, order="F")
+
+    def to_flat(self, grid: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        """Flatten a ``(nx, ny[, nz])`` grid array back to element-id order."""
+        arr = np.asarray(grid)
+        if arr.shape != self.shape:
+            raise MeshError(f"expected grid shape {self.shape}, got {arr.shape}")
+        return arr.ravel(order="F")
+
     def _face_node_offsets(self, axis: int, positive: bool) -> _I64:
         x = self.shape[0] + 1
         if self.dim == 2:
@@ -379,7 +432,7 @@ class StructuredGrid:
         return self._boundary_faces
 
     def _compute_boundary_faces(self) -> BoundaryFaces:
-        active = self.active_elements.reshape(self.shape, order="F")
+        active = self.to_grid(self.active_elements)
         volume = math.prod(self.spacing)
         owners: list[_I64] = []
         normals: list[_F64] = []

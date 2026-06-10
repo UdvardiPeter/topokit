@@ -242,3 +242,32 @@ def test_repr_is_informative() -> None:
     r = repr(g)
     assert "shape=(2, 2)" in r
     assert "1 void" in r
+
+
+def test_to_grid_to_flat_round_trip_and_layout() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    flat = np.arange(4, dtype=float)
+    a = g.to_grid(flat)
+    assert a[1, 0] == 1.0  # element id i + nx*j
+    assert a[0, 1] == 2.0
+    np.testing.assert_array_equal(g.to_flat(a), flat)
+    assert np.shares_memory(a, flat)
+
+
+def test_to_grid_to_flat_validate_shapes() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    with pytest.raises(MeshError, match="flat shape"):
+        g.to_grid(np.zeros(5))
+    with pytest.raises(MeshError, match="grid shape"):
+        g.to_flat(np.zeros((3, 2)))
+
+
+def test_protocol_exposes_masks_and_condensation() -> None:
+    g = StructuredGrid(shape=(2, 1), spacing=(1.0, 1.0), void=[False, True])
+    mesh: Mesh = g
+    assert mesh.design.sum() == 1
+    assert not mesh.solid.any()
+    assert mesh.void.sum() == 1
+    assert mesh.active_elements.sum() == 1
+    assert mesh.active_nodes.sum() == 4
+    assert mesh.node_index_map.max() == 3
