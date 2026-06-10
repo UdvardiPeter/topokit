@@ -122,3 +122,34 @@ def test_results_sorted_unique_int64() -> None:
 def test_satisfies_protocol() -> None:
     sel: Selector = Box((0.0, 0.0), (1.0, 1.0))
     assert sel.nodes(G22).size > 0
+
+
+def test_box_selects_known_face_geometrically() -> None:
+    g = StructuredGrid(shape=(1, 1), spacing=(1.0, 1.0))
+    f = g.boundary_faces()
+    ids = Box((-0.1, 0.0), (0.1, 1.0), tol=0.0).faces(g)
+    assert ids.size == 1
+    np.testing.assert_allclose(f.normal[ids[0]], [-1.0, 0.0])
+
+
+def test_near_point_elements() -> None:
+    np.testing.assert_array_equal(NearPoint((1.4, 0.6)).elements(G22), [1])
+
+
+def test_construction_validation_errors() -> None:
+    with pytest.raises(SelectionError, match="exceeds"):
+        Box((1.0, 0.0), (0.0, 1.0))
+    with pytest.raises(SelectionError, match="same length"):
+        Box((0.0,), (1.0, 1.0))
+    with pytest.raises(SelectionError, match="radius"):
+        Sphere((0.0, 0.0), -2.0)
+    with pytest.raises(SelectionError, match="radius"):
+        Cylinder((0.0, 0.0), (1.0, 0.0), -1.0)
+    with pytest.raises(SelectionError, match="zero length"):
+        Cylinder((1.0, 1.0), (1.0, 1.0), 0.5)
+    with pytest.raises(SelectionError, match="zero length"):
+        PlaneSlab((0.0, 0.0), (0.0, 0.0))
+    with pytest.raises(SelectionError, match="k must be"):
+        NearPoint((0.0, 0.0), k=0)
+    with pytest.raises(SelectionError, match="k must be"):
+        NearPoint((0.0, 0.0), k=-1)

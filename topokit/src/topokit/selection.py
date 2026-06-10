@@ -40,7 +40,12 @@ class SelectionError(ValueError):
 
 
 def default_tolerance(mesh: Mesh) -> float:
-    """Half a typical element size: ``0.5 * median(element_volumes) ** (1/dim)``."""
+    """Half a typical element size: ``0.5 * median(element_volumes) ** (1/dim)``.
+
+    The scale is isotropic. On strongly anisotropic grids it over-selects
+    along the fine axis; pass an explicit ``tol`` sized for the relevant
+    axis there.
+    """
     return float(0.5 * float(np.median(mesh.element_volumes)) ** (1.0 / mesh.dim))
 
 
@@ -116,6 +121,8 @@ class Box(SelectorBase):
     def __post_init__(self) -> None:
         if len(self.lower) != len(self.upper):
             raise SelectionError("lower and upper must have the same length")
+        if any(lo > hi for lo, hi in zip(self.lower, self.upper, strict=True)):
+            raise SelectionError(f"lower {self.lower} exceeds upper {self.upper}")
 
     def _mask(self, coords: _F64, mesh: Mesh) -> _Bool:
         _check_dim(self.lower, coords)
@@ -133,6 +140,10 @@ class Sphere(SelectorBase):
     center: tuple[float, ...]
     radius: float
     tol: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.radius < 0.0:
+            raise SelectionError(f"radius must be >= 0, got {self.radius}")
 
     def _mask(self, coords: _F64, mesh: Mesh) -> _Bool:
         _check_dim(self.center, coords)
@@ -155,6 +166,8 @@ class Cylinder(SelectorBase):
             raise SelectionError("p0 and p1 must have the same length")
         if not np.linalg.norm(np.asarray(self.p1) - np.asarray(self.p0)) > 0.0:
             raise SelectionError("cylinder axis has zero length")
+        if self.radius < 0.0:
+            raise SelectionError(f"radius must be >= 0, got {self.radius}")
 
     def _mask(self, coords: _F64, mesh: Mesh) -> _Bool:
         _check_dim(self.p0, coords)
@@ -195,7 +208,11 @@ class PlaneSlab(SelectorBase):
 
 @dataclass(frozen=True)
 class Predicate(SelectorBase):
-    """Custom vectorized membership test ``fn(coords (n, dim)) -> bool (n,)``."""
+    """Custom vectorized membership test ``fn(coords (n, dim)) -> bool (n,)``.
+
+    Not expressible in the declarative schema. A lambda makes the selector
+    unpicklable; use a module-level function if the study crosses processes.
+    """
 
     fn: Callable[[_F64], npt.NDArray[np.bool_]]
 
@@ -215,6 +232,10 @@ class NearPoint(SelectorBase):
 
     point: tuple[float, ...]
     k: int = 1
+
+    def __post_init__(self) -> None:
+        if self.k < 1:
+            raise SelectionError(f"k must be >= 1, got {self.k}")
 
     def nodes(self, mesh: Mesh) -> _I64:
         """Sorted ids of the k nearest nodes."""
