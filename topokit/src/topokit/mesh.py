@@ -121,8 +121,8 @@ class StructuredGrid:
         shape: tuple[int, ...],
         spacing: tuple[float, ...],
         origin: tuple[float, ...] | None = None,
-        solid: npt.NDArray[Any] | None = None,
-        void: npt.NDArray[Any] | None = None,
+        solid: npt.ArrayLike | None = None,
+        void: npt.ArrayLike | None = None,
     ) -> None:
         self._shape = tuple(int(s) for s in shape)
         if len(self._shape) not in (2, 3):
@@ -151,6 +151,34 @@ class StructuredGrid:
         if bool(self._void.all()):
             raise MeshError("all elements are void")
         self._boundary_faces: BoundaryFaces | None = None
+
+    def __repr__(self) -> str:
+        roles = []
+        if self._solid.any():
+            roles.append(f"{int(self._solid.sum())} solid")
+        if self._void.any():
+            roles.append(f"{int(self._void.sum())} void")
+        suffix = f", {', '.join(roles)}" if roles else ""
+        return (
+            f"StructuredGrid(shape={self.shape}, spacing={self.spacing}, "
+            f"origin={self.origin}, {self.n_elements} elements{suffix})"
+        )
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickle only the defining state; caches rebuild on demand."""
+        return {
+            "_shape": self._shape,
+            "_spacing": self._spacing,
+            "_origin": self._origin,
+            "_solid": self._solid,
+            "_void": self._void,
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        for mask in (self._solid, self._void):
+            mask.flags.writeable = False  # numpy does not preserve the flag
+        self._boundary_faces = None
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -206,7 +234,7 @@ class StructuredGrid:
         spacing = tuple(s / n for s, n in zip(size, shape, strict=True))
         return cls(shape=shape, spacing=spacing, origin=origin)
 
-    def _validated_mask(self, mask: npt.NDArray[Any] | None, name: str) -> _Bool:
+    def _validated_mask(self, mask: npt.ArrayLike | None, name: str) -> _Bool:
         if mask is None:
             out = np.zeros(self.n_elements, dtype=bool)
         else:
@@ -261,7 +289,6 @@ class StructuredGrid:
         out.flags.writeable = False
         return out
 
-    @cached_property
     def _element_index_grids(self) -> list[_I64]:
         idx = [np.arange(s, dtype=np.int64) for s in self.shape]
         return [g.ravel(order="F") for g in np.meshgrid(*idx, indexing="ij")]
@@ -285,7 +312,7 @@ class StructuredGrid:
     @cached_property
     def element_nodes(self) -> _I64:
         """Connectivity in VTK ordering, shape ``(n_elements, 4 or 8)``."""
-        corner = self._corner_node_ids(self._element_index_grids)
+        corner = self._corner_node_ids(self._element_index_grids())
         out = corner[:, None] + self._node_offsets[None, :]
         out.flags.writeable = False
         return out
@@ -293,10 +320,8 @@ class StructuredGrid:
     @cached_property
     def element_centroids(self) -> _F64:
         """Element centroids, shape ``(n_elements, dim)``."""
-        cols = [
-            self.origin[a] + (self._element_index_grids[a] + 0.5) * self.spacing[a]
-            for a in range(self.dim)
-        ]
+        grids = self._element_index_grids()
+        cols = [self.origin[a] + (grids[a] + 0.5) * self.spacing[a] for a in range(self.dim)]
         out = np.stack(cols, axis=1)
         out.flags.writeable = False
         return out

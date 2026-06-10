@@ -215,3 +215,30 @@ def test_boundary_faces_3d_void_interface() -> None:
 def test_box_accepts_numpy_scalar_element_size() -> None:
     g = StructuredGrid.box(size=(1.0, 1.0), element_size=np.float32(0.5))
     assert g.shape == (2, 2)
+
+
+def test_pickle_is_lean_and_preserves_immutability() -> None:
+    import pickle
+
+    g = StructuredGrid(shape=(20, 20, 20), spacing=(1.0, 1.0, 1.0))
+    _ = g.element_nodes  # populate caches
+    _ = g.boundary_faces()
+    blob = pickle.dumps(g)
+    assert len(blob) < 100_000  # caches are not serialized
+    g2 = pickle.loads(blob)
+    assert not g2.void.flags.writeable
+    assert not g2.solid.flags.writeable
+    np.testing.assert_array_equal(g2.element_nodes, g.element_nodes)
+    assert g2.boundary_faces().n_faces == g.boundary_faces().n_faces
+
+
+def test_constructor_accepts_plain_lists_as_masks() -> None:
+    g = StructuredGrid(shape=(2, 1), spacing=(1.0, 1.0), void=[False, True])
+    np.testing.assert_array_equal(g.void, [False, True])
+
+
+def test_repr_is_informative() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 0.5), void=[False, False, False, True])
+    r = repr(g)
+    assert "shape=(2, 2)" in r
+    assert "1 void" in r

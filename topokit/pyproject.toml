@@ -32,7 +32,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "D"]
-ignore = ["D203", "D213"]
+ignore = ["D105", "D203", "D213"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
