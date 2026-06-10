@@ -20,6 +20,9 @@ Requires Node >= 20.19 and uv. Python 3.12 is installed by uv automatically.
   `ChainLink` without one will not be merged.
 - mypy strict, ruff, and import-linter gate every PR. Module boundaries are
   enforced by the `boundaries` target.
+- New `ArrayBackend` implementations must pass the conformance suite. Subclass
+  `topokit.backend.conformance.ArrayBackendConformance` in your tests and set
+  `backend`.
 - Conventional commits: `feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`.
   Scope when useful, e.g. `feat(fields): ...`.
 

@@ -38,6 +38,7 @@ convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
+"src/topokit/backend/conformance.py" = ["D102"]
 
 [tool.mypy]
 strict = true

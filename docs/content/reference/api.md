@@ -4,6 +4,10 @@
 
 ::: topokit.backend
 
+## topokit.backend.conformance
+
+::: topokit.backend.conformance
+
 ## topokit.registry
 
 ::: topokit.registry
