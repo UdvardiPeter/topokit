@@ -4,6 +4,10 @@
 
 ::: topokit.backend
 
+## topokit.backend.numpy
+
+::: topokit.backend.numpy
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance

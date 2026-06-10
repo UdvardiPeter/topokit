@@ -54,4 +54,4 @@ def test_kernel_duplicate_raises() -> None:
 def test_numpy_backend_registered_as_builtin() -> None:
     from topokit.registry import registry
 
-    assert registry.get("backends", "numpy") is NumpyBackend
+    assert registry.get("backends", "numpy") is default_backend()

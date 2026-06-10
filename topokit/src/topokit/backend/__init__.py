@@ -13,6 +13,10 @@ Performance-critical kernels can have backend-specific implementations.
 Implementations live in their own modules; ``topokit.backend.numpy`` ships
 the default. The conformance suite for implementations is in
 ``topokit.backend.conformance``.
+
+The plugin registry stores backend *instances* under the ``backends`` group.
+Entry points in the ``topokit.backends`` namespace must reference a
+module-level instance, not a class.
 """
 
 from __future__ import annotations
@@ -53,7 +57,11 @@ class ArrayBackend(Protocol):
         ...
 
     def asarray(self, data: Any, dtype: npt.DTypeLike = np.float64) -> Any:
-        """Convert ``data`` to a backend array."""
+        """Convert ``data`` to a backend array.
+
+        May return ``data`` itself when it already has the requested dtype.
+        Callers must copy before mutating.
+        """
         ...
 
     def zeros(self, shape: tuple[int, ...], dtype: npt.DTypeLike = np.float64) -> Any:
@@ -88,6 +96,8 @@ def register_kernel(name: str, backend_name: str, fn: Callable[..., Any]) -> Non
     """Register ``fn`` as the ``name`` kernel for ``backend_name``.
 
     ``"generic"`` registers the fallback used by all backends.
+    Registrations are permanent: there is no unregister, and a duplicate
+    name for the same backend raises ``KernelError``.
     """
     key = (name, backend_name)
     if key in _KERNELS:

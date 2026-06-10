@@ -16,7 +16,7 @@
     "boundaries": { "cache": true, "inputs": ["default"] },
     "test": { "cache": true, "inputs": ["default"] },
     "test-fd": { "cache": true, "inputs": ["default"] },
-    "build": { "cache": true, "inputs": ["default"], "outputs": ["{projectRoot}/dist"] },
+    "build": { "cache": true, "inputs": ["default"], "outputs": ["{workspaceRoot}/dist"] },
     "docs-build": { "cache": true, "inputs": ["default"], "outputs": ["{workspaceRoot}/site"] }
   }
 }
