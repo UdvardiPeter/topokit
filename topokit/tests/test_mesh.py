@@ -160,3 +160,58 @@ def test_satisfies_mesh_protocol_and_meshlike() -> None:
     assert mesh.n_elements == 4
     rho = DesignField(np.full(4, 0.5), g, name="rho")
     assert rho.values.shape == (4,)
+
+
+def test_grid_is_immutable() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    with pytest.raises(AttributeError):
+        g.solid = np.ones(4, dtype=bool)  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        g.spacing = (2.0, 2.0)  # type: ignore[misc]
+
+
+def test_derived_arrays_are_read_only() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    for arr in (
+        g.nodes,
+        g.element_nodes,
+        g.element_centroids,
+        g.element_volumes,
+        g.design,
+        g.active_elements,
+        g.boundary_faces().area,
+        g.boundary_faces().nodes,
+    ):
+        with pytest.raises(ValueError, match="read-only"):
+            arr[0] = 0
+
+
+def test_boundary_faces_cached() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    assert g.boundary_faces() is g.boundary_faces()
+
+
+def test_face_nodes_are_perimeter_cyclic() -> None:
+    g = StructuredGrid(shape=(2, 2, 2), spacing=(1.0, 2.0, 3.0))
+    f = g.boundary_faces()
+    assert f.n_faces == 24
+    for k in range(f.n_faces):
+        coords = g.nodes[f.nodes[k]]
+        for a in range(4):
+            step = np.abs(coords[(a + 1) % 4] - coords[a])
+            assert np.count_nonzero(step) == 1
+
+
+def test_boundary_faces_3d_void_interface() -> None:
+    g = StructuredGrid(shape=(1, 1, 2), spacing=(1.0, 1.0, 1.0), void=np.array([False, True]))
+    f = g.boundary_faces()
+    assert f.n_faces == 6
+    np.testing.assert_array_equal(f.owner, np.zeros(6, dtype=np.int64))
+    plus_z = np.where(f.normal[:, 2] > 0.5)[0]
+    assert len(plus_z) == 1
+    np.testing.assert_allclose(f.centroid[plus_z[0]], [0.5, 0.5, 1.0])
+
+
+def test_box_accepts_numpy_scalar_element_size() -> None:
+    g = StructuredGrid.box(size=(1.0, 1.0), element_size=np.float32(0.5))
+    assert g.shape == (2, 2)

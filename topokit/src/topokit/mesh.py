@@ -109,7 +109,12 @@ class Mesh(Protocol):
 
 
 class StructuredGrid:
-    """Regular quad/hex grid with anisotropic spacing and element masks."""
+    """Regular quad/hex grid with anisotropic spacing and element masks.
+
+    Instances are immutable after construction: geometry and masks are
+    exposed as read-only properties, derived arrays are cached and
+    write-protected. Masks are flat arrays in element-id (x-fastest) order.
+    """
 
     def __init__(
         self,
@@ -119,38 +124,64 @@ class StructuredGrid:
         solid: npt.NDArray[Any] | None = None,
         void: npt.NDArray[Any] | None = None,
     ) -> None:
-        self.shape = tuple(int(s) for s in shape)
-        if len(self.shape) not in (2, 3):
-            raise MeshError(f"dim must be 2 or 3, got {len(self.shape)}")
-        if len(spacing) != len(self.shape):
+        self._shape = tuple(int(s) for s in shape)
+        if len(self._shape) not in (2, 3):
+            raise MeshError(f"dim must be 2 or 3, got {len(self._shape)}")
+        if len(spacing) != len(self._shape):
             raise MeshError(
-                f"spacing length ({len(spacing)}) must match shape length ({len(self.shape)})"
+                f"spacing length ({len(spacing)}) must match shape length ({len(self._shape)})"
             )
-        self.spacing = tuple(float(h) for h in spacing)
-        if any(h <= 0.0 for h in self.spacing):
-            raise MeshError(f"spacing must be positive, got {self.spacing}")
-        if any(s < 1 for s in self.shape):
-            raise MeshError(f"shape entries must be >= 1, got {self.shape}")
+        self._spacing = tuple(float(h) for h in spacing)
+        if any(h <= 0.0 for h in self._spacing):
+            raise MeshError(f"spacing must be positive, got {self._spacing}")
+        if any(s < 1 for s in self._shape):
+            raise MeshError(f"shape entries must be >= 1, got {self._shape}")
         if origin is None:
-            origin = (0.0,) * len(self.shape)
-        if len(origin) != len(self.shape):
+            origin = (0.0,) * len(self._shape)
+        if len(origin) != len(self._shape):
             raise MeshError(
-                f"origin length ({len(origin)}) must match shape length ({len(self.shape)})"
+                f"origin length ({len(origin)}) must match shape length ({len(self._shape)})"
             )
-        self.origin = tuple(float(x) for x in origin)
+        self._origin = tuple(float(x) for x in origin)
 
-        self.solid = self._validated_mask(solid, "solid")
-        self.void = self._validated_mask(void, "void")
-        if bool((self.solid & self.void).any()):
+        self._solid = self._validated_mask(solid, "solid")
+        self._void = self._validated_mask(void, "void")
+        if bool((self._solid & self._void).any()):
             raise MeshError("solid and void masks must be disjoint")
-        if bool(self.void.all()):
+        if bool(self._void.all()):
             raise MeshError("all elements are void")
+        self._boundary_faces: BoundaryFaces | None = None
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Element counts per axis."""
+        return self._shape
+
+    @property
+    def spacing(self) -> tuple[float, ...]:
+        """Element size per axis."""
+        return self._spacing
+
+    @property
+    def origin(self) -> tuple[float, ...]:
+        """Coordinates of the first node."""
+        return self._origin
+
+    @property
+    def solid(self) -> _Bool:
+        """Elements with fixed material."""
+        return self._solid
+
+    @property
+    def void(self) -> _Bool:
+        """Elements removed from the system."""
+        return self._void
 
     @classmethod
     def box(
         cls,
         size: tuple[float, ...],
-        element_size: float | tuple[float, ...] | None = None,
+        element_size: float | np.floating[Any] | np.integer[Any] | tuple[float, ...] | None = None,
         shape: tuple[int, ...] | None = None,
         origin: tuple[float, ...] | None = None,
     ) -> StructuredGrid:
@@ -166,7 +197,7 @@ class StructuredGrid:
             assert element_size is not None
             h = (
                 (float(element_size),) * len(size)
-                if isinstance(element_size, int | float)
+                if isinstance(element_size, int | float | np.integer | np.floating)
                 else tuple(float(x) for x in element_size)
             )
             if len(h) != len(size):
@@ -205,15 +236,19 @@ class StructuredGrid:
         """``"quad4"`` in 2D, ``"hex8"`` in 3D."""
         return "quad4" if self.dim == 2 else "hex8"
 
-    @property
+    @cached_property
     def design(self) -> _Bool:
         """Elements whose density is optimized."""
-        return ~(self.solid | self.void)
+        out = ~(self._solid | self._void)
+        out.flags.writeable = False
+        return out
 
-    @property
+    @cached_property
     def active_elements(self) -> _Bool:
         """Elements that are part of the system (non-void)."""
-        return ~self.void
+        out = ~self._void
+        out.flags.writeable = False
+        return out
 
     @cached_property
     def nodes(self) -> _F64:
@@ -222,7 +257,9 @@ class StructuredGrid:
             self.origin[a] + self.spacing[a] * np.arange(self.shape[a] + 1) for a in range(self.dim)
         ]
         grids = np.meshgrid(*axes, indexing="ij")
-        return np.stack([g.ravel(order="F") for g in grids], axis=1)
+        out = np.stack([g.ravel(order="F") for g in grids], axis=1)
+        out.flags.writeable = False
+        return out
 
     @cached_property
     def _element_index_grids(self) -> list[_I64]:
@@ -249,7 +286,9 @@ class StructuredGrid:
     def element_nodes(self) -> _I64:
         """Connectivity in VTK ordering, shape ``(n_elements, 4 or 8)``."""
         corner = self._corner_node_ids(self._element_index_grids)
-        return corner[:, None] + self._node_offsets[None, :]
+        out = corner[:, None] + self._node_offsets[None, :]
+        out.flags.writeable = False
+        return out
 
     @cached_property
     def element_centroids(self) -> _F64:
@@ -258,12 +297,16 @@ class StructuredGrid:
             self.origin[a] + (self._element_index_grids[a] + 0.5) * self.spacing[a]
             for a in range(self.dim)
         ]
-        return np.stack(cols, axis=1)
+        out = np.stack(cols, axis=1)
+        out.flags.writeable = False
+        return out
 
-    @property
+    @cached_property
     def element_volumes(self) -> _F64:
         """Constant element volume, shape ``(n_elements,)``."""
-        return np.full(self.n_elements, math.prod(self.spacing))
+        out = np.full(self.n_elements, math.prod(self.spacing))
+        out.flags.writeable = False
+        return out
 
     @cached_property
     def active_nodes(self) -> _Bool:
@@ -300,7 +343,17 @@ class StructuredGrid:
         return offsets + (shift if positive else 0)
 
     def boundary_faces(self) -> BoundaryFaces:
-        """Faces of non-void elements not shared with another non-void element."""
+        """Faces of non-void elements not shared with another non-void element.
+
+        Computed once and cached; face ids (indices into the arrays) are
+        stable. Face nodes are in perimeter order; winding is unspecified,
+        the outward normal is explicit.
+        """
+        if self._boundary_faces is None:
+            self._boundary_faces = self._compute_boundary_faces()
+        return self._boundary_faces
+
+    def _compute_boundary_faces(self) -> BoundaryFaces:
         active = self.active_elements.reshape(self.shape, order="F")
         volume = math.prod(self.spacing)
         owners: list[_I64] = []
@@ -340,10 +393,13 @@ class StructuredGrid:
                 areas.append(np.full(owner.size, volume / self.spacing[axis]))
                 centroids.append(centroid)
                 nodes.append(face_nodes)
+        owner = np.concatenate(owners)
+        normal = np.concatenate(normals)
+        area = np.concatenate(areas)
+        centroid = np.concatenate(centroids)
+        face_nodes_all = np.concatenate(nodes)
+        for arr in (owner, normal, area, centroid, face_nodes_all):
+            arr.flags.writeable = False
         return BoundaryFaces(
-            owner=np.concatenate(owners),
-            normal=np.concatenate(normals),
-            area=np.concatenate(areas),
-            centroid=np.concatenate(centroids),
-            nodes=np.concatenate(nodes),
+            owner=owner, normal=normal, area=area, centroid=centroid, nodes=face_nodes_all
         )
