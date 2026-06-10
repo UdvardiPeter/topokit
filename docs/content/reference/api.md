@@ -8,6 +8,10 @@
 
 ::: topokit.backend.numpy
 
+## topokit.mesh
+
+::: topokit.mesh
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance

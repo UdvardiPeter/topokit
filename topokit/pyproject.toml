@@ -64,6 +64,7 @@ modules = [
   "topokit.backend",
   "topokit.events",
   "topokit.fields",
+  "topokit.mesh",
   "topokit.registry",
   "topokit.testing",
 ]
