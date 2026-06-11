@@ -91,19 +91,29 @@ class SelectorBase:
     def _mask(self, coords: _F64, mesh: Mesh) -> _Bool:
         raise NotImplementedError
 
-    def __and__(self, other: Selector) -> Selector:
+    def __and__(self, other: Selector) -> SelectorBase:
         return _And(self, other)
 
-    def __or__(self, other: Selector) -> Selector:
+    def __or__(self, other: Selector) -> SelectorBase:
         return _Or(self, other)
 
-    def __invert__(self) -> Selector:
+    def __invert__(self) -> SelectorBase:
         return _Not(self)
 
 
 def _check_dim(point: tuple[float, ...], coords: _F64) -> None:
     if len(point) != coords.shape[1]:
         raise SelectionError(f"selector dim {len(point)} != mesh dim {coords.shape[1]}")
+
+
+def _freeze(obj: object, **fields: object) -> None:
+    """Coerce constructor arguments on a frozen dataclass.
+
+    Lists and numpy scalars are common call-site inputs; coercing to plain
+    tuples and floats keeps selectors hashable and equality well-behaved.
+    """
+    for name, value in fields.items():
+        object.__setattr__(obj, name, value)
 
 
 def _tol(tol: float | None, mesh: Mesh) -> float:
@@ -119,6 +129,12 @@ class Box(SelectorBase):
     tol: float | None = None
 
     def __post_init__(self) -> None:
+        _freeze(
+            self,
+            lower=tuple(float(x) for x in self.lower),
+            upper=tuple(float(x) for x in self.upper),
+            tol=None if self.tol is None else float(self.tol),
+        )
         if len(self.lower) != len(self.upper):
             raise SelectionError("lower and upper must have the same length")
         if any(lo > hi for lo, hi in zip(self.lower, self.upper, strict=True)):
@@ -142,6 +158,12 @@ class Sphere(SelectorBase):
     tol: float | None = None
 
     def __post_init__(self) -> None:
+        _freeze(
+            self,
+            center=tuple(float(x) for x in self.center),
+            radius=float(self.radius),
+            tol=None if self.tol is None else float(self.tol),
+        )
         if self.radius < 0.0:
             raise SelectionError(f"radius must be >= 0, got {self.radius}")
 
@@ -162,6 +184,13 @@ class Cylinder(SelectorBase):
     tol: float | None = None
 
     def __post_init__(self) -> None:
+        _freeze(
+            self,
+            p0=tuple(float(x) for x in self.p0),
+            p1=tuple(float(x) for x in self.p1),
+            radius=float(self.radius),
+            tol=None if self.tol is None else float(self.tol),
+        )
         if len(self.p0) != len(self.p1):
             raise SelectionError("p0 and p1 must have the same length")
         if not np.linalg.norm(np.asarray(self.p1) - np.asarray(self.p0)) > 0.0:
@@ -192,6 +221,12 @@ class PlaneSlab(SelectorBase):
     tol: float | None = None
 
     def __post_init__(self) -> None:
+        _freeze(
+            self,
+            point=tuple(float(x) for x in self.point),
+            normal=tuple(float(x) for x in self.normal),
+            tol=None if self.tol is None else float(self.tol),
+        )
         if len(self.point) != len(self.normal):
             raise SelectionError("point and normal must have the same length")
         if not np.linalg.norm(np.asarray(self.normal)) > 0.0:
@@ -234,6 +269,7 @@ class NearPoint(SelectorBase):
     k: int = 1
 
     def __post_init__(self) -> None:
+        _freeze(self, point=tuple(float(x) for x in self.point), k=int(self.k))
         if self.k < 1:
             raise SelectionError(f"k must be >= 1, got {self.k}")
 
@@ -279,6 +315,9 @@ class FaceSetSelector(SelectorBase):
 
     face_ids: tuple[int, ...]
 
+    def __post_init__(self) -> None:
+        _freeze(self, face_ids=tuple(int(x) for x in self.face_ids))
+
     def faces(self, mesh: Mesh) -> _I64:
         """Return the validated face ids, sorted unique."""
         n = mesh.boundary_faces().n_faces
@@ -301,6 +340,9 @@ class _And(SelectorBase):
     a: Selector
     b: Selector
 
+    def __repr__(self) -> str:
+        return f"({self.a!r} & {self.b!r})"
+
     def nodes(self, mesh: Mesh) -> _I64:
         return np.intersect1d(self.a.nodes(mesh), self.b.nodes(mesh))
 
@@ -316,6 +358,9 @@ class _Or(SelectorBase):
     a: Selector
     b: Selector
 
+    def __repr__(self) -> str:
+        return f"({self.a!r} | {self.b!r})"
+
     def nodes(self, mesh: Mesh) -> _I64:
         return np.union1d(self.a.nodes(mesh), self.b.nodes(mesh))
 
@@ -329,6 +374,9 @@ class _Or(SelectorBase):
 @dataclass(frozen=True)
 class _Not(SelectorBase):
     inner: Selector
+
+    def __repr__(self) -> str:
+        return f"~{self.inner!r}"
 
     def nodes(self, mesh: Mesh) -> _I64:
         return np.setdiff1d(np.arange(mesh.n_nodes, dtype=np.int64), self.inner.nodes(mesh))

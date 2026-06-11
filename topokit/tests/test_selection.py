@@ -153,3 +153,29 @@ def test_construction_validation_errors() -> None:
         NearPoint((0.0, 0.0), k=0)
     with pytest.raises(SelectionError, match="k must be"):
         NearPoint((0.0, 0.0), k=-1)
+
+
+def test_list_arguments_coerce_to_canonical_tuples() -> None:
+    a = Box([0.0, 0.0], [1.0, 1.0])  # type: ignore[arg-type]
+    b = Box((0, 0), (1, 1))
+    assert a == b
+    assert hash(a) == hash(b)
+    np.testing.assert_array_equal(a.elements(G22), b.elements(G22))
+    f = FaceSetSelector(np.array([0, 1]))  # type: ignore[arg-type]
+    assert f.face_ids == (0, 1)
+
+
+def test_selectors_pickle() -> None:
+    import pickle
+
+    sel = Box((0.0, 0.0), (1.0, 1.0)) & Sphere((0.0, 0.0), 1.0)
+    again = pickle.loads(pickle.dumps(sel))
+    np.testing.assert_array_equal(again.nodes(G22), sel.nodes(G22))
+
+
+def test_combinator_repr_is_readable() -> None:
+    sel = ~(Box((0.0, 0.0), (1.0, 1.0)) | Sphere((0.0, 0.0), 1.0))
+    r = repr(sel)
+    assert r.startswith("~(Box(")
+    assert " | Sphere(" in r
+    assert "_Or" not in r
