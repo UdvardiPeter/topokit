@@ -12,6 +12,10 @@
 
 ::: topokit.mesh
 
+## topokit.selection
+
+::: topokit.selection
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance

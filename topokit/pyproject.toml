@@ -58,13 +58,10 @@ markers = [
 root_package = "topokit"
 
 [[tool.importlinter.contracts]]
-name = "L0 foundation modules are mutually independent"
-type = "independence"
-modules = [
-  "topokit.backend",
-  "topokit.events",
-  "topokit.fields",
+name = "L0 layering: selection consumes mesh; the rest are independent"
+type = "layers"
+layers = [
+  "topokit.selection",
   "topokit.mesh",
-  "topokit.registry",
-  "topokit.testing",
+  "topokit.backend : topokit.events : topokit.fields : topokit.registry : topokit.testing",
 ]
