@@ -9,6 +9,7 @@ round-trip through npz. The mesh is referenced through the structural
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, Self, runtime_checkable
 
@@ -38,6 +39,17 @@ class MeshLike(Protocol):
 
 class FieldError(ValueError):
     """Shape, dtype, or mesh mismatch."""
+
+
+@dataclass(frozen=True)
+class FieldSpec:
+    """Identifies the field a parametrization chain must produce for a physics model.
+
+    A physics model declares ``expected_field``; the chain must terminate in
+    a link producing it. Compared by value.
+    """
+
+    name: str
 
 
 class _Field:

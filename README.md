@@ -19,7 +19,8 @@ Pre-alpha. Foundation layer only.
 | `topokit.events` event bus | done |
 | `topokit.fields` field containers | done |
 | `topokit.testing` FD gradient verification | done |
-| FEM, SIMP, optimizers (MMA/OC), solvers | next |
+| `topokit.fem` linear elasticity, loads, materials | done |
+| SIMP chain, optimizers (MMA/OC), solvers | next |
 | CAD import/export, manufacturing constraints | planned |
 | Local daemon, Fusion 360 add-in | planned |
 

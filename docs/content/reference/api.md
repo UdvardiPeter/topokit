@@ -16,6 +16,10 @@
 
 ::: topokit.selection
 
+## topokit.fem
+
+::: topokit.fem
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance
