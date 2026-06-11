@@ -179,3 +179,17 @@ def test_combinator_repr_is_readable() -> None:
     assert r.startswith("~(Box(")
     assert " | Sphere(" in r
     assert "_Or" not in r
+
+
+def test_element_mask_builds_grid_regions() -> None:
+    base = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    void = Box((1.0, 1.0), (2.0, 2.0), tol=0.0).element_mask(base)
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), void=void)
+    np.testing.assert_array_equal(g.void, [False, False, False, True])
+    assert g.design.sum() == 3
+
+
+def test_node_mask_matches_ids() -> None:
+    sel = Box((0.0, 0.0), (0.0, 2.0))
+    mask = sel.node_mask(G22)
+    np.testing.assert_array_equal(np.flatnonzero(mask), sel.nodes(G22))

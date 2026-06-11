@@ -85,6 +85,18 @@ class SelectorBase:
         """Sorted unique boundary-face ids."""
         return self._ids(mesh.boundary_faces().centroid, mesh)
 
+    def element_mask(self, mesh: Mesh) -> _Bool:
+        """Boolean element mask, the bridge to mesh ``solid``/``void`` regions."""
+        out = np.zeros(mesh.n_elements, dtype=bool)
+        out[self.elements(mesh)] = True
+        return out
+
+    def node_mask(self, mesh: Mesh) -> _Bool:
+        """Boolean node mask of the selection."""
+        out = np.zeros(mesh.n_nodes, dtype=bool)
+        out[self.nodes(mesh)] = True
+        return out
+
     def _ids(self, coords: _F64, mesh: Mesh) -> _I64:
         return np.flatnonzero(self._mask(coords, mesh)).astype(np.int64)
 
