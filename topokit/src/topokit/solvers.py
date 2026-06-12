@@ -2,6 +2,9 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Linear solvers for the assembled free-DOF systems.
 
+Both solvers assume symmetric positive definite systems, which the
+assembled stiffness matrices are.
+
 ``Direct`` factorizes once and solves any number of right-hand sides;
 ``AmgCG`` runs conjugate gradients with a pyamg smoothed-aggregation
 preconditioner (the path to large 3D systems). ``auto_solver`` picks per

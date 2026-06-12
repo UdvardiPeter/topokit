@@ -137,3 +137,11 @@ def test_satisfies_protocol_and_registry() -> None:
     assert s is not None
     assert registry.get("solvers", "direct") is Direct
     assert registry.get("solvers", "amg_cg") is AmgCG
+
+
+def test_amg_cg_multi_rhs() -> None:
+    k, f = _cantilever_system()
+    a = AmgCG(tol=1e-10)
+    a.prepare(k)
+    out = a.solve(np.stack([f, 2.0 * f], axis=1))
+    np.testing.assert_allclose(out[:, 1], 2.0 * out[:, 0], rtol=1e-8)

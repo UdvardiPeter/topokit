@@ -52,7 +52,8 @@ class SparseMatrix(Protocol):
         """Return ``(indptr, indices, data)``.
 
         The lossless export a direct factorization needs. GPU backends may
-        copy device to host here.
+        copy device to host here. Callers must not mutate the returned
+        arrays; they may alias internal storage.
         """
         ...
 
