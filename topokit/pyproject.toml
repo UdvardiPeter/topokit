@@ -12,6 +12,9 @@ dependencies = [
     "scipy>=1.15",
 ]
 
+[project.optional-dependencies]
+fast = ["pyamg>=5"]
+
 [dependency-groups]
 dev = [
   "pytest>=8.3",
@@ -20,6 +23,7 @@ dev = [
   "ruff>=0.9",
   "import-linter>=2.1",
   "scipy-stubs>=1.17",
+  "pyamg>=5",
 ]
 
 [build-system]
@@ -61,6 +65,7 @@ root_package = "topokit"
 name = "L0 layering: selection consumes mesh; the rest are independent"
 type = "layers"
 layers = [
+  "topokit.fem : topokit.solvers",
   "topokit.selection",
   "topokit.mesh",
   "topokit.backend : topokit.events : topokit.fields : topokit.registry : topokit.testing",

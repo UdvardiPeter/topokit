@@ -20,7 +20,8 @@ Pre-alpha. Foundation layer only.
 | `topokit.fields` field containers | done |
 | `topokit.testing` FD gradient verification | done |
 | `topokit.fem` linear elasticity, loads, materials | done |
-| SIMP chain, optimizers (MMA/OC), solvers | next |
+| `topokit.solvers` direct + AMG-preconditioned CG | done |
+| SIMP chain, optimizers (MMA/OC) | next |
 | CAD import/export, manufacturing constraints | planned |
 | Local daemon, Fusion 360 add-in | planned |
 

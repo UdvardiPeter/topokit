@@ -20,6 +20,10 @@
 
 ::: topokit.fem
 
+## topokit.solvers
+
+::: topokit.solvers
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance
