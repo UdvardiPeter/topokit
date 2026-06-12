@@ -24,6 +24,10 @@
 
 ::: topokit.solvers
 
+## topokit.parametrization
+
+::: topokit.parametrization
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance
