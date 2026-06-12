@@ -60,3 +60,10 @@ def test_load_rejects_mismatched_mesh(tmp_path: Path) -> None:
     f.save(p)
     with pytest.raises(FieldError, match="mesh"):
         DesignField.load(p, FakeMesh(n_nodes=4, n_elements=2))
+
+
+def test_field_spec_compares_by_value() -> None:
+    from topokit.fields import FieldSpec
+
+    assert FieldSpec("stiffness_scale") == FieldSpec("stiffness_scale")
+    assert FieldSpec("stiffness_scale") != FieldSpec("conductivity_scale")
