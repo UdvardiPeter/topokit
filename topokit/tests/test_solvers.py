@@ -120,15 +120,20 @@ def test_simp_regime_amg_vs_direct() -> None:
 def test_auto_solver_rules(monkeypatch: pytest.MonkeyPatch) -> None:
     import topokit.solvers as solvers_mod
 
-    assert isinstance(auto_solver(1000), Direct)
-    assert isinstance(auto_solver(500_000), AmgCG)
+    assert isinstance(auto_solver(1000, dim=2), Direct)
+    assert isinstance(auto_solver(100_000, dim=2), Direct)
+    assert isinstance(auto_solver(500_000, dim=2), AmgCG)
+    assert isinstance(auto_solver(1000, dim=3), Direct)
+    assert isinstance(auto_solver(50_000, dim=3), AmgCG)
+    with pytest.raises(SolverError, match="dim"):
+        auto_solver(1000, dim=4)
 
     def boom() -> object:
         raise ImportError("no pyamg")
 
     monkeypatch.setattr(solvers_mod, "_load_pyamg", boom)
     with pytest.warns(UserWarning, match=r"topokit\[fast\]"):
-        s = auto_solver(500_000)
+        s = auto_solver(500_000, dim=3)
     assert isinstance(s, Direct)
 
 
@@ -210,3 +215,23 @@ def test_solver_param_validation() -> None:
         AmgCG(max_iter=0)
     with pytest.raises(SolverError, match="residual_check"):
         Direct(residual_check=-1.0)
+
+
+def test_amg_cg_is_deterministic() -> None:
+    k, f = _cantilever_system()
+    a1 = AmgCG(tol=1e-10)
+    a1.prepare(k)
+    u1 = a1.solve(f)
+    a2 = AmgCG(tol=1e-10)
+    a2.prepare(k)
+    u2 = a2.solve(f)
+    assert np.array_equal(u1, u2)  # bitwise, decision E11
+
+
+def test_amg_cg_does_not_disturb_global_rng() -> None:
+    k, _ = _cantilever_system()
+    np.random.seed(123)
+    expected = np.random.RandomState(123).random(3)
+    a = AmgCG()
+    a.prepare(k)
+    np.testing.assert_array_equal(np.random.random(3), expected)

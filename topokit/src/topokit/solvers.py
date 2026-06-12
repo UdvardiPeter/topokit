@@ -28,7 +28,8 @@ import scipy.sparse.linalg
 
 from topokit.backend import SparseMatrix
 
-AUTO_DIRECT_LIMIT = 150_000
+AUTO_DIRECT_LIMIT_2D = 150_000
+AUTO_DIRECT_LIMIT_3D = 15_000
 
 
 class SolverError(RuntimeError):
@@ -137,9 +138,16 @@ class AmgCG:
             ) from exc
         csr = _to_scipy_csr(matrix)
         self._matrix = csr
-        self._preconditioner = pyamg.smoothed_aggregation_solver(
-            scipy.sparse.csr_matrix(csr)
-        ).aspreconditioner()
+        # pyamg estimates spectral radii with numpy's global RNG; seed it so
+        # hierarchies (and therefore runs) are reproducible, then restore.
+        state = np.random.get_state()
+        np.random.seed(0)
+        try:
+            self._preconditioner = pyamg.smoothed_aggregation_solver(
+                scipy.sparse.csr_matrix(csr)
+            ).aspreconditioner()
+        finally:
+            np.random.set_state(state)
 
     def solve(self, rhs: Any) -> Any:
         """Run preconditioned CG per right-hand side."""
@@ -166,9 +174,17 @@ class AmgCG:
         return out[:, 0] if single else out
 
 
-def auto_solver(n_dof: int) -> LinearSolver:
-    """Doc-04 selection rule: Direct below 150k DOF, AmgCG above when available."""
-    if n_dof < AUTO_DIRECT_LIMIT:
+def auto_solver(n_dof: int, dim: int) -> LinearSolver:
+    """Pick a solver by size and dimension.
+
+    Direct factorization fill-in makes the crossover dimension-dependent:
+    measured on 3D elasticity, AMG-preconditioned CG already wins at 14k
+    DOF, while 2D direct stays competitive far longer.
+    """
+    if dim not in (2, 3):
+        raise SolverError(f"dim must be 2 or 3, got {dim}")
+    limit = AUTO_DIRECT_LIMIT_2D if dim == 2 else AUTO_DIRECT_LIMIT_3D
+    if n_dof < limit:
         return Direct()
     try:
         _load_pyamg()
