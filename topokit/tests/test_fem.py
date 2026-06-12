@@ -396,3 +396,121 @@ def test_model_arrays_read_only() -> None:
         m.element_stiffness[0, 0] = 0.0
     with pytest.raises(ValueError, match="read-only"):
         m.loads()[0, 0] = 0.0
+
+
+def test_uniaxial_patch_anisotropic_offset_grid_exact() -> None:
+    g = StructuredGrid(shape=(4, 2), spacing=(0.7, 0.31), origin=(5.0, -2.0))
+    mat = Material(E=100.0, nu=0.3, rho=1.0)
+    length = 4 * 0.7
+    left = PlaneSlab(point=(5.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    right = Box((5.0 + length, -2.0), (5.0 + length, -2.0 + 0.62), tol=1e-9)
+    m = LinearElasticity(
+        g,
+        mat,
+        supports=[(left, "x"), (NearPoint((5.0, -2.0)), "y")],
+        loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
+    )
+    u = _solve(m, _ones(g))
+    np.testing.assert_allclose(m.element_stress(u, _ones(g)), 10.0, rtol=1e-9)
+
+
+def test_uniaxial_patch_with_solid_region_exact() -> None:
+    solid = np.zeros(8, dtype=bool)
+    solid[[1, 5]] = True  # one full column of solid elements
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
+    mat = Material(E=100.0, nu=0.3, rho=1.0)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
+    m = LinearElasticity(
+        g,
+        mat,
+        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
+        loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
+    )
+    u = _solve(m, _ones(g))
+    np.testing.assert_allclose(m.element_stress(u, _ones(g)), 10.0, rtol=1e-9)
+
+
+def test_plane_strain_von_mises_includes_sigma_z() -> None:
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
+    mat = Material(E=100.0, nu=0.3, rho=1.0)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
+    m = LinearElasticity(
+        g,
+        mat,
+        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
+        loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
+        mode="plane_strain",
+    )
+    u = _solve(m, _ones(g))
+    # sigma_z = nu*(sx+sy) = 3, vm = sqrt(0.5*((10)^2 + 3^2 + 7^2)) = sqrt(79)
+    np.testing.assert_allclose(m.element_stress(u, _ones(g)), np.sqrt(79.0), rtol=1e-9)
+
+
+def test_energy_consistency_in_simp_regime() -> None:
+    m = _cantilever((12, 4), (12.0, 4.0), STEEL)
+    rng = np.random.default_rng(seed=20260612)
+    scale = np.where(rng.random(48) > 0.5, 1.0, 1e-9)
+    scale[:4] = 1.0  # keep the clamped end stiff
+    k = m.assemble(scale)
+    # assembly/energy consistency holds for any u, independent of conditioning
+    u_rand = rng.normal(size=m.n_dof)
+    np.testing.assert_allclose(
+        m.element_energies(u_rand, scale).sum(), u_rand @ k.matvec(u_rand), rtol=1e-9
+    )
+    # for the solved u the identity is limited by the solver residual:
+    # cond(K) ~ 1e9 at this scale contrast, measured mismatch ~5e-6
+    u = _solve(m, scale)
+    energy = float(u @ k.matvec(u))
+    work = float(m.loads()[:, 0] @ u)
+    assert energy == pytest.approx(work, rel=1e-4)
+
+
+def test_pressure_on_void_interface_face() -> None:
+    g = StructuredGrid(shape=(2, 1), spacing=(1.0, 1.0), void=[False, True])
+    interface = Box((1.0, 0.0), (1.0, 1.0), tol=1e-9)
+    m = LinearElasticity(
+        g,
+        STEEL,
+        supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9), "all")],
+        loads=[SurfaceTraction(interface, pressure=4.0)],
+    )
+    f = m.loads()[:, 0]
+    # pressure pushes against the +x outward normal of the interface
+    assert f[m.dof_index(1, 0)] == pytest.approx(-2.0)
+    assert f[m.dof_index(4, 0)] == pytest.approx(-2.0)
+
+
+def test_cantilever_3d_matches_timoshenko() -> None:
+    e, nu, length, side, p = 1000.0, 0.3, 6.0, 1.0, 1.0
+    inertia = side**4 / 12.0
+    shear_g = e / (2.0 * (1.0 + nu))
+    reference = p * length**3 / (3.0 * e * inertia) + p * length / (5.0 / 6.0 * shear_g * side**2)
+
+    def tip(shape: tuple[int, int, int]) -> float:
+        g = StructuredGrid.box(size=(length, side, side), shape=shape)
+        left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+        tip_face = Box((length, 0.0, 0.0), (length, side, side), tol=1e-9)
+        m = LinearElasticity(
+            g,
+            Material(E=e, nu=nu, rho=1.0),
+            supports=[(left, "all")],
+            loads=[PointLoad(tip_face, (0.0, 0.0, -p))],
+        )
+        u = _solve(m, np.ones(g.n_elements))
+        return float(-m.displacement_field(u).values[:, 2].min())
+
+    coarse = tip((16, 2, 2))
+    fine = tip((32, 4, 4))
+    assert abs(fine - reference) / reference < 0.06
+    assert abs(fine - reference) < abs(coarse - reference)
+
+
+def test_integer_dof_spec_equivalent_to_names() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    a = LinearElasticity(g, STEEL, supports=[(left, (0,))], loads=[BodyForce((0.0, -1.0))])
+    b = LinearElasticity(g, STEEL, supports=[(left, "x")], loads=[BodyForce((0.0, -1.0))])
+    assert a.n_dof == b.n_dof
+    assert a.dof_index(0, 1) == b.dof_index(0, 1)
