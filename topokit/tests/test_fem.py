@@ -514,3 +514,16 @@ def test_integer_dof_spec_equivalent_to_names() -> None:
     b = LinearElasticity(g, STEEL, supports=[(left, "x")], loads=[BodyForce((0.0, -1.0))])
     assert a.n_dof == b.n_dof
     assert a.dof_index(0, 1) == b.dof_index(0, 1)
+
+
+def test_unsupported_element_kind_rejected() -> None:
+    class FakeKindGrid(StructuredGrid):
+        @property
+        def element_kind(self) -> str:
+            return "tet4"
+
+    g = FakeKindGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    with pytest.raises(FemError, match="tet4"):
+        LinearElasticity(
+            g, STEEL, supports=[(NearPoint((0.0, 0.0)), "all")], loads=[BodyForce((0.0, -1.0))]
+        )

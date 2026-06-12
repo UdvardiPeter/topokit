@@ -119,7 +119,11 @@ class SurfaceTraction:
 
 @dataclass(frozen=True)
 class BodyForce:
-    """Per-volume force over all active elements."""
+    """Per-volume force over all active elements.
+
+    Design-independent: evaluated once at full density. Density-dependent
+    self-weight (loads that shrink with the material) is out of scope in v1.
+    """
 
     vector: tuple[float, ...]
 
@@ -315,6 +319,8 @@ class LinearElasticity:
         dim = mesh.dim
         if dim == 3 and mode != "plane_stress":
             raise FemError("mode is a 2D setting; remove it for 3D meshes")
+        if mesh.element_kind not in ("quad4", "hex8"):
+            raise FemError(f"unsupported element kind {mesh.element_kind!r}")
 
         self._d = _d_matrix(material, dim, mode)
         self._ke = _element_stiffness(self._d, mesh.spacing)
