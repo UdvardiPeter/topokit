@@ -867,6 +867,30 @@ wheels = [
 ]
 
 [[package]]
+name = "pyamg"
+version = "5.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/54/f1/e7f0466af00dc59b6592f03499a8ca1c839d5265a045d0b010b574f67143/pyamg-5.3.0.tar.gz", hash = "sha256:5323d0f1a4cd999be246a90d580c9e1e9b584b98887f6298d397611087ef860b", size = 4161140, upload-time = "2025-08-24T02:06:10.133Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/6f/603ade45abb6ef8fdc40884cb246733efe110db2563c54fd19f7dc240832/pyamg-5.3.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:661f510311fbfa03b8b317ce9cdb6602902321dd936bcc975ee94bfe43eacb72", size = 1852410, upload-time = "2025-08-24T02:05:48.601Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/c4/ae346f844d4e08a15b9178707ced39de3f92c4e1b0447d0a9c5ccd24eaac/pyamg-5.3.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:d7d38303310e8551ae737898577c6ec69a1ee0fa4baf95f525c86f0071d94260", size = 1763595, upload-time = "2025-08-24T02:05:50.55Z" },
+    { url = "https://files.pythonhosted.org/packages/db/45/1c03a50699d1ce96f5a3f54755c3bdd575e459f8ba2c66eba3365881584c/pyamg-5.3.0-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:2a69c7974b26b1d5cd5bc0e371c565239199e9032b2ceb97190d492cd6498367", size = 1899545, upload-time = "2025-08-24T02:05:52.522Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/16/d703720aeaf57eca57867993b57d969ed1bc9675a93c82606663587aa285/pyamg-5.3.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:4a6de101435d11645293f83b23c22830c372100d13e6d0bcb8d1abd3e92c88c8", size = 2943354, upload-time = "2025-08-24T02:05:54.065Z" },
+    { url = "https://files.pythonhosted.org/packages/79/84/cefaabc44798ba7df2e806f4eb06ea435fe627886b40f312d263aaa7b76f/pyamg-5.3.0-cp312-cp312-win32.whl", hash = "sha256:0561b942b7b8a35700842077a2b6a228510ae8fcc402862bd3f60dc7d2cd75f4", size = 1563969, upload-time = "2025-08-24T02:05:55.662Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/8b/ff8c56c1f7a7997c7988c84bc55bc34b336b862531fbf88d3a8c5aa3fe5f/pyamg-5.3.0-cp312-cp312-win_amd64.whl", hash = "sha256:dd832b392314c5d4dbb6464f7ba8d788694d253a51b9809af8ade4886d24565f", size = 1681747, upload-time = "2025-08-24T02:05:57.421Z" },
+    { url = "https://files.pythonhosted.org/packages/66/b9/705e5f5177d545114d8ae46245de6bb5b8e3e92d9886a31b7fa475762efd/pyamg-5.3.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:c8e70912b1f6fd02c2d40ca10f6e94cce24181a1baa029f084aee74600242686", size = 1852677, upload-time = "2025-08-24T02:05:59.084Z" },
+    { url = "https://files.pythonhosted.org/packages/48/39/9da477018dd8eee06f064eee3d9047089c0621b3bda63ee99f256b27b287/pyamg-5.3.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:e8f771f1ad314534d14d6d8a47d289b191f081abdd1443c491ac93f6d3102be5", size = 1763803, upload-time = "2025-08-24T02:06:01.006Z" },
+    { url = "https://files.pythonhosted.org/packages/63/f3/c13ae1422434baeefe4d4f306a1cc77f024fe96d2abab3c212cfa1bf3ff8/pyamg-5.3.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5cc223c66a7aca06fba898eb5e8ede6bb7974a9ddf7b8a98f56143c829e63631", size = 1900343, upload-time = "2025-08-24T02:06:03.103Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/86/13b27316cf5f984720b736b58d7a0d8bf94870b99a546a0137f53f36924c/pyamg-5.3.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:fddf30940d422d97a24b6211e3405bf707688a94d0683780ae40073209c3aa6d", size = 2946401, upload-time = "2025-08-24T02:06:05.101Z" },
+    { url = "https://files.pythonhosted.org/packages/96/e2/ac14da5a3df18652f651788bf8eda9dcf99a485787ccb28add2fcd5d8eda/pyamg-5.3.0-cp313-cp313-win32.whl", hash = "sha256:6f7ea204aafc7e57a1900d47067430b059954d293a11025aea8616e5b6fba493", size = 1564120, upload-time = "2025-08-24T02:06:06.688Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/b4/72f17561584b51d9c9ca121b5307699eb6aa8300c812a31c8b4ea4ad9d2a/pyamg-5.3.0-cp313-cp313-win_amd64.whl", hash = "sha256:3965844194dc15be5c9d7198086b58496c2833e40e60b1133ab340d24fac950c", size = 1681868, upload-time = "2025-08-24T02:06:08.388Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1132,10 +1156,16 @@ dependencies = [
     { name = "scipy" },
 ]
 
+[package.optional-dependencies]
+fast = [
+    { name = "pyamg" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "import-linter" },
     { name = "mypy" },
+    { name = "pyamg" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -1145,13 +1175,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", specifier = ">=2.2" },
+    { name = "pyamg", marker = "extra == 'fast'", specifier = ">=5" },
     { name = "scipy", specifier = ">=1.15" },
 ]
+provides-extras = ["fast"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "import-linter", specifier = ">=2.1" },
     { name = "mypy", specifier = ">=1.14" },
+    { name = "pyamg", specifier = ">=5" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-cov", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.9" },

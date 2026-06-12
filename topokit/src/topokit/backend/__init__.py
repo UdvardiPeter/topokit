@@ -48,6 +48,14 @@ class SparseMatrix(Protocol):
         """Return the main diagonal as a dense vector."""
         ...
 
+    def csr_arrays(self) -> tuple[Any, Any, Any]:
+        """Return ``(indptr, indices, data)``.
+
+        The lossless export a direct factorization needs. GPU backends may
+        copy device to host here.
+        """
+        ...
+
 
 class ArrayBackend(Protocol):
     """Minimal array op set the numerics need."""

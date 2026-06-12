@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-import scipy.sparse.linalg
 
 from topokit.fem import (
     ALUMINUM_6061,
@@ -21,12 +20,11 @@ from topokit.selection import Box, NearPoint, OnBoundary, PlaneSlab
 
 
 def _solve(model: LinearElasticity, scale: np.ndarray) -> np.ndarray:
-    from typing import Any, cast
+    from topokit.solvers import Direct
 
-    k = cast(Any, model.assemble(scale))  # .raw is the WP-1.1 interim accessor
-    f = model.loads()
-    u: np.ndarray = scipy.sparse.linalg.spsolve(k.raw.tocsc(), f[:, 0])
-    return np.atleast_1d(u)
+    solver = Direct()
+    solver.prepare(model.assemble(scale))
+    return np.asarray(solver.solve(model.loads()[:, 0]))
 
 
 def _ones(mesh: StructuredGrid) -> np.ndarray:

@@ -100,6 +100,18 @@ class ArrayBackendConformance:
         )
         np.testing.assert_allclose(m.diagonal(), [4.0])
 
+    def test_csr_arrays_reconstruct_matrix(self) -> None:
+        rows = self.backend.asarray([0, 0, 1, 2], dtype=np.int64)
+        cols = self.backend.asarray([0, 2, 1, 2], dtype=np.int64)
+        vals = self.backend.asarray([1.0, 2.0, 3.0, 4.0])
+        m = self.backend.coo_to_csr(rows, cols, vals, shape=(3, 3))
+        indptr, indices, data = (np.asarray(a) for a in m.csr_arrays())
+        import scipy.sparse
+
+        dense = scipy.sparse.csr_array((data, indices, indptr), shape=m.shape).toarray()
+        x = np.array([1.0, 2.0, 3.0])
+        np.testing.assert_allclose(dense @ x, np.asarray(m.matvec(x)))
+
     def test_diagonal(self) -> None:
         m = self.backend.coo_to_csr(
             self.backend.asarray([0, 1, 2, 0], dtype=np.int64),

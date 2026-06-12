@@ -39,6 +39,10 @@ class _ScipyCsr:
         """Return the main diagonal as a dense vector."""
         return np.asarray(self.raw.diagonal(), dtype=np.float64)
 
+    def csr_arrays(self) -> tuple[_Arr, _Arr, _F64]:
+        """Return ``(indptr, indices, data)``."""
+        return self.raw.indptr, self.raw.indices, np.asarray(self.raw.data, dtype=np.float64)
+
 
 class NumpyBackend:
     """Default CPU backend."""
