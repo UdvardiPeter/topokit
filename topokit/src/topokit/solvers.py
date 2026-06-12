@@ -62,26 +62,53 @@ def _load_pyamg() -> Any:
 
 
 class Direct:
-    """Sparse direct solver: CHOLMOD when scikit-sparse is installed, else splu."""
+    """Sparse direct solver: CHOLMOD when scikit-sparse is installed, else splu.
 
-    def __init__(self) -> None:
+    SuperLU factorizes numerically singular systems without complaint and
+    returns garbage, so every solve is residual-checked by default:
+    under-constrained models fail loudly instead of producing huge
+    plausible-looking displacements. ``residual_check=None`` disables it.
+    """
+
+    def __init__(self, residual_check: float | None = 1e-3) -> None:
+        if residual_check is not None and residual_check <= 0.0:
+            raise SolverError(f"residual_check must be > 0 or None, got {residual_check}")
+        self.residual_check = residual_check
         self._solve_fn: Any = None
+        self._matrix: scipy.sparse.csr_array | None = None
 
     def prepare(self, matrix: SparseMatrix) -> None:
         """Factorize ``matrix``."""
         csr = _to_scipy_csr(matrix)
+        self._matrix = csr
         try:
             from sksparse.cholmod import cholesky  # type: ignore[import-not-found]
 
             self._solve_fn = cholesky(csr.tocsc())
         except ImportError:
-            self._solve_fn = scipy.sparse.linalg.splu(csr.tocsc()).solve
+            try:
+                self._solve_fn = scipy.sparse.linalg.splu(csr.tocsc()).solve
+            except RuntimeError as exc:
+                raise SolverError(f"factorization failed: {exc}; check supports") from exc
 
     def solve(self, rhs: Any) -> Any:
         """Solve for ``rhs`` using the stored factorization."""
-        if self._solve_fn is None:
+        if self._solve_fn is None or self._matrix is None:
             raise SolverError("call prepare() before solve()")
-        return self._solve_fn(np.asarray(rhs, dtype=np.float64))
+        b = np.asarray(rhs, dtype=np.float64)
+        x = self._solve_fn(b)
+        if self.residual_check is not None:
+            cols_b = b[:, None] if b.ndim == 1 else b
+            cols_x = x[:, None] if x.ndim == 1 else x
+            num = np.linalg.norm(cols_b - self._matrix @ cols_x, axis=0)
+            den = np.maximum(np.linalg.norm(cols_b, axis=0), 1e-300)
+            worst = float((num / den).max())
+            if worst > self.residual_check:
+                raise SolverError(
+                    f"relative residual {worst:.2e} exceeds {self.residual_check:g}; "
+                    "the system may be singular - check supports"
+                )
+        return x
 
 
 class AmgCG:
@@ -91,6 +118,10 @@ class AmgCG:
     """
 
     def __init__(self, tol: float = 1e-8, max_iter: int | None = None) -> None:
+        if tol <= 0.0:
+            raise SolverError(f"tol must be > 0, got {tol}")
+        if max_iter is not None and max_iter < 1:
+            raise SolverError(f"max_iter must be >= 1, got {max_iter}")
         self.tol = float(tol)
         self.max_iter = max_iter
         self._matrix: scipy.sparse.csr_array | None = None

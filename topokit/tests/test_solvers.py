@@ -1,5 +1,7 @@
 """Tests for linear solvers."""
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -145,3 +147,66 @@ def test_amg_cg_multi_rhs() -> None:
     a.prepare(k)
     out = a.solve(np.stack([f, 2.0 * f], axis=1))
     np.testing.assert_allclose(out[:, 1], 2.0 * out[:, 0], rtol=1e-8)
+
+
+def _singular_system() -> tuple[SparseMatrix, np.ndarray]:
+    from topokit.fem import STEEL
+    from topokit.selection import NearPoint
+
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    m = LinearElasticity(
+        g,
+        STEEL,
+        supports=[(NearPoint((0.0, 0.0)), "x")],  # rigid modes remain
+        loads=[PointLoad(Box((2.0, 0.0), (2.0, 2.0), tol=1e-9), (0.0, -1.0))],
+    )
+    return m.assemble(np.ones(4)), m.loads()[:, 0]
+
+
+def test_direct_detects_singular_system() -> None:
+    k, f = _singular_system()
+    d = Direct()
+    d.prepare(k)
+    with pytest.raises(SolverError, match="singular"):
+        d.solve(f)
+
+
+def test_direct_residual_check_can_be_disabled() -> None:
+    k, f = _singular_system()
+    d = Direct(residual_check=None)
+    d.prepare(k)
+    d.solve(f)  # garbage, but explicitly requested
+
+
+def test_direct_prefers_cholmod_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import types
+
+    import scipy.sparse.linalg as sla
+
+    calls: list[str] = []
+
+    def fake_cholesky(csc: Any) -> object:
+        calls.append("cholmod")
+        return sla.splu(csc).solve
+
+    chol = types.ModuleType("sksparse.cholmod")
+    chol.cholesky = fake_cholesky  # type: ignore[attr-defined]
+    sk = types.ModuleType("sksparse")
+    sk.cholmod = chol  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "sksparse", sk)
+    monkeypatch.setitem(sys.modules, "sksparse.cholmod", chol)
+    k, b, x_ref = _spd_system()
+    d = Direct()
+    d.prepare(k)
+    assert calls == ["cholmod"]
+    np.testing.assert_allclose(d.solve(b), x_ref, rtol=1e-12)
+
+
+def test_solver_param_validation() -> None:
+    with pytest.raises(SolverError, match="tol"):
+        AmgCG(tol=0.0)
+    with pytest.raises(SolverError, match="max_iter"):
+        AmgCG(max_iter=0)
+    with pytest.raises(SolverError, match="residual_check"):
+        Direct(residual_check=-1.0)
