@@ -342,3 +342,57 @@ def test_linear_elasticity_registered_as_builtin() -> None:
     from topokit.registry import registry
 
     assert registry.get("physics", "linear_elasticity") is LinearElasticity
+
+
+def test_mode_rejected_for_3d() -> None:
+    g = StructuredGrid(shape=(1, 1, 1), spacing=(1.0, 1.0, 1.0))
+    with pytest.raises(FemError, match="2D"):
+        LinearElasticity(
+            g,
+            STEEL,
+            supports=[(NearPoint((0.0, 0.0, 0.0)), "all")],
+            loads=[BodyForce((0.0, 0.0, -1.0))],
+            mode="plane_strain",
+        )
+
+
+def test_negative_scale_rejected() -> None:
+    m = _cantilever((4, 2), (4.0, 2.0), STEEL)
+    bad = np.ones(8)
+    bad[3] = -0.1
+    with pytest.raises(FemError, match="negative"):
+        m.assemble(bad)
+
+
+def test_dof_index_component_validated() -> None:
+    m = _cantilever((4, 2), (4.0, 2.0), STEEL)
+    with pytest.raises(FemError, match="component"):
+        m.dof_index(0, 2)
+
+
+def test_empty_and_mixed_load_cases_rejected() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
+    pin = NearPoint((0.0, 0.0))
+    with pytest.raises(FemError, match="empty"):
+        LinearElasticity(g, STEEL, supports=[(pin, "all")], loads=[[]])
+    with pytest.raises(FemError, match="one case"):
+        LinearElasticity(
+            g,
+            STEEL,
+            supports=[(pin, "all")],
+            loads=[BodyForce((0.0, -1.0)), [BodyForce((0.0, -1.0))]],  # type: ignore[arg-type]
+        )
+
+
+def test_load_params_coerce_to_canonical() -> None:
+    sel = NearPoint((0.0, 0.0))
+    assert PointLoad(sel, [0.0, -1.0]) == PointLoad(sel, (0, -1))  # type: ignore[arg-type]
+    assert BodyForce([0.0, -1.0]) == BodyForce((0.0, -1.0))  # type: ignore[arg-type]
+
+
+def test_model_arrays_read_only() -> None:
+    m = _cantilever((4, 2), (4.0, 2.0), STEEL)
+    with pytest.raises(ValueError, match="read-only"):
+        m.element_stiffness[0, 0] = 0.0
+    with pytest.raises(ValueError, match="read-only"):
+        m.loads()[0, 0] = 0.0

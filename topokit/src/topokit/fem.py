@@ -20,6 +20,11 @@ Implementation notes:
   ``assemble`` path goes through the array backend.
 - 2D uses unit thickness; ``mode`` selects plane stress (default) or
   plane strain.
+- Bilinear elements with full integration lock in coarse bending-dominated
+  meshes; benchmark meshes follow literature norms.
+- Models are not meant to cross processes: they do not keep their
+  constructor inputs, so reconstruct from the problem spec instead of
+  pickling.
 """
 
 from __future__ import annotations
@@ -74,12 +79,20 @@ PA12 = Material(E=1700.0, nu=0.40, rho=1.01e-9, name="pa12")
 RESIN_SLA = Material(E=2800.0, nu=0.35, rho=1.15e-9, name="resin-sla")
 
 
+def _freeze(obj: object, **fields: object) -> None:
+    for name, value in fields.items():
+        object.__setattr__(obj, name, value)
+
+
 @dataclass(frozen=True)
 class PointLoad:
     """Total ``force`` split equally over the selected active nodes."""
 
     selector: Selector
     force: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        _freeze(self, force=tuple(float(x) for x in self.force))
 
 
 @dataclass(frozen=True)
@@ -97,6 +110,11 @@ class SurfaceTraction:
     def __post_init__(self) -> None:
         if (self.traction is None) == (self.pressure is None):
             raise FemError("give exactly one of traction or pressure")
+        _freeze(
+            self,
+            traction=None if self.traction is None else tuple(float(x) for x in self.traction),
+            pressure=None if self.pressure is None else float(self.pressure),
+        )
 
 
 @dataclass(frozen=True)
@@ -104,6 +122,9 @@ class BodyForce:
     """Per-volume force over all active elements."""
 
     vector: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        _freeze(self, vector=tuple(float(x) for x in self.vector))
 
 
 Load = PointLoad | SurfaceTraction | BodyForce
@@ -292,9 +313,12 @@ class LinearElasticity:
         self.mode = mode
         self._backend = backend if backend is not None else default_backend()
         dim = mesh.dim
+        if dim == 3 and mode != "plane_stress":
+            raise FemError("mode is a 2D setting; remove it for 3D meshes")
 
         self._d = _d_matrix(material, dim, mode)
-        self.element_stiffness = _element_stiffness(self._d, mesh.spacing)
+        self._ke = _element_stiffness(self._d, mesh.spacing)
+        self._ke.flags.writeable = False
         self._centroid_b = _centroid_b(mesh.spacing)
 
         # condensed DOF numbering over active nodes
@@ -327,12 +351,19 @@ class LinearElasticity:
         rows = np.repeat(self._edofs_free, nen * dim, axis=1).ravel()
         cols = np.tile(self._edofs_free, (1, nen * dim)).ravel()
         keep = (rows >= 0) & (cols >= 0)
-        self._rows = rows[keep]
-        self._cols = cols[keep]
+        # int32 halves the dominant pattern memory; n_dof is always < 2**31.
+        self._rows = rows[keep].astype(np.int32)
+        self._cols = cols[keep].astype(np.int32)
         self._keep = keep
-        self._ke_flat = self.element_stiffness.ravel()
+        self._ke_flat = self._ke.ravel()
 
         self._loads = self._build_loads(loads, cn, dim, n_cdof, free)
+        self._loads.flags.writeable = False
+
+    @property
+    def element_stiffness(self) -> _F64:
+        """The shared element stiffness matrix (read-only)."""
+        return self._ke
 
     @property
     def n_dof(self) -> int:
@@ -346,6 +377,8 @@ class LinearElasticity:
 
     def dof_index(self, node: int, comp: int) -> int:
         """Free-DOF index for ``(node, component)``; ``-1`` if fixed or inactive."""
+        if comp < 0 or comp >= self.mesh.dim:
+            raise FemError(f"component {comp} out of range for dim {self.mesh.dim}")
         cnid = int(self.mesh.node_index_map[node])
         if cnid < 0:
             return -1
@@ -361,11 +394,18 @@ class LinearElasticity:
     ) -> _F64:
         if not loads:
             raise FemError("at least one load is required")
-        cases: list[Sequence[Load]]
-        if isinstance(loads[0], PointLoad | SurfaceTraction | BodyForce):
-            cases = [loads]  # type: ignore[list-item]
+        flat = [isinstance(item, PointLoad | SurfaceTraction | BodyForce) for item in loads]
+        if all(flat):
+            cases: list[Sequence[Load]] = [loads]  # type: ignore[list-item]
+        elif any(flat):
+            raise FemError("loads must be either one case of Loads or a list of cases")
         else:
             cases = list(loads)  # type: ignore[arg-type]
+            for j, case in enumerate(cases):
+                if not case:
+                    raise FemError(f"load case {j} is empty")
+                if not all(isinstance(it, PointLoad | SurfaceTraction | BodyForce) for it in case):
+                    raise FemError(f"load case {j} contains non-Load entries")
         out = np.zeros((n_cdof, len(cases)))
         for j, case in enumerate(cases):
             for load in case:
@@ -427,6 +467,8 @@ class LinearElasticity:
             raise FemError(f"scale shape {arr.shape} != ({self.mesh.n_elements},)")
         if not np.isfinite(arr).all():
             raise FemError("scale contains non-finite values")
+        if bool((arr < 0.0).any()):
+            raise FemError("scale contains negative values")
         return arr
 
     def assemble(self, scale: Any) -> SparseMatrix:
@@ -452,7 +494,11 @@ class LinearElasticity:
         return u_ext[idx]
 
     def element_energies(self, u: Any, scale: Any) -> _F64:
-        """Per-element strain energy ``scale_e * u_e K_e u_e``, zeros at void."""
+        """Per-element strain energy ``scale_e * u_e K_e u_e``, zeros at void.
+
+        Sums to the compliance ``u f``. Pass ones as ``scale`` to get the
+        unscaled energies ``u_e K_e u_e``, the compliance sensitivity kernel.
+        """
         arr = self._check_scale(scale)
         ue = self._element_displacements(u)
         e_active = np.einsum("ei,ij,ej->e", ue, self.element_stiffness, ue)
