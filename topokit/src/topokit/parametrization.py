@@ -353,8 +353,16 @@ class DensityFilter(LinkSpec):
 
     The kernel is the tensor product of per-axis triangles of physical
     ``radius`` (the spec's deliberate separable approximation of the radial
-    cone). Void is excluded; solid participates pinned at 1. The pullback
-    is the exact transpose of the normalized correlation.
+    cone, chosen for its O(n*r) cost). Void is excluded; solid participates
+    pinned at 1. The pullback is the exact transpose of the normalized
+    correlation.
+
+    Because the kernel is separable, its reach is ``sqrt(dim)`` larger along
+    diagonals than along axes (measured 1.41x in 2D, 1.73x in 3D), so the
+    minimum member size it enforces is orientation-dependent, tightest for
+    axis-aligned features. A radial kernel would be needed for isotropic
+    control; the radius-to-member-size calibration is set in the
+    manufacturing-constraint work.
     """
 
     radius: float = 1.5
