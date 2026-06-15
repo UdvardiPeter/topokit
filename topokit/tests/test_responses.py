@@ -212,3 +212,62 @@ def test_responses_registry_fd_meta() -> None:
             return np.asarray(p(xx, r.grad_field(_solution(model, g, chain, xx))))
 
         assert_gradient_matches(f, grad, x, rtol=1e-5)
+
+
+def test_multiload_gradient_fd() -> None:
+    g = StructuredGrid.box(size=(6.0, 4.0), shape=(6, 4))
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    model = LinearElasticity(
+        g,
+        STEEL,
+        supports=[(left, "all")],
+        loads=[
+            [PointLoad(NearPoint((6.0, 4.0)), (0.0, -1.0))],
+            [PointLoad(NearPoint((6.0, 0.0)), (1.0, 0.0))],
+        ],
+    )
+    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
+    rng = np.random.default_rng(20260615)
+    x = rng.uniform(0.3, 0.9, size=chain.n_vars)
+    comp = Compliance(weights=(2.0, 3.0))
+
+    def f(xx: np.ndarray) -> float:
+        return comp.value(_solution(model, g, chain, xx))
+
+    def grad(xx: np.ndarray) -> np.ndarray:
+        return np.asarray(chain.pullback(xx, comp.grad_field(_solution(model, g, chain, xx))))
+
+    assert_gradient_matches(f, grad, x, rtol=1e-5)
+
+
+def test_volume_empty_region_raises() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), solid=np.ones(4, dtype=bool))
+    sol = Solution(
+        model=None,
+        mesh=g,
+        displacements=np.zeros((1, 1)),
+        interpolated=np.ones(4),
+        density=np.ones(4),
+    )
+    with pytest.raises(ResponseError, match="no elements"):
+        Volume(region="design").value(sol)
+
+
+def test_constraint_zero_bound() -> None:
+    g, _model = _cantilever(shape=(4, 2), size=(4.0, 2.0))
+    chain = SIMP().bind(g)
+    sol = _solution_no_solve(g, chain, np.full(chain.n_vars, 0.6))
+    c = Volume() <= 0.0  # degenerate but must not divide by zero
+    assert c.value(sol) == pytest.approx(0.6)  # unnormalized: g = value
+
+
+def test_negative_gradient_step_reduces_compliance() -> None:
+    g, model = _cantilever(shape=(8, 4), size=(8.0, 4.0))
+    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
+    x = np.full(chain.n_vars, 0.5)
+    comp = Compliance()
+    c0 = comp.value(_solution(model, g, chain, x))
+    gx = chain.pullback(x, comp.grad_field(_solution(model, g, chain, x)))
+    x1 = np.clip(x - 1e-4 * gx / np.linalg.norm(gx), 0.0, 1.0)
+    c1 = comp.value(_solution(model, g, chain, x1))
+    assert c1 < c0

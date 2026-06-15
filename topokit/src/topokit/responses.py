@@ -20,7 +20,7 @@ normalized to ``g <= 0`` form for the optimizer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
@@ -32,6 +32,11 @@ if TYPE_CHECKING:
     from topokit.fem import PhysicsModel
 
 _F64 = npt.NDArray[np.float64]
+
+# Which chain field a response differentiates against; the orchestration layer
+# routes "interpolated" through chain.pullback and "density" through
+# chain.pullback_density.
+FieldBasis = Literal["interpolated", "density"]
 
 
 class ResponseError(ValueError):
@@ -54,7 +59,7 @@ class Response(Protocol):
     """A scalar of the solved state, differentiable w.r.t. one field basis."""
 
     name: ClassVar[str]
-    field_basis: ClassVar[str]  # "interpolated" | "density"
+    field_basis: ClassVar[FieldBasis]
     n_extra_adjoints: ClassVar[int]
 
     def value(self, solution: Solution) -> float:
@@ -81,13 +86,14 @@ class Compliance(ResponseBase):
     """Structural compliance ``u^T K u`` (lower is stiffer); the usual objective.
 
     Multi-load: a weighted sum over load cases (default weight 1.0 each, so a
-    single case is unchanged). The value uses ``u^T K u`` rather than ``f^T u``
-    so it stays consistent with the gradient for an inexact (iterative) solve.
+    single case is unchanged). The value is the sum of element strain energies
+    ``u^T K u`` (equal to ``f^T u`` at convergence), the standard topology-
+    optimization compliance form and the quantity the gradient differentiates.
     """
 
     weights: tuple[float, ...] | None = None
     name: ClassVar[str] = "compliance"
-    field_basis: ClassVar[str] = "interpolated"
+    field_basis: ClassVar[FieldBasis] = "interpolated"
     n_extra_adjoints: ClassVar[int] = 0
 
     def _case_weights(self, n_cases: int) -> _F64:
@@ -137,7 +143,7 @@ class Volume(ResponseBase):
 
     region: str = "design"
     name: ClassVar[str] = "volume"
-    field_basis: ClassVar[str] = "density"
+    field_basis: ClassVar[FieldBasis] = "density"
     n_extra_adjoints: ClassVar[int] = 0
 
     def _mask(self, mesh: Mesh) -> npt.NDArray[np.bool_]:
@@ -154,7 +160,10 @@ class Volume(ResponseBase):
         mesh = solution.mesh
         region = self._mask(mesh)
         v = mesh.element_volumes
-        return float((solution.density[region] * v[region]).sum() / v[region].sum())
+        total = float(v[region].sum())
+        if total == 0.0:
+            raise ResponseError(f"volume region {self.region!r} contains no elements")
+        return float((solution.density[region] * v[region]).sum() / total)
 
     def grad_field(self, solution: Solution) -> _F64:
         """``dV/d(rho)`` = element volume fraction on the region, zero elsewhere."""
@@ -180,8 +189,8 @@ class Constraint:
     sense: str  # "<=" or ">="
 
     @property
-    def field_basis(self) -> str:
-        """The field basis of the underlying response."""
+    def field_basis(self) -> FieldBasis:
+        """Return the field basis of the underlying response."""
         return self.response.field_basis
 
     def _scale(self) -> float:
