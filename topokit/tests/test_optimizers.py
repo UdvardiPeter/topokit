@@ -173,7 +173,10 @@ def test_oc_minimizes_cantilever_end_to_end() -> None:
             break
 
     assert c_hist[-1] < 0.5 * c_hist[0]  # compliance substantially reduced
-    assert vol_hist[-1] == pytest.approx(vf, abs=0.02)  # volume tracked the target
+    # volume is linear in x here (no projection), so OC's bisection tracks the
+    # target near-exactly every iteration (a tight guard against drift bugs)
+    assert vol_hist[-1] == pytest.approx(vf, abs=1e-3)
+    assert max(abs(v - vf) for v in vol_hist[1:]) < 1e-3
     # material redistributed to both extremes (a structure formed); crisp 0/1
     # boundaries need Heaviside projection, which this no-projection chain omits
     rho_d = chain.physical_density(x)[g.design]
