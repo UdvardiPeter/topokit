@@ -175,6 +175,13 @@ class BoundChain:
             raise ParametrizationError(f"x shape {arr.shape} != ({self.n_vars},)")
         if not np.isfinite(arr).all():
             raise ParametrizationError("x contains non-finite values")
+        # Design variables are densities in [0, 1]; the optimizer enforces this
+        # bound, so a violation means a diverged optimizer or direct misuse.
+        # A small tolerance absorbs float noise at the bounds.
+        if arr.min() < -1e-6 or arr.max() > 1.0 + 1e-6:
+            raise ParametrizationError(
+                f"design variables must be in [0, 1], got [{arr.min():.4g}, {arr.max():.4g}]"
+            )
         return arr
 
     def _embed(self, design_values: _F64) -> _F64:
@@ -210,17 +217,49 @@ class BoundChain:
         _, pinned = self._forward(arr)
         return self._terminal.apply(pinned)
 
-    def pullback(self, x: Any, grad_field: Any) -> _F64:
-        """Chain-rule ``dF/d(field)`` back to ``dF/dx``."""
+    def physical_density(self, x: Any) -> _F64:
+        """Return the physical density field, ``(n_elements,)``, after filters and projection.
+
+        This is the field before the terminal material-interpolation link
+        (solid pinned to 1, void to 0). Responses defined on density, such
+        as volume, consume it; responses on the interpolated property, such
+        as compliance, consume :meth:`apply`. It is also the branch point
+        for coupled physics (one terminal link per physics share it).
+        """
         arr = self._check(x)
-        grad = np.asarray(grad_field, dtype=np.float64)
-        if grad.shape != (self.mesh.n_elements,):
-            raise ParametrizationError(f"grad shape {grad.shape} != ({self.mesh.n_elements},)")
+        _, pinned = self._forward(arr)
+        return pinned
+
+    def pullback(self, x: Any, grad_field: Any) -> _F64:
+        """Chain-rule ``dF/d(field)`` back to ``dF/dx`` through the whole chain."""
+        arr = self._check(x)
+        grad = self._check_grad(grad_field)
+        inputs, pinned = self._forward(arr)
+        g = self._terminal.pullback(pinned, grad)
+        return self._density_pullback(inputs, g)
+
+    def pullback_density(self, x: Any, grad_density: Any) -> _F64:
+        """Chain-rule ``dF/d(rho_bar)`` back to ``dF/dx`` for density responses.
+
+        Stops at the terminal boundary: use this for a response defined on
+        :meth:`physical_density` (e.g. volume), :meth:`pullback` for one on
+        :meth:`apply`.
+        """
+        arr = self._check(x)
+        grad = self._check_grad(grad_density)
         inputs, _ = self._forward(arr)
-        idx = len(inputs) - 1
-        g = self._terminal.pullback(inputs[idx], grad)
-        idx -= 1
+        return self._density_pullback(inputs, grad)
+
+    def _check_grad(self, grad: Any) -> _F64:
+        arr = np.asarray(grad, dtype=np.float64)
+        if arr.shape != (self.mesh.n_elements,):
+            raise ParametrizationError(f"grad shape {arr.shape} != ({self.mesh.n_elements},)")
+        return arr
+
+    def _density_pullback(self, inputs: list[_F64], g: _F64) -> _F64:
+        """Pull a gradient w.r.t. ``rho_bar`` back to ``x`` (density links only)."""
         g = self._pin_pullback(g)
+        idx = len(inputs) - 2  # entry before the appended pinned field
         for link in reversed(self._middle):
             g = link.pullback(inputs[idx], g)
             idx -= 1
@@ -352,6 +391,11 @@ class _BoundDensityFilter(_BoundLink):
         return np.where(mesh.active_elements, out, 0.0)
 
     def pullback(self, x: _F64, grad_out: _F64) -> _F64:
+        # Forward is F = A D^-1 C A (mask, normalize, correlate, mask), with
+        # A and D diagonal and the separable correlation C symmetric. The
+        # exact transpose is A C D^-1 A; the diagonal factors commute, so the
+        # code below (A C A D^-1) equals it. Keep that commutativity in mind
+        # before reordering these operations.
         mesh = self.mesh
         scaled = np.where(mesh.active_elements, grad_out / self._denom, 0.0)
         back = self._correlate(mesh.to_grid(scaled), self._weights)

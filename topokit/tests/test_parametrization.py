@@ -204,3 +204,58 @@ def test_spec_validation_errors() -> None:
         SIMP(p=0.0)
     with pytest.raises(ParametrizationError, match="plane"):
         SymmetryMap(planes=("q",))
+
+
+def test_physical_density_is_pre_terminal() -> None:
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
+    bound = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
+    x = np.full(bound.n_vars, 0.5)
+    rho_bar = bound.physical_density(x)
+    # rho_bar is the filtered density (~0.5), the scale is rho_bar**3 (~0.125)
+    np.testing.assert_allclose(rho_bar, 0.5, rtol=1e-9)
+    np.testing.assert_allclose(bound.apply(x), 0.5**3, rtol=1e-6)
+
+
+def test_physical_density_pins_solid_and_void() -> None:
+    solid = np.zeros(8, dtype=bool)
+    solid[0] = True
+    void = np.zeros(8, dtype=bool)
+    void[7] = True
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid, void=void)
+    bound = SIMP().bind(g)
+    rho = bound.physical_density(np.full(bound.n_vars, 0.4))
+    assert rho[0] == 1.0  # solid
+    assert rho[7] == 0.0  # void
+
+
+def test_pullback_density_fd_verified() -> None:
+    void = np.zeros(12, dtype=bool)
+    void[[1, 2]] = True
+    solid = np.zeros(12, dtype=bool)
+    solid[[9, 10]] = True
+    g = StructuredGrid(shape=(4, 3), spacing=(0.7, 0.45), void=void, solid=solid)
+    bound = (
+        SymmetryMap(planes=("x",)) | DensityFilter(radius=1.0) | Heaviside(beta=2.0) | SIMP()
+    ).bind(g)
+    rng = np.random.default_rng(seed=11)
+    x = rng.uniform(0.2, 0.8, size=bound.n_vars)
+    w = rng.normal(size=g.n_elements)
+
+    def f(xx: np.ndarray) -> float:
+        return float(w @ bound.physical_density(xx))
+
+    def grad(xx: np.ndarray) -> np.ndarray:
+        return np.asarray(bound.pullback_density(xx, w))
+
+    assert_gradient_matches(f, grad, x)
+
+
+def test_out_of_range_design_raises() -> None:
+    bound = SIMP(p=3.0).bind(G42)
+    with pytest.raises(ParametrizationError, match=r"\[0, 1\]"):
+        bound.apply(np.full(8, -0.01))
+    with pytest.raises(ParametrizationError, match=r"\[0, 1\]"):
+        bound.apply(np.full(8, 1.5))
+    # float noise at the bounds is tolerated
+    bound.apply(np.full(8, 1.0 + 1e-9))
+    bound.apply(np.full(8, -1e-9))
