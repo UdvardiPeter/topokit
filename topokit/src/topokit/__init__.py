@@ -12,6 +12,7 @@ from topokit.parametrization import (
     SymmetryMap,
 )
 from topokit.registry import registry
+from topokit.responses import Compliance, Volume
 from topokit.solvers import AmgCG, Direct
 
 __version__ = "0.0.1.dev0"
@@ -29,3 +30,5 @@ registry.register("chain_links", "simp", SIMP, source="topokit.parametrization")
 registry.register(
     "chain_links", "sensitivity_filter", SensitivityFilter, source="topokit.parametrization"
 )
+registry.register("responses", "compliance", Compliance, source="topokit.responses")
+registry.register("responses", "volume", Volume, source="topokit.responses")

@@ -65,6 +65,7 @@ root_package = "topokit"
 name = "L0 layering: selection consumes mesh; the rest are independent"
 type = "layers"
 layers = [
+  "topokit.responses",
   "topokit.fem : topokit.solvers : topokit.parametrization",
   "topokit.selection",
   "topokit.mesh",

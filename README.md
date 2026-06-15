@@ -22,6 +22,7 @@ Pre-alpha. Foundation layer only.
 | `topokit.fem` linear elasticity, loads, materials | done |
 | `topokit.solvers` direct + AMG-preconditioned CG | done |
 | `topokit.parametrization` the unified SIMP chain | done |
+| `topokit.responses` compliance, volume, constraints | done |
 | Optimizers (MMA/OC), Problem/Study | next |
 | CAD import/export, manufacturing constraints | planned |
 | Local daemon, Fusion 360 add-in | planned |

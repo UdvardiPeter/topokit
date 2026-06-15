@@ -28,6 +28,10 @@
 
 ::: topokit.parametrization
 
+## topokit.responses
+
+::: topokit.responses
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance
