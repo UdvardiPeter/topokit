@@ -188,6 +188,10 @@ class Constraint:
     bound: float
     sense: str  # "<=" or ">="
 
+    def __post_init__(self) -> None:
+        if self.sense not in ("<=", ">="):
+            raise ResponseError(f"sense must be '<=' or '>=', got {self.sense!r}")
+
     @property
     def field_basis(self) -> FieldBasis:
         """Return the field basis of the underlying response."""

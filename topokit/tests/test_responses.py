@@ -271,3 +271,93 @@ def test_negative_gradient_step_reduces_compliance() -> None:
     x1 = np.clip(x - 1e-4 * gx / np.linalg.norm(gx), 0.0, 1.0)
     c1 = comp.value(_solution(model, g, chain, x1))
     assert c1 < c0
+
+
+def _model_masked(g: StructuredGrid) -> LinearElasticity:
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    x_max = g.shape[0] * g.spacing[0]
+    y_max = g.shape[1] * g.spacing[1]
+    tip = Box((x_max, 0.0), (x_max, y_max), tol=1e-9)
+    return LinearElasticity(
+        g,
+        Material(E=1000.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(tip, (0.0, -1.0))],
+    )
+
+
+def _sol_masked(
+    model: LinearElasticity | None, g: StructuredGrid, chain: Any, x: np.ndarray
+) -> Solution:
+    scale = chain.apply(x)
+    rho = chain.physical_density(x)
+    if model is None:
+        return Solution(
+            model=None, mesh=g, displacements=np.zeros((1, 1)), interpolated=scale, density=rho
+        )
+    solver = Direct()
+    solver.prepare(model.assemble(scale))
+    u = np.asarray(solver.solve(model.loads())).reshape(model.n_dof, -1)
+    return Solution(model=model, mesh=g, displacements=u, interpolated=scale, density=rho)
+
+
+def test_compliance_gradient_fd_with_solid_and_void() -> None:
+    solid = np.zeros(24 * 12, dtype=bool)
+    solid[:12] = True
+    void = np.zeros(24 * 12, dtype=bool)
+    void[-3:] = True
+    g = StructuredGrid(shape=(24, 12), spacing=(1.0, 1.0), solid=solid, void=void)
+    model = _model_masked(g)
+    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
+    rng = np.random.default_rng(1)
+    x = rng.uniform(0.3, 0.9, chain.n_vars)
+    comp = Compliance()
+    assert_gradient_matches(
+        lambda xx: comp.value(_sol_masked(model, g, chain, xx)),
+        lambda xx: np.asarray(
+            chain.pullback(xx, comp.grad_field(_sol_masked(model, g, chain, xx)))
+        ),
+        x,
+        rtol=1e-5,
+    )
+
+
+def test_volume_gradient_fd_through_symmetry() -> None:
+    from topokit.parametrization import SymmetryMap
+
+    g = StructuredGrid(shape=(8, 6), spacing=(1.0, 1.0))
+    chain = (SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
+    rng = np.random.default_rng(2)
+    x = rng.uniform(0.3, 0.9, chain.n_vars)
+    vol = Volume()
+    assert_gradient_matches(
+        lambda xx: vol.value(_sol_masked(None, g, chain, xx)),
+        lambda xx: np.asarray(
+            chain.pullback_density(xx, vol.grad_field(_sol_masked(None, g, chain, xx)))
+        ),
+        x,
+        rtol=1e-5,
+    )
+
+
+def test_volume_active_region_gradient_with_solid() -> None:
+    solid = np.zeros(48, dtype=bool)
+    solid[:6] = True
+    g = StructuredGrid(shape=(8, 6), spacing=(1.0, 1.0), solid=solid)
+    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
+    rng = np.random.default_rng(4)
+    x = rng.uniform(0.3, 0.9, chain.n_vars)
+    vol = Volume(region="active")
+    assert_gradient_matches(
+        lambda xx: vol.value(_sol_masked(None, g, chain, xx)),
+        lambda xx: np.asarray(
+            chain.pullback_density(xx, vol.grad_field(_sol_masked(None, g, chain, xx)))
+        ),
+        x,
+        rtol=1e-5,
+    )
+
+
+def test_constraint_rejects_bad_sense() -> None:
+    with pytest.raises(ResponseError, match="sense"):
+        Constraint(Volume(), 0.3, "==")
