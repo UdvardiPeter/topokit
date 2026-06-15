@@ -164,6 +164,11 @@ class BoundChain:
             if reduced is not None
             else int(mesh.design.sum())
         )
+        if self.n_vars == 0:
+            raise ParametrizationError(
+                "the design region is empty (all elements are solid or void); "
+                "at least one design element is required"
+            )
 
     def initial_design(self, volume_fraction: float) -> _F64:
         """Return a uniform starting design."""
@@ -449,8 +454,10 @@ class SIMP(LinkSpec):
     is_terminal: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
-        if self.p <= 0.0:
-            raise ParametrizationError(f"p must be > 0, got {self.p}")
+        # p >= 1 is SIMP's definition (the penalization exponent); p < 1 also
+        # gives an unbounded gradient at rho = 0, which poisons the optimizer.
+        if self.p < 1.0:
+            raise ParametrizationError(f"p must be >= 1, got {self.p}")
         if not 0.0 <= self.scale_min < 1.0:
             raise ParametrizationError(f"scale_min must be in [0, 1), got {self.scale_min}")
 

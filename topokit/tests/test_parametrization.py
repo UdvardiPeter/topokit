@@ -259,3 +259,63 @@ def test_out_of_range_design_raises() -> None:
     # float noise at the bounds is tolerated
     bound.apply(np.full(8, 1.0 + 1e-9))
     bound.apply(np.full(8, -1e-9))
+
+
+def test_3d_multiplane_symmetry_fd_and_octants() -> None:
+    g = StructuredGrid(shape=(4, 4, 4), spacing=(1.0, 1.0, 1.0))
+    bound = (SymmetryMap(planes=("x", "y", "z")) | DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
+    assert bound.n_vars == 8  # 8 octants of a 4x4x4 grid
+    rng = np.random.default_rng(seed=3)
+    x = rng.uniform(0.2, 0.8, size=bound.n_vars)
+    out = g.to_grid(bound.apply(x))
+    np.testing.assert_allclose(out, out[::-1])
+    np.testing.assert_allclose(out, out[:, ::-1])
+    np.testing.assert_allclose(out, out[:, :, ::-1])
+    v = rng.normal(size=g.n_elements)
+    assert_gradient_matches(
+        lambda xx: float(v @ bound.apply(xx)),
+        lambda xx: np.asarray(bound.pullback(xx, v)),
+        x,
+    )
+
+
+def test_odd_width_mirror_fixes_center() -> None:
+    g = StructuredGrid(shape=(3, 2), spacing=(1.0, 1.0))
+    bound = (SymmetryMap(planes=("x",)) | SIMP(p=1.0, scale_min=0.0)).bind(g)
+    out = g.to_grid(bound.apply(np.linspace(0.1, 0.9, bound.n_vars)))
+    np.testing.assert_allclose(out[0], out[2])  # mirrored columns
+    rng = np.random.default_rng(5)
+    x = rng.uniform(0.2, 0.8, bound.n_vars)
+    v = rng.normal(size=g.n_elements)
+    assert_gradient_matches(
+        lambda xx: float(v @ bound.apply(xx)),
+        lambda xx: np.asarray(bound.pullback(xx, v)),
+        x,
+    )
+
+
+def test_heaviside_continuation_endpoint_fd() -> None:
+    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
+    bound = (DensityFilter(radius=1.5) | Heaviside(beta=32.0, eta=0.3) | SIMP(p=3.0)).bind(g)
+    rng = np.random.default_rng(9)
+    x = rng.uniform(0.2, 0.8, bound.n_vars)
+    v = rng.normal(size=g.n_elements)
+    assert_gradient_matches(
+        lambda xx: float(v @ bound.apply(xx)),
+        lambda xx: np.asarray(bound.pullback(xx, v)),
+        x,
+    )
+
+
+def test_empty_design_region_raises() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), solid=np.ones(4, dtype=bool))
+    with pytest.raises(ParametrizationError, match="design region is empty"):
+        SIMP().bind(g)
+
+
+def test_simp_requires_p_at_least_one() -> None:
+    with pytest.raises(ParametrizationError, match="p must be >= 1"):
+        SIMP(p=0.5)
+    with pytest.raises(ParametrizationError, match="p must be >= 1"):
+        SIMP(p=0.0)
+    SIMP(p=1.0)  # linear is allowed
