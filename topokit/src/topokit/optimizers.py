@@ -94,7 +94,15 @@ class OC:
         df0 = np.asarray(df0, dtype=np.float64)
         g = np.asarray(g, dtype=np.float64)
         dg = np.asarray(dg, dtype=np.float64)
-        if g.shape != (1,) or dg.shape != (1, x.size):
+        n = self._lower.size
+        if x.shape != (n,):
+            raise OptimizerError(f"x shape {x.shape} != ({n},) from setup")
+        if df0.shape != (n,):
+            raise OptimizerError(f"df0 shape {df0.shape} != ({n},)")
+        for name, arr in (("x", x), ("df0", df0), ("g", g), ("dg", dg)):
+            if not np.isfinite(arr).all():
+                raise OptimizerError(f"{name} contains non-finite values")
+        if g.shape != (1,) or dg.shape != (1, n):
             raise OptimizerError("OC handles exactly one constraint")
         dgdx = dg[0]
         if bool((dgdx < 0.0).any()):

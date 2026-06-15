@@ -182,3 +182,40 @@ def test_oc_minimizes_cantilever_end_to_end() -> None:
     rho_d = chain.physical_density(x)[g.design]
     assert rho_d.min() < 0.1
     assert rho_d.max() > 0.9
+
+
+def test_eta_not_half_branch() -> None:
+    # the b**eta path (eta != 0.5) is distinct code from the sqrt fast path
+    n = 4
+    x = np.full(n, 0.5)
+    df0 = -np.array([4.0, 1.0, 1.0, 1.0])
+    dg = np.full((1, n), (1.0 / n) / 0.5)
+    g = np.array([0.0])
+    gentle = _oc(n, eta=0.3, move=1.0).step(x, 0.0, df0, g, dg)
+    aggressive = _oc(n, eta=1.0, move=1.0).step(x, 0.0, df0, g, dg)
+    assert np.isfinite(gentle.x_next).all() and np.isfinite(aggressive.x_next).all()
+    assert gentle.x_next.mean() == pytest.approx(0.5, abs=1e-3)
+    assert aggressive.x_next.mean() == pytest.approx(0.5, abs=1e-3)
+    # larger eta pushes the most-sensitive element harder
+    assert aggressive.x_next[0] > gentle.x_next[0]
+
+
+def test_input_validation() -> None:
+    opt = _oc(4)
+    x = np.full(4, 0.5)
+    dg = np.full((1, 4), 0.25)
+    g = np.array([0.0])
+    with pytest.raises(OptimizerError, match="x shape"):
+        opt.step(np.full(6, 0.5), 0.0, -np.ones(6), g, np.full((1, 6), 0.25))
+    with pytest.raises(OptimizerError, match="df0 shape"):
+        opt.step(x, 0.0, -np.ones(3), g, dg)
+    with pytest.raises(OptimizerError, match="non-finite"):
+        opt.step(x, 0.0, -np.array([1.0, np.nan, 1.0, 1.0]), g, dg)
+    with pytest.raises(OptimizerError, match="non-finite"):
+        opt.step(x, 0.0, -np.ones(4), g, np.full((1, 4), np.inf))
+
+
+def test_step_before_setup_raises() -> None:
+    opt = OC()
+    with pytest.raises(OptimizerError, match="setup"):
+        opt.step(np.full(4, 0.5), 0.0, -np.ones(4), np.array([0.0]), np.full((1, 4), 0.25))
