@@ -21,6 +21,7 @@ field containers, gradient verification harness). Numerics land next.
 | `topokit.selection` | geometric selectors for loads, supports, regions |
 | `topokit.fem` | linear elasticity, loads, materials, element library |
 | `topokit.solvers` | direct and AMG-preconditioned iterative solvers |
+| `topokit.parametrization` | the unified chain: symmetry, filters, projection, SIMP |
 | `topokit.registry` | plugin resolution by group and name |
 | `topokit.events` | typed event bus for the optimization loop |
 | `topokit.fields` | validated field containers (design, element, nodal) |

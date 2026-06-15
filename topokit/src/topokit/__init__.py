@@ -4,6 +4,13 @@
 
 from topokit.backend import default_backend
 from topokit.fem import LinearElasticity
+from topokit.parametrization import (
+    SIMP,
+    DensityFilter,
+    Heaviside,
+    SensitivityFilter,
+    SymmetryMap,
+)
 from topokit.registry import registry
 from topokit.solvers import AmgCG, Direct
 
@@ -15,3 +22,10 @@ registry.register("backends", "numpy", default_backend(), source="topokit.backen
 registry.register("physics", "linear_elasticity", LinearElasticity, source="topokit.fem")
 registry.register("solvers", "direct", Direct, source="topokit.solvers")
 registry.register("solvers", "amg_cg", AmgCG, source="topokit.solvers")
+registry.register("chain_links", "symmetry", SymmetryMap, source="topokit.parametrization")
+registry.register("chain_links", "density_filter", DensityFilter, source="topokit.parametrization")
+registry.register("chain_links", "heaviside", Heaviside, source="topokit.parametrization")
+registry.register("chain_links", "simp", SIMP, source="topokit.parametrization")
+registry.register(
+    "chain_links", "sensitivity_filter", SensitivityFilter, source="topokit.parametrization"
+)
