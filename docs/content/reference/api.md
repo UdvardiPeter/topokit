@@ -32,6 +32,10 @@
 
 ::: topokit.responses
 
+## topokit.optimizers
+
+::: topokit.optimizers
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance
