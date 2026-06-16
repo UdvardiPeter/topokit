@@ -53,6 +53,17 @@ class Optimizer(Protocol):
         ...
 
 
+def validate_bounds(n_vars: int, lower: _F64, upper: _F64) -> tuple[_F64, _F64]:
+    """Coerce and validate the box bounds for ``setup`` (shape, upper > lower)."""
+    lo = np.asarray(lower, dtype=np.float64)
+    hi = np.asarray(upper, dtype=np.float64)
+    if lo.shape != (n_vars,) or hi.shape != (n_vars,):
+        raise OptimizerError(f"lower/upper must have shape ({n_vars},)")
+    if not np.all(hi > lo):
+        raise OptimizerError("upper bound must exceed lower bound for every variable")
+    return lo, hi
+
+
 def check_step_inputs(
     lower: _F64 | None, x: _F64, df0: _F64, g: _F64, dg: _F64
 ) -> tuple[_F64, _F64, _F64, _F64]:

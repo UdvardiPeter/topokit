@@ -356,3 +356,85 @@ def test_protocol_registry_and_validation() -> None:
         )
     with pytest.raises(OptimizerError, match="setup"):
         MMA().step(np.full(4, 0.5), 0.0, -np.ones(4), np.array([0.0]), np.full((1, 4), 0.1))
+
+
+def test_mma_rejects_degenerate_bounds() -> None:
+    opt = MMA()
+    with pytest.raises(OptimizerError, match="upper bound must exceed"):
+        opt.setup(3, np.array([0.0, 0.0, 0.0]), np.array([1.0, 0.0, 1.0]))
+
+
+def test_mma_escapes_starting_bound() -> None:
+    # MMA's additive update can grow a variable from exactly 0 (OC cannot)
+    n = 6
+    t = np.ones(n)  # objective min sum (x-1)^2 wants x = 1
+    opt = _mma(n)
+    x = np.zeros(n)
+    for _ in range(60):
+        df0 = 2.0 * (x - t)
+        res = opt.step(x, float(((x - t) ** 2).sum()), df0, np.array([-1.0]), np.zeros((1, n)))
+        x = res.x_next
+        if res.change < 1e-7:
+            break
+    assert x.min() > 0.9  # escaped the lower bound toward the optimum
+
+
+def test_mma_checkpoint_restore_early_iteration() -> None:
+    # restoring from a k=1 state (xold1/xold2 still None) must round-trip
+    n = 6
+    rng = np.random.default_rng(3)
+    t = rng.uniform(0.0, 1.0, n)
+
+    def run(restore_at: int) -> np.ndarray:
+        opt = _mma(n)
+        x = np.full(n, 0.3)
+        for k in range(15):
+            if k == restore_at:
+                fresh = _mma(n)
+                fresh.load_state(opt.state())
+                opt = fresh
+            df0 = 2.0 * (x - t)
+            g = np.array([x.mean() / 0.3 - 1.0])
+            dg = np.full((1, n), (1.0 / n) / 0.3)
+            x = opt.step(x, 0.0, df0, g, dg).x_next
+        return x
+
+    np.testing.assert_array_equal(run(1), run(99))  # restore at k=1 vs never
+
+
+def test_mma_converges_on_cantilever() -> None:
+    from topokit.fem import LinearElasticity, Material, PointLoad
+    from topokit.mesh import StructuredGrid
+    from topokit.parametrization import SIMP, DensityFilter
+    from topokit.responses import Compliance, Solution, Volume
+    from topokit.selection import Box, PlaneSlab
+    from topokit.solvers import Direct
+
+    g = StructuredGrid.box(size=(20.0, 10.0), shape=(20, 10))
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    tip = Box((20.0, 0.0), (20.0, 0.0), tol=0.6)
+    model = LinearElasticity(
+        g,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(tip, (0.0, -1.0))],
+    )
+    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
+    opt = _mma(chain.n_vars)
+    x = chain.initial_design(0.4)
+    comp, con = Compliance(), Volume() <= 0.4
+    converged = False
+    for _ in range(150):
+        scale, rho = chain.apply(x), chain.physical_density(x)
+        sv = Direct()
+        sv.prepare(model.assemble(scale))
+        u = np.asarray(sv.solve(model.loads())).reshape(model.n_dof, -1)
+        sol = Solution(model=model, mesh=g, displacements=u, interpolated=scale, density=rho)
+        dc = chain.pullback(x, comp.grad_field(sol))
+        dg = chain.pullback_density(x, con.grad_field(sol)).reshape(1, -1)
+        res = opt.step(x, comp.value(sol), dc, np.array([con.value(sol)]), dg)
+        x = res.x_next
+        if res.change < 1e-3:
+            converged = True
+            break
+    assert converged  # MMA reaches the convergence threshold on the real problem

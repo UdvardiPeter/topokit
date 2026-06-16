@@ -22,7 +22,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from topokit.optimizers._base import OptimizerError, StepResult, check_step_inputs
+from topokit.optimizers._base import OptimizerError, StepResult, check_step_inputs, validate_bounds
 
 _F64 = npt.NDArray[np.float64]
 
@@ -208,6 +208,12 @@ class MMA:
     Handles ``m >= 1`` constraints. Stateful: the asymptotes and the two
     previous design points are kept across steps and serialized by
     :meth:`state` for checkpointing.
+
+    Unlike OC, MMA is **not** invariant to objective scaling: the asymptote
+    approximation depends on gradient magnitudes, so a badly scaled objective
+    can converge to a non-optimal point. Callers should scale the objective to
+    order 1 (e.g. compliance divided by its initial value); the orchestration
+    layer does this.
     """
 
     asyinit: float = 0.5
@@ -228,10 +234,7 @@ class MMA:
 
     def setup(self, n_vars: int, lower: _F64, upper: _F64) -> None:
         """Store the box bounds and reset the asymptote history."""
-        self._lower = np.asarray(lower, dtype=np.float64)
-        self._upper = np.asarray(upper, dtype=np.float64)
-        if self._lower.shape != (n_vars,) or self._upper.shape != (n_vars,):
-            raise OptimizerError("lower/upper must have shape (n_vars,)")
+        self._lower, self._upper = validate_bounds(n_vars, lower, upper)
         self._k = 0
         self._xold1 = None
         self._xold2 = None

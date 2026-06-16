@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from topokit.optimizers._base import OptimizerError, StepResult, check_step_inputs
+from topokit.optimizers._base import OptimizerError, StepResult, check_step_inputs, validate_bounds
 
 _F64 = npt.NDArray[np.float64]
 
@@ -44,10 +44,7 @@ class OC:
 
     def setup(self, n_vars: int, lower: _F64, upper: _F64) -> None:
         """Store the box bounds."""
-        self._lower = np.asarray(lower, dtype=np.float64)
-        self._upper = np.asarray(upper, dtype=np.float64)
-        if self._lower.shape != (n_vars,) or self._upper.shape != (n_vars,):
-            raise OptimizerError("lower/upper must have shape (n_vars,)")
+        self._lower, self._upper = validate_bounds(n_vars, lower, upper)
 
     def step(self, x: _F64, f0: float, df0: _F64, g: _F64, dg: _F64) -> StepResult:
         """One OC update; bisects the multiplier so the constraint is active."""
