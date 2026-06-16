@@ -191,6 +191,13 @@ def solve_subproblem(sp: MMASubproblem) -> SubproblemSolution:
             x, y, z, lam, xsi, eta, mu, zet, s = xn, yn, zn, lamn, xsin, etan, mun, zetn, sn
         eps *= 0.1
 
+    # converged solves leave a residual ~ the final barrier (1e-6); a large
+    # residual means the interior point stalled and the result is unusable.
+    if np.linalg.norm(residu, np.inf) > 1e-3:
+        raise OptimizerError(
+            f"MMA subproblem solver did not converge (residual "
+            f"{np.linalg.norm(residu, np.inf):.2e})"
+        )
     return SubproblemSolution(x=x, y=y, z=float(z), lam=lam)
 
 

@@ -183,22 +183,90 @@ def test_mma_two_constraints_matches_scipy() -> None:
     np.testing.assert_allclose(x, ref.x, atol=2e-3)
 
 
-def test_mma_asymptote_oscillation_shrinks_monotone_expands() -> None:
+def test_mma_asymptote_band_stays_positive_under_monotone_march() -> None:
+    # a steady monotone design march keeps the asymptote band open (gamma>=1),
+    # exercising the k>=3 update; oscillation (handled by gamma=asydecr) shrinks
+    # it, which the convergence test indirectly covers.
     opt = _mma(1)
-    # feed a monotone-increasing sequence then an oscillation; inspect state
-    df0 = np.array([-1.0])
-    g = np.array([-1.0])  # slack, never binding
-    dg = np.array([[0.5]])
-    x = np.array([0.2])
+    x = np.array([0.5])
     widths = []
-    for _ in range(5):
-        res = opt.step(x, 0.0, df0, g, dg)
-        st = opt.state()
-        widths.append(float(st["upp"][0] - st["low"][0]))
-        x = res.x_next
-    # after the first two init iterations, a monotone march should not collapse
-    assert widths[-1] > 0.0
+    for v in (0.6, 0.7, 0.8, 0.9):
+        opt.step(x, 0.0, np.array([-1.0]), np.array([-10.0]), np.array([[0.0]]))
+        widths.append(float(opt.state()["upp"][0] - opt.state()["low"][0]))
+        x = np.array([v])
     assert all(w > 0.0 for w in widths)
+    assert widths[-1] >= widths[1] * 0.99  # not collapsing under a monotone march
+
+
+def test_mma_subproblem_infeasible_relaxation() -> None:
+    # when the subproblem is infeasible in x, y absorbs the violation and the
+    # KKT stationarity gives lam ~ c + d*y (the path the early sign bug broke)
+    n, m = 6, 1
+    rng = np.random.default_rng(0)
+    low = rng.uniform(-2.0, -1.0, n)
+    upp = rng.uniform(1.0, 2.0, n)
+    alpha = low + 0.1 * (upp - low)
+    beta = upp - 0.1 * (upp - low)
+    xm = 0.5 * (alpha + beta)
+    p = rng.uniform(0.1, 1.0, (m, n))
+    q = rng.uniform(0.1, 1.0, (m, n))
+    g_mid = np.array([(p[0] / (upp - xm) + q[0] / (xm - low)).sum()])
+    sp = MMASubproblem(
+        low=low,
+        upp=upp,
+        alpha=alpha,
+        beta=beta,
+        p0=rng.uniform(0.5, 2.0, n),
+        q0=rng.uniform(0.5, 2.0, n),
+        p=p,
+        q=q,
+        b=g_mid - 5.0,  # unreachable -> infeasible in x
+        a0=1.0,
+        a=np.zeros(m),
+        c=np.full(m, 1000.0),
+        d=np.ones(m),
+    )
+    sol = solve_subproblem(sp)
+    assert sol.y[0] > 0.1  # y takes up the violation
+    np.testing.assert_allclose(sol.lam[0], 1000.0 + sol.y[0], rtol=1e-3)
+
+
+def test_mma_negative_gradient_constraint() -> None:
+    # a ">=" style constraint has a negative gradient (the q-branch); MMA must
+    # still satisfy it. Forward validation for v1.x stress/displacement limits.
+    n = 20
+    rng = np.random.default_rng(2)
+    t = rng.uniform(0.0, 1.0, n)
+    opt = _mma(n)
+    x = np.full(n, 0.5)
+    for _ in range(120):
+        df0 = 2.0 * (x - t)
+        g = np.array([0.6 - x.mean()])  # mean(x) >= 0.6
+        dg = np.full((1, n), -1.0 / n)
+        res = opt.step(x, float(((x - t) ** 2).sum()), df0, g, dg)
+        x = res.x_next
+        if res.change < 1e-6:
+            break
+    assert x.mean() >= 0.6 - 1e-3
+
+
+def test_mma_converges_in_bounded_iterations() -> None:
+    n, V = 30, 0.3
+    rng = np.random.default_rng(1)
+    t = rng.uniform(0.0, 1.0, n)
+    opt = _mma(n)
+    x = np.full(n, V)
+    iters = 0
+    for it in range(1, 101):
+        iters = it
+        df0 = 2.0 * (x - t)
+        g = np.array([x.mean() / V - 1.0])
+        dg = np.full((1, n), (1.0 / n) / V)
+        res = opt.step(x, float(((x - t) ** 2).sum()), df0, g, dg)
+        x = res.x_next
+        if res.change < 1e-6:
+            break
+    assert iters < 60  # MMA converges briskly (no oscillation stall)
 
 
 def test_mma_state_roundtrip_identical_trajectory() -> None:
