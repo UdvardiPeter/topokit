@@ -24,7 +24,8 @@ Pre-alpha. Foundation layer only.
 | `topokit.parametrization` the unified SIMP chain | done |
 | `topokit.responses` compliance, volume, constraints | done |
 | `topokit.optimizers` OC (optimality criteria) | done |
-| MMA optimizer, Problem/Study | next |
+| `topokit.optimizers` OC + clean-room MMA | done |
+| Problem/Study orchestration | next |
 | CAD import/export, manufacturing constraints | planned |
 | Local daemon, Fusion 360 add-in | planned |
 
