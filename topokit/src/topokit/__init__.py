@@ -4,6 +4,7 @@
 
 from topokit.backend import default_backend
 from topokit.fem import LinearElasticity
+from topokit.optimizers import OC
 from topokit.parametrization import (
     SIMP,
     DensityFilter,
@@ -32,3 +33,4 @@ registry.register(
 )
 registry.register("responses", "compliance", Compliance, source="topokit.responses")
 registry.register("responses", "volume", Volume, source="topokit.responses")
+registry.register("optimizers", "oc", OC, source="topokit.optimizers")

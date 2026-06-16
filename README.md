@@ -23,7 +23,8 @@ Pre-alpha. Foundation layer only.
 | `topokit.solvers` direct + AMG-preconditioned CG | done |
 | `topokit.parametrization` the unified SIMP chain | done |
 | `topokit.responses` compliance, volume, constraints | done |
-| Optimizers (MMA/OC), Problem/Study | next |
+| `topokit.optimizers` OC (optimality criteria) | done |
+| MMA optimizer, Problem/Study | next |
 | CAD import/export, manufacturing constraints | planned |
 | Local daemon, Fusion 360 add-in | planned |
 

@@ -23,6 +23,7 @@ field containers, gradient verification harness). Numerics land next.
 | `topokit.solvers` | direct and AMG-preconditioned iterative solvers |
 | `topokit.parametrization` | the unified chain: symmetry, filters, projection, SIMP |
 | `topokit.responses` | compliance, volume, von Mises, constraint objects |
+| `topokit.optimizers` | OC optimizer (MMA next) |
 | `topokit.registry` | plugin resolution by group and name |
 | `topokit.events` | typed event bus for the optimization loop |
 | `topokit.fields` | validated field containers (design, element, nodal) |
