@@ -8,7 +8,7 @@ from topokit.fem import LinearElasticity, Material, PointLoad
 from topokit.fields import FieldSpec
 from topokit.mesh import StructuredGrid
 from topokit.optimizers import MMA, OC, Optimizer
-from topokit.parametrization import SIMP, DensityFilter
+from topokit.parametrization import SIMP, DensityFilter, SymmetryMap
 from topokit.problem import Problem, ProblemError, Study
 from topokit.responses import Compliance, Volume
 from topokit.selection import Box, PlaneSlab
@@ -224,3 +224,23 @@ def test_study_is_deterministic() -> None:
 def test_amg_solver_runs() -> None:
     result = Study(_problem(solver=AmgCG(tol=1e-9)), max_iter=15, tol=1e-3).run()
     assert result.objective > 0.0
+
+
+def test_symmetry_runs_in_reduced_space() -> None:
+    # SymmetryMap is a reduced-input link: the optimizer works in the reduced
+    # space, so n_vars < design-element count. Confirms the reduced gradient
+    # size flows through optimizer.setup/step and the design vars stay reduced.
+    model = _cantilever()
+    chain = SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | SIMP(p=3.0)
+    p = Problem(
+        model,
+        chain,
+        objective=Compliance(),
+        constraints=[Volume() <= 0.4],
+        optimizer=OC(move=0.2),
+    )
+    assert p.chain.n_vars < int(model.mesh.design.sum())  # space genuinely reduced
+    result = Study(p, max_iter=30, tol=1e-3).run()
+    assert result.x.size == p.chain.n_vars
+    assert result.history["objective"][-1] < result.history["objective"][0]
+    assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)

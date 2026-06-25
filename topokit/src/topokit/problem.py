@@ -220,7 +220,7 @@ class Study:
 
         c0 = None
         for i in range(1, self.max_iter + 1):
-            _sol, f0, df0, gvals, dgs, responses = self._evaluate(x)
+            sol, f0, df0, gvals, dgs, responses = self._evaluate(x)
             if c0 is None:
                 c0 = abs(f0) if abs(f0) > 1e-30 else 1.0  # objective normalization scale (MMA)
             step = p.optimizer.step(x, f0 / c0, df0 / c0, gvals, dgs)
@@ -239,7 +239,7 @@ class Study:
                 )
             )
             if self.snapshot_every and i % self.snapshot_every == 0:
-                self.events.publish(FieldSnapshot(iteration=i, rho=p.chain.physical_density(x)))
+                self.events.publish(FieldSnapshot(iteration=i, rho=sol.density))
 
             self._final = IterationState(iteration=i, x=x.copy(), objective=f0, change=step.change)
             yield self._final
