@@ -67,6 +67,18 @@ def test_problem_solver_auto_resolves() -> None:
     assert isinstance(explicit.solver, Direct)
 
 
+def test_problem_unknown_solver_string_raises() -> None:
+    with pytest.raises(ProblemError, match="solver"):
+        _problem(solver="bogus")
+
+
+def test_problem_accepts_prebound_chain() -> None:
+    model = _cantilever()
+    bound = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(model.mesh)
+    p = Problem(model, bound, objective=Compliance(), constraints=[Volume() <= 0.4])
+    assert p.chain is bound  # used as-is, not re-bound
+
+
 def test_study_reduces_compliance_with_oc() -> None:
     # OC plateaus on this grey (no-projection) cantilever rather than reaching a
     # tight change tol, so assert the optimization worked, not convergence.
@@ -134,6 +146,11 @@ def test_explicit_x0_validated() -> None:
     p = _problem()
     with pytest.raises(ProblemError, match="x0"):
         Study(p, x0=np.ones(5))  # wrong size
+
+
+def test_max_iter_must_be_positive() -> None:
+    with pytest.raises(ProblemError, match="max_iter"):
+        Study(_problem(), max_iter=0)
 
 
 def test_multi_load_runs() -> None:
