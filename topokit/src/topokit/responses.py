@@ -19,7 +19,7 @@ normalized to ``g <= 0`` form for the optimizer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, runtime_checkable
 
 import numpy as np
@@ -187,6 +187,7 @@ class Constraint:
     response: Response
     bound: float
     sense: str  # "<=" or ">="
+    label: str | None = None
 
     def __post_init__(self) -> None:
         if self.sense not in ("<=", ">="):
@@ -196,6 +197,20 @@ class Constraint:
     def field_basis(self) -> FieldBasis:
         """Return the field basis of the underlying response."""
         return self.response.field_basis
+
+    @property
+    def report_key(self) -> str:
+        """Key for this constraint in events and history (``label`` or the response name).
+
+        Two constraints on the same response (e.g. volume on different regions)
+        share a response name; give each a distinct ``label`` so the
+        orchestration layer can report them apart.
+        """
+        return self.label if self.label is not None else self.response.name
+
+    def labeled(self, label: str) -> Constraint:
+        """Return a copy reported under ``label``."""
+        return replace(self, label=label)
 
     def _scale(self) -> float:
         if self.bound == 0.0:

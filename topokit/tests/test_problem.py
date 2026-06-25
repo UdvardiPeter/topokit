@@ -79,6 +79,35 @@ def test_problem_accepts_prebound_chain() -> None:
     assert p.chain is bound  # used as-is, not re-bound
 
 
+def test_duplicate_constraint_names_raise() -> None:
+    # both Volume constraints report under "volume"; reporting would silently
+    # drop one, so Problem rejects the collision and points at .labeled(...)
+    with pytest.raises(ProblemError, match="label"):
+        Problem(
+            _cantilever(),
+            DensityFilter(radius=1.5) | SIMP(p=3.0),
+            objective=Compliance(),
+            constraints=[Volume(region="design") <= 0.4, Volume(region="all") <= 0.6],
+            optimizer=MMA(),
+        )
+
+
+def test_labeled_constraints_reported_separately() -> None:
+    p = Problem(
+        _cantilever(),
+        DensityFilter(radius=1.5) | SIMP(p=3.0),
+        objective=Compliance(),
+        constraints=[
+            (Volume(region="design") <= 0.4).labeled("vol_design"),
+            (Volume(region="all") <= 0.6).labeled("vol_all"),
+        ],
+        optimizer=MMA(),
+    )
+    result = Study(p, max_iter=5, tol=0.0).run()
+    assert len(result.history["vol_design"]) == 5
+    assert len(result.history["vol_all"]) == 5
+
+
 def test_study_reduces_compliance_with_oc() -> None:
     # OC plateaus on this grey (no-projection) cantilever rather than reaching a
     # tight change tol, so assert the optimization worked, not convergence.

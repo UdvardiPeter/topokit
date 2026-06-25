@@ -74,6 +74,20 @@ class Problem:
             )
         self.objective = objective
         self.constraints = tuple(constraints)
+        # Events and history key responses by name; collisions would silently
+        # drop a constraint from the reporting, so reject them up front. The
+        # objective lives under "objective"; "change" is the step-size series.
+        reserved = {"objective", "change", objective.name}
+        seen: set[str] = set()
+        for c in self.constraints:
+            key = c.report_key
+            if key in reserved or key in seen:
+                raise ProblemError(
+                    f"constraint report key {key!r} collides with the objective, another "
+                    f"constraint, or a reserved history key; give the constraint a distinct "
+                    f"label via Constraint.labeled(...)"
+                )
+            seen.add(key)
         self.optimizer = optimizer if optimizer is not None else OC()
         if isinstance(solver, str):
             if solver != "auto":
@@ -166,7 +180,7 @@ class Study:
         for i, c in enumerate(p.constraints):
             gvals[i] = c.value(sol)
             dgs[i] = grad_to_x(c)
-            responses[c.response.name] = c.response.value(sol)
+            responses[c.report_key] = c.response.value(sol)
         return sol, f0, df0, gvals, dgs, responses
 
     def run(self) -> Result:
@@ -198,7 +212,7 @@ class Study:
         x = self._initial_x()
         self._history: dict[str, list[float]] = {"objective": [], "change": []}
         for c in p.constraints:
-            self._history[c.response.name] = []
+            self._history[c.report_key] = []
         self._converged = False
         self._reason = "max iterations reached"
         t0 = time.perf_counter()
