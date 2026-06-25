@@ -2,8 +2,10 @@
 
 Open-source topology optimization for engineers.
 
-**Status: pre-alpha.** The foundation layer exists (plugin registry, event bus,
-field containers, gradient verification harness). Numerics land next.
+**Status: pre-alpha.** The full numerical core runs end to end: a `Problem`
+assembles mesh, physics, parametrization, objective, constraints, and an
+optimizer, and a `Study` drives the loop to convergence. CAD I/O and
+manufacturing constraints land next.
 
 ## Goals
 
@@ -24,6 +26,7 @@ field containers, gradient verification harness). Numerics land next.
 | `topokit.parametrization` | the unified chain: symmetry, filters, projection, SIMP |
 | `topokit.responses` | compliance, volume, von Mises, constraint objects |
 | `topokit.optimizers` | OC and clean-room MMA optimizers |
+| `topokit.problem` | Problem assembly and the Study optimization loop |
 | `topokit.registry` | plugin resolution by group and name |
 | `topokit.events` | typed event bus for the optimization loop |
 | `topokit.fields` | validated field containers (design, element, nodal) |

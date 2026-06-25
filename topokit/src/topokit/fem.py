@@ -141,6 +141,11 @@ class PhysicsModel(Protocol):
     expected_field: ClassVar[FieldSpec]
 
     @property
+    def mesh(self) -> StructuredGrid:
+        """The discretization the model is built on."""
+        ...
+
+    @property
     def n_dof(self) -> int:
         """Number of free DOFs."""
         ...

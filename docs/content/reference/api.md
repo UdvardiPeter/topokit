@@ -36,6 +36,10 @@
 
 ::: topokit.optimizers
 
+## topokit.problem
+
+::: topokit.problem
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance

@@ -12,11 +12,32 @@ from topokit.parametrization import (
     SensitivityFilter,
     SymmetryMap,
 )
+from topokit.problem import Problem, Result, Study
 from topokit.registry import registry
 from topokit.responses import Compliance, Volume
 from topokit.solvers import AmgCG, Direct
 
 __version__ = "0.0.1.dev0"
+
+__all__ = [
+    "MMA",
+    "OC",
+    "SIMP",
+    "AmgCG",
+    "Compliance",
+    "DensityFilter",
+    "Direct",
+    "Heaviside",
+    "LinearElasticity",
+    "Problem",
+    "Result",
+    "SensitivityFilter",
+    "Study",
+    "SymmetryMap",
+    "Volume",
+    "default_backend",
+    "registry",
+]
 
 # Convention: the backends group stores instances; component groups
 # (physics, optimizers, solvers, ...) store classes.
