@@ -265,3 +265,22 @@ def test_kkt_residual_flags_feasibility_and_stationarity() -> None:
 
 def test_step_result_kkt_defaults_zero() -> None:
     assert StepResult(x_next=np.zeros(1), change=0.0).kkt == 0.0
+
+
+def test_oc_reports_kkt_decreasing() -> None:
+    # a small convex compliance-like problem; kkt should fall as OC converges
+    n = 8
+    opt = _oc(n)
+    x = np.full(n, 0.5)
+    df0 = -np.arange(1.0, n + 1.0)  # increasing variables lowers f
+    dg = np.ones((1, n)) / n  # volume
+    first = last = None
+    for _ in range(40):
+        g = np.array([x.mean() - 0.4])
+        r = opt.step(x, float(-(df0 * x).sum()), df0, g, dg)
+        first = r.kkt if first is None else first
+        last = r.kkt
+        x = r.x_next
+    assert last is not None and first is not None
+    assert np.isfinite(last)
+    assert last < first
