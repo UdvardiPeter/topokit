@@ -104,6 +104,54 @@ class Problem:
         return 0.5
 
 
+@dataclass(frozen=True)
+class Stage:
+    """One continuation stage.
+
+    Holds the SIMP ``p`` and Heaviside ``beta`` for the stage plus the
+    per-stage convergence cap/tol (E6 ``200/stage``).
+    """
+
+    p: float
+    beta: float
+    max_iter: int = 200
+    tol: float = 0.01
+
+    def __post_init__(self) -> None:
+        if self.p < 1.0:
+            raise ProblemError(f"stage p must be >= 1, got {self.p}")
+        if self.beta <= 0.0:
+            raise ProblemError(f"stage beta must be > 0, got {self.beta}")
+        if self.max_iter < 1:
+            raise ProblemError(f"stage max_iter must be >= 1, got {self.max_iter}")
+        if self.tol < 0.0:
+            raise ProblemError(f"stage tol must be >= 0, got {self.tol}")
+
+
+@dataclass(frozen=True)
+class Schedule:
+    """An ordered tuple of continuation stages (E7, introspectable/replaceable)."""
+
+    stages: tuple[Stage, ...]
+
+    def __post_init__(self) -> None:
+        if not self.stages:
+            raise ProblemError("schedule stages must not be empty")
+
+    @classmethod
+    def default(cls, *, max_iter: int = 200, tol: float = 0.01) -> Schedule:
+        """The doc-04 ramp: p 1->3, then beta doubling 1->32."""
+        pairs = [(1, 1), (2, 1), (3, 1), (3, 2), (3, 4), (3, 8), (3, 16), (3, 32)]
+        return cls(tuple(Stage(float(p), float(b), max_iter, tol) for p, b in pairs))
+
+    @classmethod
+    def single(
+        cls, *, p: float = 3.0, beta: float = 1.0, max_iter: int = 200, tol: float = 0.01
+    ) -> Schedule:
+        """One stage = no continuation (the 1.9a behavior)."""
+        return cls((Stage(p, beta, max_iter, tol),))
+
+
 @dataclass
 class IterationState:
     """The per-iteration state yielded by :meth:`Study.iterate`."""

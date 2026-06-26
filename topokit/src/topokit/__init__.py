@@ -12,7 +12,7 @@ from topokit.parametrization import (
     SensitivityFilter,
     SymmetryMap,
 )
-from topokit.problem import IterationState, Problem, Result, Study
+from topokit.problem import IterationState, Problem, Result, Schedule, Stage, Study
 from topokit.registry import registry
 from topokit.responses import Compliance, Volume
 from topokit.solvers import AmgCG, Direct
@@ -32,7 +32,9 @@ __all__ = [
     "LinearElasticity",
     "Problem",
     "Result",
+    "Schedule",
     "SensitivityFilter",
+    "Stage",
     "Study",
     "SymmetryMap",
     "Volume",
