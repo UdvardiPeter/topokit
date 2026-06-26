@@ -112,6 +112,7 @@ class IterationState:
     x: _F64
     objective: float
     change: float
+    kkt: float
 
 
 @dataclass
@@ -126,6 +127,7 @@ class Result:
     converged: bool
     reason: str
     timing: float
+    kkt: float
 
 
 @dataclass
@@ -198,6 +200,7 @@ class Study:
             converged=self._converged,
             reason=self._reason,
             timing=self._timing,
+            kkt=self._final.kkt,
         )
 
     def iterate(self) -> Iterator[IterationState]:
@@ -210,7 +213,7 @@ class Study:
         p = self.problem
         p.optimizer.setup(p.chain.n_vars, np.zeros(p.chain.n_vars), np.ones(p.chain.n_vars))
         x = self._initial_x()
-        self._history: dict[str, list[float]] = {"objective": [], "change": []}
+        self._history: dict[str, list[float]] = {"objective": [], "change": [], "kkt": []}
         for c in p.constraints:
             self._history[c.report_key] = []
         self._converged = False
@@ -227,6 +230,7 @@ class Study:
 
             self._history["objective"].append(f0)
             self._history["change"].append(step.change)
+            self._history["kkt"].append(step.kkt)
             for name, val in responses.items():
                 if name != p.objective.name:
                     self._history[name].append(val)
@@ -236,12 +240,15 @@ class Study:
                     design_change=step.change,
                     responses=responses,
                     wall_time=time.perf_counter() - t0,
+                    kkt=step.kkt,
                 )
             )
             if self.snapshot_every and i % self.snapshot_every == 0:
                 self.events.publish(FieldSnapshot(iteration=i, rho=sol.density))
 
-            self._final = IterationState(iteration=i, x=x.copy(), objective=f0, change=step.change)
+            self._final = IterationState(
+                iteration=i, x=x.copy(), objective=f0, change=step.change, kkt=step.kkt
+            )
             yield self._final
 
             if step.change < self.tol:

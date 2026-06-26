@@ -244,3 +244,13 @@ def test_symmetry_runs_in_reduced_space() -> None:
     assert result.x.size == p.chain.n_vars
     assert result.history["objective"][-1] < result.history["objective"][0]
     assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
+
+
+def test_study_reports_kkt() -> None:
+    study = Study(_problem(), max_iter=10, tol=0.0)
+    iters: list[IterationFinished] = []
+    study.events.subscribe(IterationFinished, iters.append)
+    result = study.run()
+    assert all(np.isfinite(it.kkt) for it in iters)
+    assert np.isfinite(result.kkt)
+    assert len(result.history["kkt"]) == result.iterations

@@ -26,8 +26,11 @@ class OptimizerError(ValueError):
 
 @dataclass(frozen=True)
 class StepResult:
-    """One optimizer step: the next point, the max design change, and the
-    first-order KKT/optimality residual (reported, not gating; E6)."""
+    """One optimizer step.
+
+    Carries the next point, the max design change, and the first-order
+    KKT/optimality residual (reported, not gating; E6).
+    """
 
     x_next: _F64
     change: float
