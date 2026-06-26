@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from topokit.optimizers import OC, Optimizer, OptimizerError
+from topokit.optimizers._base import StepResult, kkt_residual
 
 
 def _oc(n: int, move: float = 0.2, eta: float = 0.5) -> OC:
@@ -219,3 +220,48 @@ def test_step_before_setup_raises() -> None:
     opt = OC()
     with pytest.raises(OptimizerError, match="setup"):
         opt.step(np.full(4, 0.5), 0.0, -np.ones(4), np.array([0.0]), np.full((1, 4), 0.25))
+
+
+def test_kkt_residual_zero_at_unconstrained_interior_optimum() -> None:
+    # interior point, zero gradient, no constraints -> residual 0
+    x = np.array([0.5, 0.5])
+    res = kkt_residual(
+        x,
+        df0=np.zeros(2),
+        g=np.zeros(0),
+        dg=np.zeros((0, 2)),
+        lower=np.zeros(2),
+        upper=np.ones(2),
+        lam=np.zeros(0),
+    )
+    assert res == 0.0
+
+
+def test_kkt_residual_flags_feasibility_and_stationarity() -> None:
+    x = np.array([0.5])
+    # violated constraint g=0.3 (>0) dominates
+    res = kkt_residual(
+        x,
+        df0=np.zeros(1),
+        g=np.array([0.3]),
+        dg=np.zeros((1, 1)),
+        lower=np.zeros(1),
+        upper=np.ones(1),
+        lam=np.zeros(1),
+    )
+    assert res == 0.3
+    # nonzero Lagrangian gradient at an interior point -> stationarity residual
+    res2 = kkt_residual(
+        x,
+        df0=np.array([0.2]),
+        g=np.zeros(1),
+        dg=np.zeros((1, 1)),
+        lower=np.zeros(1),
+        upper=np.ones(1),
+        lam=np.zeros(1),
+    )
+    assert res2 == pytest.approx(0.2)
+
+
+def test_step_result_kkt_defaults_zero() -> None:
+    assert StepResult(x_next=np.zeros(1), change=0.0).kkt == 0.0
