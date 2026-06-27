@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
+"""The 2D reference problems (MBB beam and cantilever), 88-line setup."""
+
+from __future__ import annotations
+
+from topokit.fem import LinearElasticity, Material, PointLoad
+from topokit.mesh import StructuredGrid
+from topokit.optimizers import Optimizer
+from topokit.parametrization import SIMP, DensityFilter
+from topokit.problem import Problem
+from topokit.responses import Compliance, Volume
+from topokit.selection import NearPoint, PlaneSlab
+
+
+def _grid(nelx: int, nely: int) -> StructuredGrid:
+    return StructuredGrid.box(size=(float(nelx), float(nely)), shape=(nelx, nely))
+
+
+def mbb(
+    nelx: int,
+    nely: int,
+    *,
+    volfrac: float = 0.5,
+    penal: float = 3.0,
+    rmin: float = 2.4,
+    optimizer: Optimizer,
+) -> Problem:
+    """Half-MBB beam: left x-rollers, bottom-right y-support, top-left load."""
+    grid = _grid(nelx, nely)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    bottom_right = NearPoint((float(nelx), 0.0))
+    top_left = NearPoint((0.0, float(nely)))
+    model = LinearElasticity(
+        grid,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "x"), (bottom_right, "y")],
+        loads=[PointLoad(top_left, (0.0, -1.0))],
+    )
+    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    return Problem(
+        model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
+    )
+
+
+def cantilever(
+    nelx: int,
+    nely: int,
+    *,
+    volfrac: float = 0.4,
+    penal: float = 3.0,
+    rmin: float = 2.4,
+    optimizer: Optimizer,
+) -> Problem:
+    """Cantilever: left edge fully fixed, downward load at the mid-right edge."""
+    grid = _grid(nelx, nely)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    mid_right = NearPoint((float(nelx), nely / 2.0))
+    model = LinearElasticity(
+        grid,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(mid_right, (0.0, -1.0))],
+    )
+    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    return Problem(
+        model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
+    )
