@@ -325,6 +325,22 @@ def test_resume_matches_uninterrupted(tmp_path: Path) -> None:
     np.testing.assert_array_equal(out.x, full.x)
 
 
+def test_estimate_stiffness_bytes() -> None:
+    from topokit.problem import _estimate_stiffness_bytes
+
+    assert _estimate_stiffness_bytes(n_dof=1_000_000, nnz=80_000_000) == (
+        80_000_000 * 12 + 1_000_001 * 4
+    )
+
+
+def test_small_problem_does_not_warn() -> None:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any memory warning would fail the test
+        _problem(OC(move=0.2))  # the 20x10 cantilever is tiny
+
+
 def test_resume_rejects_wrong_problem(tmp_path: Path) -> None:
     path = tmp_path / "run.topo"
     Study(

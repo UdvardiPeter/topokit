@@ -19,7 +19,9 @@ density through ``chain.pullback_density``).
 
 from __future__ import annotations
 
+import os
 import time
+import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 
@@ -72,6 +74,38 @@ def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -
         for link in spec.links
     )
     return Chain(links).bind(mesh)
+
+
+_NODES_PER_ELEMENT = {"quad4": 4, "hex8": 8}
+
+
+def _estimate_stiffness_bytes(n_dof: int, nnz: int) -> int:
+    """Rough CSR float64 stiffness-matrix size: data + indices + indptr."""
+    return nnz * (8 + 4) + (n_dof + 1) * 4
+
+
+def _available_ram_bytes() -> int | None:
+    """Best-effort total RAM in bytes, or None if undetectable."""
+    try:
+        return int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
+    except (ValueError, OSError, AttributeError):
+        return None
+
+
+def _warn_if_memory_tight(model: PhysicsModel) -> None:
+    """Warn (with numbers) if the estimated stiffness matrix may strain RAM."""
+    nen = _NODES_PER_ELEMENT.get(model.mesh.element_kind)
+    if nen is None:
+        return
+    nnz = model.mesh.n_elements * (nen * model.mesh.dim) ** 2
+    estimate = _estimate_stiffness_bytes(model.n_dof, nnz)
+    ram = _available_ram_bytes()
+    if ram is not None and estimate > 0.5 * ram:
+        warnings.warn(
+            f"estimated stiffness matrix ~{estimate / 1e9:.1f} GB may strain available "
+            f"RAM ~{ram / 1e9:.1f} GB; consider a coarser mesh or the AmgCG solver",
+            stacklevel=3,
+        )
 
 
 def _schedule_to_json(schedule: Schedule) -> list[dict[str, float]]:
@@ -130,6 +164,7 @@ class Problem:
             self.solver: LinearSolver = auto_solver(model.n_dof, model.mesh.dim)
         else:
             self.solver = solver
+        _warn_if_memory_tight(model)
 
     def default_volume_fraction(self) -> float:
         """Guess an initial design density from the first volume constraint."""
