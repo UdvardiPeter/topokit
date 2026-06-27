@@ -70,6 +70,13 @@ def test_continuation_runs_stages_and_emits_stage_events() -> None:
     assert result.iterations == len(result.history["objective"])
 
 
+def test_default_study_runs_continuation() -> None:
+    # schedule=None -> Schedule.default -> continuation ON (E7)
+    study = Study(_problem_proj(), max_iter=12, tol=1e-3)  # no schedule arg
+    result = study.run()
+    assert result.history["stage"][-1] >= 1  # more than one stage ran
+
+
 def test_continuation_dedups_when_no_heaviside() -> None:
     # DensityFilter|SIMP: beta-ramp stages collapse to the distinct p stages (1,2,3)
     p = _problem(OC(move=0.2))
@@ -143,7 +150,7 @@ def test_labeled_constraints_reported_separately() -> None:
         ],
         optimizer=MMA(),
     )
-    result = Study(p, max_iter=5, tol=0.0).run()
+    result = Study(p, schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0)).run()
     assert len(result.history["vol_design"]) == 5
     assert len(result.history["vol_all"]) == 5
 
@@ -151,7 +158,9 @@ def test_labeled_constraints_reported_separately() -> None:
 def test_study_reduces_compliance_with_oc() -> None:
     # OC plateaus on this grey (no-projection) cantilever rather than reaching a
     # tight change tol, so assert the optimization worked, not convergence.
-    result = Study(_problem(OC(move=0.2)), max_iter=120, tol=1e-3).run()
+    result = Study(
+        _problem(OC(move=0.2)), schedule=Schedule.single(p=3.0, max_iter=120, tol=1e-3)
+    ).run()
     assert result.history["objective"][-1] < 0.5 * result.history["objective"][0]
     assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
 
@@ -159,13 +168,23 @@ def test_study_reduces_compliance_with_oc() -> None:
 def test_study_with_mma_matches_oc() -> None:
     # MMA needs objective normalization (Study supplies it); without it MMA
     # would converge wrong. Assert MMA reaches the same compliance as OC.
-    c_oc = Study(_problem(OC(move=0.2)), max_iter=120, tol=1e-3).run().objective
-    c_mma = Study(_problem(MMA()), max_iter=120, tol=1e-3).run().objective
+    c_oc = (
+        Study(_problem(OC(move=0.2)), schedule=Schedule.single(p=3.0, max_iter=120, tol=1e-3))
+        .run()
+        .objective
+    )
+    c_mma = (
+        Study(_problem(MMA()), schedule=Schedule.single(p=3.0, max_iter=120, tol=1e-3))
+        .run()
+        .objective
+    )
     assert abs(c_mma - c_oc) / c_oc < 0.05
 
 
 def test_study_emits_events() -> None:
-    study = Study(_problem(), max_iter=20, tol=0.0, snapshot_every=5)
+    study = Study(
+        _problem(), schedule=Schedule.single(p=3.0, max_iter=20, tol=0.0), snapshot_every=5
+    )
     started: list[StudyStarted] = []
     iters: list[IterationFinished] = []
     snaps: list[FieldSnapshot] = []
@@ -184,28 +203,32 @@ def test_study_emits_events() -> None:
 
 
 def test_iterate_matches_run() -> None:
-    states = list(Study(_problem(), max_iter=15, tol=0.0).iterate())
+    states = list(
+        Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=15, tol=0.0)).iterate()
+    )
     assert len(states) == 15
-    final_iter = Study(_problem(), max_iter=15, tol=0.0).run()
+    final_iter = Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=15, tol=0.0)).run()
     np.testing.assert_allclose(states[-1].x, final_iter.x)
 
 
 def test_convergence_stops_at_tol() -> None:
     # MMA reaches a tight change tol on the cantilever (~78 iters); OC plateaus
-    result = Study(_problem(MMA()), max_iter=200, tol=1e-3).run()
+    result = Study(_problem(MMA()), schedule=Schedule.single(p=3.0, max_iter=200, tol=1e-3)).run()
     assert result.converged
     assert result.iterations < 200
 
 
 def test_convergence_stops_at_max_iter() -> None:
-    result = Study(_problem(OC(move=0.2)), max_iter=3, tol=1e-12).run()
+    result = Study(
+        _problem(OC(move=0.2)), schedule=Schedule.single(p=3.0, max_iter=3, tol=1e-12)
+    ).run()
     assert not result.converged
     assert result.iterations == 3
     assert "max" in result.reason.lower()
 
 
 def test_x0_default_uses_volume_fraction() -> None:
-    study = Study(_problem(), max_iter=1, tol=0.0)
+    study = Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=1, tol=0.0))
     states = list(study.iterate())
     # first physical density averages near the volume target before optimization moves it
     assert 0.3 < states[0].x.mean() < 0.5  # started near vf=0.4
@@ -243,26 +266,28 @@ def test_multi_load_runs() -> None:
         constraints=[Volume() <= 0.4],
         optimizer=OC(move=0.2),
     )
-    result = Study(p, max_iter=30, tol=1e-3).run()
+    result = Study(p, schedule=Schedule.single(p=3.0, max_iter=30, tol=1e-3)).run()
     assert result.objective > 0.0
     assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
 
 
 def test_result_fields_and_history() -> None:
-    result = Study(_problem(), max_iter=10, tol=0.0).run()
+    result = Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=10, tol=0.0)).run()
     assert result.design.values.shape == (_cantilever().mesh.n_elements,)
     assert len(result.history["objective"]) == result.iterations == 10
     assert result.timing >= 0.0
 
 
 def test_study_is_deterministic() -> None:
-    r1 = Study(_problem(MMA()), max_iter=15, tol=0.0).run()
-    r2 = Study(_problem(MMA()), max_iter=15, tol=0.0).run()
+    r1 = Study(_problem(MMA()), schedule=Schedule.single(p=3.0, max_iter=15, tol=0.0)).run()
+    r2 = Study(_problem(MMA()), schedule=Schedule.single(p=3.0, max_iter=15, tol=0.0)).run()
     np.testing.assert_array_equal(r1.x, r2.x)
 
 
 def test_amg_solver_runs() -> None:
-    result = Study(_problem(solver=AmgCG(tol=1e-9)), max_iter=15, tol=1e-3).run()
+    result = Study(
+        _problem(solver=AmgCG(tol=1e-9)), schedule=Schedule.single(p=3.0, max_iter=15, tol=1e-3)
+    ).run()
     assert result.objective > 0.0
 
 
@@ -280,7 +305,7 @@ def test_symmetry_runs_in_reduced_space() -> None:
         optimizer=OC(move=0.2),
     )
     assert p.chain.n_vars < int(model.mesh.design.sum())  # space genuinely reduced
-    result = Study(p, max_iter=30, tol=1e-3).run()
+    result = Study(p, schedule=Schedule.single(p=3.0, max_iter=30, tol=1e-3)).run()
     assert result.x.size == p.chain.n_vars
     assert result.history["objective"][-1] < result.history["objective"][0]
     assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
@@ -310,7 +335,7 @@ def test_staged_chains_equal_when_params_unchanged() -> None:
 
 
 def test_study_reports_kkt() -> None:
-    study = Study(_problem(), max_iter=10, tol=0.0)
+    study = Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=10, tol=0.0))
     iters: list[IterationFinished] = []
     study.events.subscribe(IterationFinished, iters.append)
     result = study.run()

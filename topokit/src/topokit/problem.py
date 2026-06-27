@@ -73,17 +73,6 @@ def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -
     return Chain(links).bind(mesh)
 
 
-def _authored_params(spec: Chain) -> tuple[float, float]:
-    """Read the chain's authored SIMP ``p`` and Heaviside ``beta`` (the single-stage default)."""
-    p, beta = 3.0, 1.0
-    for link in spec.links:
-        if isinstance(link, SIMP):
-            p = link.p
-        elif isinstance(link, Heaviside):
-            beta = link.beta
-    return p, beta
-
-
 class Problem:
     """A validated topology-optimization problem ready to run."""
 
@@ -226,10 +215,8 @@ class Study:
         if self.max_iter < 1:
             raise ProblemError(f"max_iter must be >= 1, got {self.max_iter}")
         if self.schedule is None:
-            # single stage at the chain's authored p/beta (continuation off);
-            # Task 2.4 flips this to Schedule.default (E7).
-            p, beta = _authored_params(self.problem.chain.spec)
-            self.schedule = Schedule.single(p=p, beta=beta, max_iter=self.max_iter, tol=self.tol)
+            # continuation ON by default (E7); max_iter/tol feed the per-stage caps
+            self.schedule = Schedule.default(max_iter=self.max_iter, tol=self.tol)
         if self.x0 is not None:
             x0 = np.asarray(self.x0, dtype=np.float64)
             if x0.shape != (self.problem.chain.n_vars,):
