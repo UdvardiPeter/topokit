@@ -3,13 +3,19 @@
 import numpy as np
 import pytest
 
-from topokit.events import FieldSnapshot, IterationFinished, StudyFinished, StudyStarted
+from topokit.events import (
+    FieldSnapshot,
+    IterationFinished,
+    StageFinished,
+    StudyFinished,
+    StudyStarted,
+)
 from topokit.fem import LinearElasticity, Material, PointLoad
 from topokit.fields import FieldSpec
 from topokit.mesh import StructuredGrid
 from topokit.optimizers import MMA, OC, Optimizer
-from topokit.parametrization import SIMP, DensityFilter, SymmetryMap
-from topokit.problem import Problem, ProblemError, Study
+from topokit.parametrization import SIMP, DensityFilter, Heaviside, SymmetryMap
+from topokit.problem import Problem, ProblemError, Schedule, Study
 from topokit.responses import Compliance, Volume
 from topokit.selection import Box, PlaneSlab
 from topokit.solvers import AmgCG, Direct, LinearSolver
@@ -38,6 +44,40 @@ def _problem(optimizer: Optimizer | None = None, solver: LinearSolver | str = "a
         optimizer=optimizer or OC(move=0.2),
         solver=solver,
     )
+
+
+def _problem_proj(optimizer: Optimizer | None = None) -> Problem:
+    model = _cantilever()
+    chain = DensityFilter(radius=1.5) | Heaviside(beta=1.0) | SIMP(p=3.0)
+    return Problem(
+        model,
+        chain,
+        objective=Compliance(),
+        constraints=[Volume() <= 0.4],
+        optimizer=optimizer or OC(move=0.2),
+    )
+
+
+def test_continuation_runs_stages_and_emits_stage_events() -> None:
+    p = _problem_proj()
+    stages_seen: list[StageFinished] = []
+    study = Study(p, schedule=Schedule.default(max_iter=15, tol=1e-3))
+    study.events.subscribe(StageFinished, stages_seen.append)
+    result = study.run()
+    assert len(stages_seen) == 8  # all stages executed (Heaviside present)
+    assert result.history["stage"][-1] == 7  # zero-based last stage index
+    assert result.history["stage"][0] == 0
+    assert result.iterations == len(result.history["objective"])
+
+
+def test_continuation_dedups_when_no_heaviside() -> None:
+    # DensityFilter|SIMP: beta-ramp stages collapse to the distinct p stages (1,2,3)
+    p = _problem(OC(move=0.2))
+    stages_seen: list[StageFinished] = []
+    study = Study(p, schedule=Schedule.default(max_iter=10, tol=1e-3))
+    study.events.subscribe(StageFinished, stages_seen.append)
+    study.run()
+    assert len(stages_seen) == 3
 
 
 def test_problem_validates_field_mismatch() -> None:
@@ -247,15 +287,15 @@ def test_symmetry_runs_in_reduced_space() -> None:
 
 
 def test_staged_chain_overrides_p_and_beta() -> None:
-    from topokit.parametrization import Heaviside
     from topokit.problem import _staged_chain
 
     model = _cantilever()
     spec = DensityFilter(radius=1.5) | Heaviside(beta=1.0) | SIMP(p=3.0)
     staged = _staged_chain(spec, model.mesh, p=2.0, beta=8.0)
-    links = {type(link).__name__: link for link in staged.spec.links}
-    assert links["SIMP"].p == 2.0
-    assert links["Heaviside"].beta == 8.0
+    simp = next(link for link in staged.spec.links if isinstance(link, SIMP))
+    heav = next(link for link in staged.spec.links if isinstance(link, Heaviside))
+    assert simp.p == 2.0
+    assert heav.beta == 8.0
 
 
 def test_staged_chains_equal_when_params_unchanged() -> None:

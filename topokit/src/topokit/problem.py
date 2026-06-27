@@ -30,6 +30,7 @@ from topokit.events import (
     EventBus,
     FieldSnapshot,
     IterationFinished,
+    StageFinished,
     StudyFinished,
     StudyStarted,
 )
@@ -70,6 +71,17 @@ def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -
         for link in spec.links
     )
     return Chain(links).bind(mesh)
+
+
+def _authored_params(spec: Chain) -> tuple[float, float]:
+    """Read the chain's authored SIMP ``p`` and Heaviside ``beta`` (the single-stage default)."""
+    p, beta = 3.0, 1.0
+    for link in spec.links:
+        if isinstance(link, SIMP):
+            p = link.p
+        elif isinstance(link, Heaviside):
+            beta = link.beta
+    return p, beta
 
 
 class Problem:
@@ -180,6 +192,7 @@ class IterationState:
     objective: float
     change: float
     kkt: float
+    stage: int
 
 
 @dataclass
@@ -202,6 +215,7 @@ class Study:
     """Runs the optimization loop for a :class:`Problem`."""
 
     problem: Problem
+    schedule: Schedule | None = None
     max_iter: int = 200
     tol: float = 0.01
     x0: _F64 | None = None
@@ -211,6 +225,11 @@ class Study:
     def __post_init__(self) -> None:
         if self.max_iter < 1:
             raise ProblemError(f"max_iter must be >= 1, got {self.max_iter}")
+        if self.schedule is None:
+            # single stage at the chain's authored p/beta (continuation off);
+            # Task 2.4 flips this to Schedule.default (E7).
+            p, beta = _authored_params(self.problem.chain.spec)
+            self.schedule = Schedule.single(p=p, beta=beta, max_iter=self.max_iter, tol=self.tol)
         if self.x0 is not None:
             x0 = np.asarray(self.x0, dtype=np.float64)
             if x0.shape != (self.problem.chain.n_vars,):
@@ -224,11 +243,13 @@ class Study:
             return x0
         return self.problem.chain.initial_design(self.problem.default_volume_fraction())
 
-    def _evaluate(self, x: _F64) -> tuple[Solution, float, _F64, _F64, _F64, dict[str, float]]:
-        """Solve the physics at ``x`` and return objective/constraint values+grads."""
+    def _evaluate(
+        self, x: _F64, chain: BoundChain
+    ) -> tuple[Solution, float, _F64, _F64, _F64, dict[str, float]]:
+        """Solve the physics at ``x`` through ``chain`` and return values+grads."""
         p = self.problem
-        scale = p.chain.apply(x)
-        rho = p.chain.physical_density(x)
+        scale = chain.apply(x)
+        rho = chain.physical_density(x)
         p.solver.prepare(p.model.assemble(scale))
         u = np.atleast_2d(np.asarray(p.solver.solve(p.model.loads()))).reshape(p.model.n_dof, -1)
         sol = Solution(
@@ -238,8 +259,8 @@ class Study:
         def grad_to_x(thing: Response | Constraint) -> _F64:
             gf = thing.grad_field(sol)
             if thing.field_basis == "interpolated":
-                return np.asarray(p.chain.pullback(x, gf))
-            return np.asarray(p.chain.pullback_density(x, gf))
+                return np.asarray(chain.pullback(x, gf))
+            return np.asarray(chain.pullback_density(x, gf))
 
         f0 = p.objective.value(sol)
         df0 = grad_to_x(p.objective)
@@ -253,13 +274,14 @@ class Study:
         return sol, f0, df0, gvals, dgs, responses
 
     def run(self) -> Result:
-        """Run to convergence or the iteration cap, firing events."""
+        """Run every continuation stage to convergence or the cap, firing events."""
         for _ in self.iterate():
             pass
-        p = self.problem
         x = self._final.x  # the evaluated design (paired with self._final.objective)
         return Result(
-            design=DesignField(p.chain.physical_density(x), p.model.mesh, name="density"),
+            design=DesignField(
+                self._final_chain.physical_density(x), self.problem.model.mesh, name="density"
+            ),
             x=x,
             objective=self._final.objective,
             history=self._history,
@@ -271,66 +293,92 @@ class Study:
         )
 
     def iterate(self) -> Iterator[IterationState]:
-        """Yield one :class:`IterationState` per iteration; the shared loop body.
+        """Yield one :class:`IterationState` per iteration across all stages.
 
         Each yielded state pairs the *evaluated* design ``x`` with the
-        objective measured at that ``x``, so a result built from the last
-        state is self-consistent.
+        objective measured at that ``x``. Stages override the chain's SIMP
+        ``p``/Heaviside ``beta`` (Option A); an executed stage warm-starts from
+        the previous stage's ``x`` but resets the optimizer and ``c0``.
         """
         p = self.problem
-        p.optimizer.setup(p.chain.n_vars, np.zeros(p.chain.n_vars), np.ones(p.chain.n_vars))
+        assert self.schedule is not None
         x = self._initial_x()
-        self._history: dict[str, list[float]] = {"objective": [], "change": [], "kkt": []}
+        self._history: dict[str, list[float]] = {
+            "objective": [],
+            "change": [],
+            "kkt": [],
+            "stage": [],
+        }
         for c in p.constraints:
             self._history[c.report_key] = []
         self._converged = False
         self._reason = "max iterations reached"
         t0 = time.perf_counter()
-        self.events.publish(StudyStarted(config={"max_iter": self.max_iter, "tol": self.tol}))
+        self.events.publish(StudyStarted(config={"stages": len(self.schedule.stages)}))
 
-        c0 = None
-        for i in range(1, self.max_iter + 1):
-            sol, f0, df0, gvals, dgs, responses = self._evaluate(x)
-            if c0 is None:
-                c0 = abs(f0) if abs(f0) > 1e-30 else 1.0  # objective normalization scale (MMA)
-            step = p.optimizer.step(x, f0 / c0, df0 / c0, gvals, dgs)
+        iteration = 0
+        prev_spec: Chain | None = None
+        for stage_index, stage in enumerate(self.schedule.stages):
+            chain = _staged_chain(p.chain.spec, p.model.mesh, p=stage.p, beta=stage.beta)
+            if chain.spec == prev_spec:
+                continue  # dedup: identical to the previous executed stage
+            prev_spec = chain.spec
+            self._final_chain = chain
+            p.optimizer.setup(chain.n_vars, np.zeros(chain.n_vars), np.ones(chain.n_vars))
+            c0: float | None = None
+            self._converged = False
+            stage_reason = "stage max iterations reached"
 
-            self._history["objective"].append(f0)
-            self._history["change"].append(step.change)
-            self._history["kkt"].append(step.kkt)
-            for name, val in responses.items():
-                if name != p.objective.name:
-                    self._history[name].append(val)
-            self.events.publish(
-                IterationFinished(
-                    iteration=i,
-                    design_change=step.change,
-                    responses=responses,
-                    wall_time=time.perf_counter() - t0,
-                    kkt=step.kkt,
+            for _ in range(1, stage.max_iter + 1):
+                iteration += 1
+                sol, f0, df0, gvals, dgs, responses = self._evaluate(x, chain)
+                if c0 is None:
+                    c0 = abs(f0) if abs(f0) > 1e-30 else 1.0  # normalization scale (MMA)
+                step = p.optimizer.step(x, f0 / c0, df0 / c0, gvals, dgs)
+
+                self._history["objective"].append(f0)
+                self._history["change"].append(step.change)
+                self._history["kkt"].append(step.kkt)
+                self._history["stage"].append(float(stage_index))
+                for name, val in responses.items():
+                    if name != p.objective.name:
+                        self._history[name].append(val)
+                self.events.publish(
+                    IterationFinished(
+                        iteration=iteration,
+                        design_change=step.change,
+                        responses=responses,
+                        wall_time=time.perf_counter() - t0,
+                        kkt=step.kkt,
+                        stage=stage_index,
+                    )
                 )
-            )
-            if self.snapshot_every and i % self.snapshot_every == 0:
-                self.events.publish(FieldSnapshot(iteration=i, rho=sol.density))
+                if self.snapshot_every and iteration % self.snapshot_every == 0:
+                    self.events.publish(FieldSnapshot(iteration=iteration, rho=sol.density))
 
-            self._final = IterationState(
-                iteration=i, x=x.copy(), objective=f0, change=step.change, kkt=step.kkt
-            )
-            yield self._final
+                self._final = IterationState(
+                    iteration=iteration,
+                    x=x.copy(),
+                    objective=f0,
+                    change=step.change,
+                    kkt=step.kkt,
+                    stage=stage_index,
+                )
+                yield self._final
 
-            if step.change < self.tol:
-                self._converged = True
-                self._reason = f"design change {step.change:.2e} < tol {self.tol:g}"
-                break
-            x = step.x_next
+                if step.change < stage.tol:
+                    self._converged = True
+                    stage_reason = f"design change {step.change:.2e} < tol {stage.tol:g}"
+                    break
+                x = step.x_next
+
+            self._reason = stage_reason
+            self.events.publish(StageFinished(stage=stage_index, reason=stage_reason))
 
         self._timing = time.perf_counter() - t0
         self.events.publish(
             StudyFinished(
                 reason=self._reason,
-                summary={
-                    "iterations": len(self._history["objective"]),
-                    "converged": self._converged,
-                },
+                summary={"iterations": iteration, "converged": self._converged},
             )
         )
