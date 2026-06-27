@@ -271,6 +271,15 @@ def test_multi_load_runs() -> None:
     assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
 
 
+def test_result_tracks_best_feasible() -> None:
+    result = Study(
+        _problem(OC(move=0.2)), schedule=Schedule.single(p=3.0, max_iter=40, tol=1e-3)
+    ).run()
+    assert result.best_objective <= result.objective + 1e-9
+    assert result.best_x.shape == result.x.shape
+    assert result.best_design.values.shape == (_cantilever().mesh.n_elements,)
+
+
 def test_result_fields_and_history() -> None:
     result = Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=10, tol=0.0)).run()
     assert result.design.values.shape == (_cantilever().mesh.n_elements,)

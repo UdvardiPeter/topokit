@@ -191,6 +191,9 @@ class Result:
     design: DesignField
     x: _F64
     objective: float
+    best_design: DesignField
+    best_x: _F64
+    best_objective: float
     history: dict[str, list[float]]
     iterations: int
     converged: bool
@@ -265,12 +268,16 @@ class Study:
         for _ in self.iterate():
             pass
         x = self._final.x  # the evaluated design (paired with self._final.objective)
+        mesh = self.problem.model.mesh
         return Result(
-            design=DesignField(
-                self._final_chain.physical_density(x), self.problem.model.mesh, name="density"
-            ),
+            design=DesignField(self._final_chain.physical_density(x), mesh, name="density"),
             x=x,
             objective=self._final.objective,
+            best_design=DesignField(
+                self._final_chain.physical_density(self._best_x), mesh, name="density"
+            ),
+            best_x=self._best_x,
+            best_objective=self._best_obj,
             history=self._history,
             iterations=self._final.iteration,
             converged=self._converged,
@@ -315,6 +322,13 @@ class Study:
             c0: float | None = None
             self._converged = False
             stage_reason = "stage max iterations reached"
+            # best-feasible tracking, reset per stage: compliance across stages
+            # is not comparable (different p), and early grey stages are not
+            # valid topologies, so "best" means the best iterate of this stage.
+            self._best_feasible = False
+            self._best_x = x.copy()
+            self._best_obj = float("inf")
+            self._best_g = float("inf")
 
             for _ in range(1, stage.max_iter + 1):
                 iteration += 1
@@ -322,6 +336,17 @@ class Study:
                 if c0 is None:
                     c0 = abs(f0) if abs(f0) > 1e-30 else 1.0  # normalization scale (MMA)
                 step = p.optimizer.step(x, f0 / c0, df0 / c0, gvals, dgs)
+
+                maxg = float(gvals.max()) if gvals.size else 0.0
+                if maxg <= 1e-4 and (not self._best_feasible or f0 < self._best_obj):
+                    self._best_feasible, self._best_x, self._best_obj, self._best_g = (
+                        True,
+                        x.copy(),
+                        f0,
+                        maxg,
+                    )
+                elif not self._best_feasible and maxg < self._best_g:
+                    self._best_x, self._best_obj, self._best_g = x.copy(), f0, maxg
 
                 self._history["objective"].append(f0)
                 self._history["change"].append(step.change)
