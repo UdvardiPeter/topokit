@@ -40,6 +40,10 @@
 
 ::: topokit.problem
 
+## topokit.checkpoint
+
+::: topokit.checkpoint
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance

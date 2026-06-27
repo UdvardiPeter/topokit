@@ -26,7 +26,8 @@ manufacturing constraints land next.
 | `topokit.parametrization` | the unified chain: symmetry, filters, projection, SIMP |
 | `topokit.responses` | compliance, volume, von Mises, constraint objects |
 | `topokit.optimizers` | OC and clean-room MMA optimizers |
-| `topokit.problem` | Problem assembly and the Study optimization loop |
+| `topokit.problem` | Problem, the Study loop, SIMP/Heaviside continuation |
+| `topokit.checkpoint` | single-file `.topo` checkpoint save and resume |
 | `topokit.registry` | plugin resolution by group and name |
 | `topokit.events` | typed event bus for the optimization loop |
 | `topokit.fields` | validated field containers (design, element, nodal) |
