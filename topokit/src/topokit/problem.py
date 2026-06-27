@@ -58,12 +58,13 @@ def _bind_chain(chain: Chain | BoundChain, model: PhysicsModel) -> BoundChain:
     return chain.bind(model.mesh)
 
 
-def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -> BoundChain:
-    """Rebind ``spec`` with SIMP ``p`` and Heaviside ``beta`` replaced (Option A).
+def _staged_spec(spec: Chain, *, p: float, beta: float) -> Chain:
+    """Return ``spec`` with SIMP ``p`` and Heaviside ``beta`` replaced (no bind).
 
     Continuation overrides the authored ``SIMP.p``/``Heaviside.beta`` with the
     stage values; other link types pass through. ``replace`` re-runs each
     link's ``__post_init__``, so a bad staged value fails loud before the stage.
+    Kept separate from the bind so the stage-dedup compares specs cheaply.
     """
     links = tuple(
         replace(link, p=p)
@@ -73,7 +74,12 @@ def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -
         else link
         for link in spec.links
     )
-    return Chain(links).bind(mesh)
+    return Chain(links)
+
+
+def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -> BoundChain:
+    """Rebind ``spec`` with the stage's SIMP ``p``/Heaviside ``beta`` (Option A)."""
+    return _staged_spec(spec, p=p, beta=beta).bind(mesh)
 
 
 _NODES_PER_ELEMENT = {"quad4": 4, "hex8": 8}
@@ -265,6 +271,7 @@ class Result:
     best_objective: float
     history: dict[str, list[float]]
     iterations: int
+    stages_run: int
     converged: bool
     reason: str
     timing: float
@@ -289,6 +296,10 @@ class Study:
         self._resume: _Resume | None = None
         if self.max_iter < 1:
             raise ProblemError(f"max_iter must be >= 1, got {self.max_iter}")
+        if self.checkpoint_path is not None:
+            parent = os.path.dirname(self.checkpoint_path)
+            if parent and not os.path.isdir(parent):
+                raise ProblemError(f"checkpoint directory does not exist: {parent!r}")
         if self.schedule is None:
             # continuation ON by default (E7); max_iter/tol feed the per-stage caps
             self.schedule = Schedule.default(max_iter=self.max_iter, tol=self.tol)
@@ -442,6 +453,7 @@ class Study:
             best_objective=self._best_obj,
             history=self._history,
             iterations=self._final.iteration,
+            stages_run=len({int(s) for s in self._history["stage"]}),
             converged=self._converged,
             reason=self._reason,
             timing=self._timing,
@@ -489,10 +501,11 @@ class Study:
         for stage_index, stage in enumerate(self.schedule.stages):
             if stage_index < start_stage:
                 continue  # already completed in a prior session (resume)
-            chain = _staged_chain(p.chain.spec, p.model.mesh, p=stage.p, beta=stage.beta)
-            if chain.spec == prev_spec:
-                continue  # dedup: identical to the previous executed stage
-            prev_spec = chain.spec
+            staged = _staged_spec(p.chain.spec, p=stage.p, beta=stage.beta)
+            if staged == prev_spec:
+                continue  # dedup: identical to the previous executed stage (no bind paid)
+            prev_spec = staged
+            chain = staged.bind(p.model.mesh)
             self._final_chain = chain
             p.optimizer.setup(chain.n_vars, np.zeros(chain.n_vars), np.ones(chain.n_vars))
             c0: float | None = None
@@ -573,8 +586,13 @@ class Study:
                     break
                 x = step.x_next
                 # checkpoint the next-iteration cursor (x is the design to resume from,
-                # the optimizer state is post-step, c0 is this stage's scale)
-                if self.checkpoint_path and iteration % self.checkpoint_every == 0:
+                # the optimizer state is post-step, c0 is this stage's scale);
+                # checkpoint_every <= 0 means "only the final write" (no per-iteration)
+                if (
+                    self.checkpoint_path
+                    and self.checkpoint_every > 0
+                    and iteration % self.checkpoint_every == 0
+                ):
                     self._checkpoint(stage_index, j + 1, iteration, x, c0)
 
             self._reason = stage_reason

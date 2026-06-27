@@ -18,7 +18,7 @@ from topokit.fields import FieldSpec
 from topokit.mesh import StructuredGrid
 from topokit.optimizers import MMA, OC, Optimizer
 from topokit.parametrization import SIMP, DensityFilter, Heaviside, SymmetryMap
-from topokit.problem import Problem, ProblemError, Schedule, Study
+from topokit.problem import Problem, ProblemError, Schedule, Stage, Study
 from topokit.responses import Compliance, Volume
 from topokit.selection import Box, PlaneSlab
 from topokit.solvers import AmgCG, Direct, LinearSolver
@@ -68,6 +68,7 @@ def test_continuation_runs_stages_and_emits_stage_events() -> None:
     study.events.subscribe(StageFinished, stages_seen.append)
     result = study.run()
     assert len(stages_seen) == 8  # all stages executed (Heaviside present)
+    assert result.stages_run == 8
     assert result.history["stage"][-1] == 7  # zero-based last stage index
     assert result.history["stage"][0] == 0
     assert result.iterations == len(result.history["objective"])
@@ -86,8 +87,9 @@ def test_continuation_dedups_when_no_heaviside() -> None:
     stages_seen: list[StageFinished] = []
     study = Study(p, schedule=Schedule.default(max_iter=10, tol=1e-3))
     study.events.subscribe(StageFinished, stages_seen.append)
-    study.run()
+    result = study.run()
     assert len(stages_seen) == 3
+    assert result.stages_run == 3
 
 
 def test_problem_validates_field_mismatch() -> None:
@@ -339,6 +341,42 @@ def test_small_problem_does_not_warn() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # any memory warning would fail the test
         _problem(OC(move=0.2))  # the 20x10 cantilever is tiny
+
+
+def test_checkpoint_every_zero_writes_only_final(tmp_path: Path) -> None:
+    # checkpoint_every <= 0 must not divide-by-zero; the final write still happens
+    path = tmp_path / "run.topo"
+    Study(
+        _problem(OC(move=0.2)),
+        schedule=Schedule.single(p=3.0, max_iter=6, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=0,
+    ).run()
+    assert path.exists()
+
+
+def test_checkpoint_bad_directory_raises(tmp_path: Path) -> None:
+    with pytest.raises(ProblemError, match="directory"):
+        Study(_problem(OC(move=0.2)), checkpoint_path=str(tmp_path / "nope" / "run.topo"))
+
+
+def test_resume_multistage_matches_uninterrupted(tmp_path: Path) -> None:
+    # two distinct p-stages; checkpoint lands in stage 1, resume must skip stage 0,
+    # restore stage 1, and finish -> bit-identical to the uninterrupted run.
+    full_sched = Schedule((Stage(2.0, 1.0, 6, 0.0), Stage(3.0, 1.0, 6, 0.0)))
+    full = Study(_problem(OC(move=0.2)), schedule=full_sched).run()
+
+    path = tmp_path / "run.topo"
+    Study(  # stage 1 capped at 3 -> stops at global iter 9, checkpointed there
+        _problem(OC(move=0.2)),
+        schedule=Schedule((Stage(2.0, 1.0, 6, 0.0), Stage(3.0, 1.0, 3, 0.0))),
+        checkpoint_path=str(path),
+        checkpoint_every=9,
+    ).run()
+    resumed = Study.resume(_problem(OC(move=0.2)), str(path))
+    resumed.schedule = full_sched
+    out = resumed.run()
+    np.testing.assert_array_equal(out.x, full.x)
 
 
 def test_resume_completed_run_raises(tmp_path: Path) -> None:
