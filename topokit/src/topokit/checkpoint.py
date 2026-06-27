@@ -32,7 +32,7 @@ def config_fingerprint(parts: tuple[Any, ...]) -> str:
 def write_topo(path: str, manifest: dict[str, Any], arrays: dict[str, _F64]) -> None:
     """Write a ``.topo`` atomically (temp file + ``os.replace``)."""
     buf = io.BytesIO()
-    np.savez(buf, **arrays)
+    np.savez(buf, **arrays)  # type: ignore[arg-type]  # numpy stub mistypes **kwds
     tmp = f"{path}.tmp"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest))

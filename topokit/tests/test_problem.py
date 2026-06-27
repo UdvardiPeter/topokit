@@ -1,8 +1,11 @@
 """Tests for the Problem/Study orchestration layer."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
+from topokit.checkpoint import read_topo
 from topokit.events import (
     FieldSnapshot,
     IterationFinished,
@@ -278,6 +281,19 @@ def test_result_tracks_best_feasible() -> None:
     assert result.best_objective <= result.objective + 1e-9
     assert result.best_x.shape == result.x.shape
     assert result.best_design.values.shape == (_cantilever().mesh.n_elements,)
+
+
+def test_study_writes_checkpoint(tmp_path: Path) -> None:
+    path = tmp_path / "run.topo"
+    Study(
+        _problem(OC(move=0.2)),
+        schedule=Schedule.single(p=3.0, max_iter=12, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=5,
+    ).run()
+    assert path.exists()
+    m, a = read_topo(str(path))
+    assert "x" in a and "fingerprint" in m and "c0" in m
 
 
 def test_result_fields_and_history() -> None:

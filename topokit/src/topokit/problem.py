@@ -26,6 +26,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 import numpy.typing as npt
 
+from topokit.checkpoint import SCHEMA_VERSION, config_fingerprint, write_topo
 from topokit.events import (
     EventBus,
     FieldSnapshot,
@@ -71,6 +72,20 @@ def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -
         for link in spec.links
     )
     return Chain(links).bind(mesh)
+
+
+def _schedule_to_json(schedule: Schedule) -> list[dict[str, float]]:
+    return [
+        {"p": s.p, "beta": s.beta, "max_iter": s.max_iter, "tol": s.tol} for s in schedule.stages
+    ]
+
+
+def _schedule_from_json(data: list[dict[str, float]]) -> Schedule:
+    return Schedule(
+        tuple(
+            Stage(p=d["p"], beta=d["beta"], max_iter=int(d["max_iter"]), tol=d["tol"]) for d in data
+        )
+    )
 
 
 class Problem:
@@ -212,6 +227,8 @@ class Study:
     tol: float = 0.01
     x0: _F64 | None = None
     snapshot_every: int = 5
+    checkpoint_path: str | None = None
+    checkpoint_every: int = 10
     events: EventBus = field(default_factory=EventBus)
 
     def __post_init__(self) -> None:
@@ -262,6 +279,59 @@ class Study:
             dgs[i] = grad_to_x(c)
             responses[c.report_key] = c.response.value(sol)
         return sol, f0, df0, gvals, dgs, responses
+
+    def _config_parts(self) -> tuple[object, ...]:
+        """Canonical view of the problem's structure for the checkpoint fingerprint."""
+        p = self.problem
+        assert self.schedule is not None
+        return (
+            tuple(p.model.mesh.shape),
+            tuple(float(s) for s in p.model.mesh.spacing),
+            int(p.model.n_dof),
+            repr(p.chain.spec),
+            p.objective.name,
+            tuple((c.report_key, float(c.bound), c.sense) for c in p.constraints),
+            type(p.optimizer).__name__,
+            tuple(tuple(sorted(d.items())) for d in _schedule_to_json(self.schedule)),
+        )
+
+    def _checkpoint(
+        self, stage_index: int, iter_in_stage: int, iteration: int, x: _F64, c0: float | None
+    ) -> None:
+        """Write the resumable state to ``checkpoint_path`` (atomic .topo)."""
+        if self.checkpoint_path is None:
+            return
+        assert self.schedule is not None
+        opt_state = self.problem.optimizer.state()
+        opt_scalars: dict[str, object] = {}
+        opt_arrays: dict[str, _F64] = {}
+        opt_none: list[str] = []
+        for k, v in opt_state.items():
+            if v is None:
+                opt_none.append(k)
+            elif isinstance(v, np.ndarray):
+                opt_arrays[f"opt__{k}"] = v
+            else:
+                opt_scalars[k] = v
+        manifest = {
+            "schema": SCHEMA_VERSION,
+            "fingerprint": config_fingerprint(self._config_parts()),
+            "schedule": _schedule_to_json(self.schedule),
+            "stage_index": stage_index,
+            "iter_in_stage": iter_in_stage,
+            "iteration": iteration,
+            "c0": c0,
+            "converged": self._converged,
+            "reason": self._reason,
+            "history": self._history,
+            "best_objective": self._best_obj,
+            "best_g": self._best_g,
+            "best_feasible": self._best_feasible,
+            "opt_scalars": opt_scalars,
+            "opt_none": opt_none,
+        }
+        arrays = {"x": np.asarray(x), "best_x": np.asarray(self._best_x), **opt_arrays}
+        write_topo(self.checkpoint_path, manifest, arrays)
 
     def run(self) -> Result:
         """Run every continuation stage to convergence or the cap, firing events."""
@@ -330,7 +400,7 @@ class Study:
             self._best_obj = float("inf")
             self._best_g = float("inf")
 
-            for _ in range(1, stage.max_iter + 1):
+            for j in range(1, stage.max_iter + 1):
                 iteration += 1
                 sol, f0, df0, gvals, dgs, responses = self._evaluate(x, chain)
                 if c0 is None:
@@ -383,10 +453,15 @@ class Study:
                     stage_reason = f"design change {step.change:.2e} < tol {stage.tol:g}"
                     break
                 x = step.x_next
+                # checkpoint the next-iteration cursor (x is the design to resume from,
+                # the optimizer state is post-step, c0 is this stage's scale)
+                if self.checkpoint_path and iteration % self.checkpoint_every == 0:
+                    self._checkpoint(stage_index, j + 1, iteration, x, c0)
 
             self._reason = stage_reason
             self.events.publish(StageFinished(stage=stage_index, reason=stage_reason))
 
+        self._checkpoint(stage_index, j + 1, iteration, x, c0)
         self._timing = time.perf_counter() - t0
         self.events.publish(
             StudyFinished(
