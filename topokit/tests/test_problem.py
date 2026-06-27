@@ -309,6 +309,35 @@ def test_study_is_deterministic() -> None:
     np.testing.assert_array_equal(r1.x, r2.x)
 
 
+def test_resume_matches_uninterrupted(tmp_path: Path) -> None:
+    full = Study(_problem(MMA()), schedule=Schedule.single(p=3.0, max_iter=30, tol=0.0)).run()
+
+    path = tmp_path / "run.topo"
+    Study(
+        _problem(MMA()),
+        schedule=Schedule.single(p=3.0, max_iter=12, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=12,
+    ).run()
+    resumed = Study.resume(_problem(MMA()), str(path))
+    resumed.schedule = Schedule.single(p=3.0, max_iter=30, tol=0.0)  # extend the cap
+    out = resumed.run()
+    np.testing.assert_array_equal(out.x, full.x)
+
+
+def test_resume_rejects_wrong_problem(tmp_path: Path) -> None:
+    path = tmp_path / "run.topo"
+    Study(
+        _problem(OC(move=0.2)),
+        schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=5,
+    ).run()
+    other = _problem_proj(OC(move=0.2))  # different chain (has Heaviside)
+    with pytest.raises(ProblemError, match="different problem"):
+        Study.resume(other, str(path))
+
+
 def test_amg_solver_runs() -> None:
     result = Study(
         _problem(solver=AmgCG(tol=1e-9)), schedule=Schedule.single(p=3.0, max_iter=15, tol=1e-3)

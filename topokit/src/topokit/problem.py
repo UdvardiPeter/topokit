@@ -26,7 +26,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 import numpy.typing as npt
 
-from topokit.checkpoint import SCHEMA_VERSION, config_fingerprint, write_topo
+from topokit.checkpoint import SCHEMA_VERSION, config_fingerprint, read_topo, write_topo
 from topokit.events import (
     EventBus,
     FieldSnapshot,
@@ -188,6 +188,25 @@ class Schedule:
 
 
 @dataclass
+class _Resume:
+    """The restored cursor for :meth:`Study.resume` (internal)."""
+
+    stage_index: int
+    iter_in_stage: int
+    iteration: int
+    x: _F64
+    c0: float
+    opt_state: dict[str, object]
+    history: dict[str, list[float]]
+    best_x: _F64
+    best_obj: float
+    best_g: float
+    best_feasible: bool
+    converged: bool
+    reason: str
+
+
+@dataclass
 class IterationState:
     """The per-iteration state yielded by :meth:`Study.iterate`."""
 
@@ -232,6 +251,7 @@ class Study:
     events: EventBus = field(default_factory=EventBus)
 
     def __post_init__(self) -> None:
+        self._resume: _Resume | None = None
         if self.max_iter < 1:
             raise ProblemError(f"max_iter must be >= 1, got {self.max_iter}")
         if self.schedule is None:
@@ -279,6 +299,39 @@ class Study:
             dgs[i] = grad_to_x(c)
             responses[c.report_key] = c.response.value(sol)
         return sol, f0, df0, gvals, dgs, responses
+
+    @classmethod
+    def resume(cls, problem: Problem, path: str, *, events: EventBus | None = None) -> Study:
+        """Reconstruct a Study from a ``.topo`` and continue; ``problem`` must match."""
+        manifest, arrays = read_topo(path)
+        schedule = _schedule_from_json(manifest["schedule"])
+        study = cls(problem, schedule=schedule)
+        if events is not None:
+            study.events = events
+        if config_fingerprint(study._config_parts()) != manifest["fingerprint"]:
+            raise ProblemError("checkpoint was written for a different problem")
+        opt_state: dict[str, object] = dict(manifest["opt_scalars"])
+        for name in manifest["opt_none"]:
+            opt_state[name] = None
+        for key, arr in arrays.items():
+            if key.startswith("opt__"):
+                opt_state[key[len("opt__") :]] = arr
+        study._resume = _Resume(
+            stage_index=int(manifest["stage_index"]),
+            iter_in_stage=int(manifest["iter_in_stage"]),
+            iteration=int(manifest["iteration"]),
+            x=arrays["x"],
+            c0=float(manifest["c0"]),
+            opt_state=opt_state,
+            history={k: list(v) for k, v in manifest["history"].items()},
+            best_x=arrays["best_x"],
+            best_obj=float(manifest["best_objective"]),
+            best_g=float(manifest["best_g"]),
+            best_feasible=bool(manifest["best_feasible"]),
+            converged=bool(manifest["converged"]),
+            reason=str(manifest["reason"]),
+        )
+        return study
 
     def _config_parts(self) -> tuple[object, ...]:
         """Canonical view of the problem's structure for the checkpoint fingerprint."""
@@ -366,23 +419,36 @@ class Study:
         """
         p = self.problem
         assert self.schedule is not None
-        x = self._initial_x()
-        self._history: dict[str, list[float]] = {
-            "objective": [],
-            "change": [],
-            "kkt": [],
-            "stage": [],
-        }
-        for c in p.constraints:
-            self._history[c.report_key] = []
-        self._converged = False
-        self._reason = "max iterations reached"
+        resume = self._resume
+        self._resume = None  # consume; a re-run starts fresh
+        if resume is None:
+            x = self._initial_x()
+            self._history: dict[str, list[float]] = {
+                "objective": [],
+                "change": [],
+                "kkt": [],
+                "stage": [],
+            }
+            for c in p.constraints:
+                self._history[c.report_key] = []
+            self._converged = False
+            self._reason = "max iterations reached"
+            iteration = 0
+            start_stage, start_j = 0, 1
+        else:
+            x = resume.x
+            self._history = resume.history
+            self._converged = resume.converged
+            self._reason = resume.reason
+            iteration = resume.iteration
+            start_stage, start_j = resume.stage_index, resume.iter_in_stage
         t0 = time.perf_counter()
         self.events.publish(StudyStarted(config={"stages": len(self.schedule.stages)}))
 
-        iteration = 0
         prev_spec: Chain | None = None
         for stage_index, stage in enumerate(self.schedule.stages):
+            if stage_index < start_stage:
+                continue  # already completed in a prior session (resume)
             chain = _staged_chain(p.chain.spec, p.model.mesh, p=stage.p, beta=stage.beta)
             if chain.spec == prev_spec:
                 continue  # dedup: identical to the previous executed stage
@@ -390,17 +456,29 @@ class Study:
             self._final_chain = chain
             p.optimizer.setup(chain.n_vars, np.zeros(chain.n_vars), np.ones(chain.n_vars))
             c0: float | None = None
-            self._converged = False
             stage_reason = "stage max iterations reached"
-            # best-feasible tracking, reset per stage: compliance across stages
-            # is not comparable (different p), and early grey stages are not
-            # valid topologies, so "best" means the best iterate of this stage.
-            self._best_feasible = False
-            self._best_x = x.copy()
-            self._best_obj = float("inf")
-            self._best_g = float("inf")
+            if resume is not None and stage_index == start_stage:
+                # restore the in-progress stage exactly (determinism: x, optimizer
+                # state, c0, and best are all restored)
+                p.optimizer.load_state(resume.opt_state)
+                c0 = resume.c0
+                self._best_feasible = resume.best_feasible
+                self._best_x = resume.best_x
+                self._best_obj = resume.best_obj
+                self._best_g = resume.best_g
+                j_start = start_j
+            else:
+                # best-feasible tracking, reset per stage: compliance across stages
+                # is not comparable (different p), and early grey stages are not
+                # valid topologies, so "best" means the best iterate of this stage.
+                self._best_feasible = False
+                self._best_x = x.copy()
+                self._best_obj = float("inf")
+                self._best_g = float("inf")
+                j_start = 1
+            self._converged = False
 
-            for j in range(1, stage.max_iter + 1):
+            for j in range(j_start, stage.max_iter + 1):
                 iteration += 1
                 sol, f0, df0, gvals, dgs, responses = self._evaluate(x, chain)
                 if c0 is None:
