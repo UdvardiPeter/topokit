@@ -379,6 +379,22 @@ def test_resume_multistage_matches_uninterrupted(tmp_path: Path) -> None:
     np.testing.assert_array_equal(out.x, full.x)
 
 
+def test_resume_rejects_unknown_schema(tmp_path: Path) -> None:
+    from topokit.checkpoint import write_topo
+
+    path = tmp_path / "run.topo"
+    write_topo(str(path), {"schema": 999}, {"x": np.zeros(4)})
+    with pytest.raises(ProblemError, match="schema"):
+        Study.resume(_problem(OC(move=0.2)), str(path))
+
+
+def test_iterate_yields_across_stages() -> None:
+    # E10: the generator spans every executed stage with a global iteration counter
+    states = list(Study(_problem_proj(), schedule=Schedule.default(max_iter=8, tol=1e-3)).iterate())
+    assert {s.stage for s in states} == set(range(8))  # all 8 stages yielded
+    assert [s.iteration for s in states] == list(range(1, len(states) + 1))  # global, contiguous
+
+
 def test_resume_completed_run_raises(tmp_path: Path) -> None:
     # resuming a checkpoint that is already at the end of its schedule, with the
     # same schedule, has nothing to do -> clear error rather than a crash

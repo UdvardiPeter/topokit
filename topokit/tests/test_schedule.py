@@ -25,5 +25,7 @@ def test_stage_and_schedule_validation() -> None:
         Stage(p=3.0, beta=0.0)
     with pytest.raises(ProblemError, match="max_iter"):
         Stage(p=3.0, beta=1.0, max_iter=0)
+    with pytest.raises(ProblemError, match="tol"):
+        Stage(p=3.0, beta=1.0, tol=-1.0)
     with pytest.raises(ProblemError, match="stages"):
         Schedule(())
