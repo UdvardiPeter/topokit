@@ -438,3 +438,21 @@ def test_mma_converges_on_cantilever() -> None:
             converged = True
             break
     assert converged  # MMA reaches the convergence threshold on the real problem
+
+
+def test_mma_reports_kkt_decreasing_on_convex() -> None:
+    # MMA on a convex 2-var problem; kkt residual should drop toward the optimum
+    opt = MMA()
+    opt.setup(2, np.zeros(2), np.ones(2))
+    x = np.array([0.5, 0.5])
+    kkts = []
+    for _ in range(20):
+        f0 = float(((x - 0.2) ** 2).sum())
+        df0 = 2.0 * (x - 0.2)
+        g = np.array([x.sum() - 1.0])
+        dg = np.ones((1, 2))
+        r = opt.step(x, f0, df0, g, dg)
+        kkts.append(r.kkt)
+        x = r.x_next
+    assert np.isfinite(kkts[-1])
+    assert kkts[-1] < kkts[0]

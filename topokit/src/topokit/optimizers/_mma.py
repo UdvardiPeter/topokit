@@ -22,7 +22,13 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from topokit.optimizers._base import OptimizerError, StepResult, check_step_inputs, validate_bounds
+from topokit.optimizers._base import (
+    OptimizerError,
+    StepResult,
+    check_step_inputs,
+    kkt_residual,
+    validate_bounds,
+)
 
 _F64 = npt.NDArray[np.float64]
 
@@ -295,13 +301,14 @@ class MMA:
             d=np.ones(m),
         )
         sol = solve_subproblem(sp)
+        kkt = kkt_residual(x, df0, g, dg, xmin, xmax, sol.lam)
 
         self._xold2 = self._xold1
         self._xold1 = x.copy()
         self._low = low
         self._upp = upp
         x_next = sol.x
-        return StepResult(x_next=x_next, change=float(np.abs(x_next - x).max()))
+        return StepResult(x_next=x_next, change=float(np.abs(x_next - x).max()), kkt=kkt)
 
     def state(self) -> dict[str, Any]:
         """Asymptotes and design history, for checkpointing."""

@@ -26,10 +26,15 @@ class OptimizerError(ValueError):
 
 @dataclass(frozen=True)
 class StepResult:
-    """One optimizer step: the next point and the max design change."""
+    """One optimizer step.
+
+    Carries the next point, the max design change, and the first-order
+    KKT/optimality residual (reported, not gating; E6).
+    """
 
     x_next: _F64
     change: float
+    kkt: float = 0.0
 
 
 @runtime_checkable
@@ -51,6 +56,25 @@ class Optimizer(Protocol):
     def load_state(self, state: dict[str, Any]) -> None:
         """Restore from :meth:`state`."""
         ...
+
+
+def kkt_residual(
+    x: _F64, df0: _F64, g: _F64, dg: _F64, lower: _F64, upper: _F64, lam: _F64
+) -> float:
+    """First-order KKT/optimality residual at ``x`` (reported, not gating).
+
+    The inf-norm of three parts: box-projected stationarity of the Lagrangian
+    ``df0 + lam @ dg``, constraint feasibility (``g <= 0`` form), and
+    complementarity ``lam_j g_j``. ``lam`` are the constraint multipliers the
+    optimizer used for this step (in the optimizer's normalized space, so the
+    value is a relative diagnostic, comparable within a stage).
+    """
+    grad_l = df0 + lam @ dg if lam.size else df0
+    proj = x - np.clip(x - grad_l, lower, upper)
+    res_stat = float(np.abs(proj).max()) if proj.size else 0.0
+    res_feas = float(max(0.0, g.max())) if g.size else 0.0
+    res_comp = float(np.abs(lam * g).max()) if g.size else 0.0
+    return max(res_stat, res_feas, res_comp)
 
 
 def validate_bounds(n_vars: int, lower: _F64, upper: _F64) -> tuple[_F64, _F64]:

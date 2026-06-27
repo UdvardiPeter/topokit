@@ -36,6 +36,8 @@ class IterationFinished(Event):
     design_change: float
     responses: Mapping[str, float]
     wall_time: float
+    kkt: float = 0.0
+    stage: int = 0
 
 
 @dataclass(frozen=True, slots=True)

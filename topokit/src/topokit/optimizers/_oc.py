@@ -17,7 +17,13 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from topokit.optimizers._base import OptimizerError, StepResult, check_step_inputs, validate_bounds
+from topokit.optimizers._base import (
+    OptimizerError,
+    StepResult,
+    check_step_inputs,
+    kkt_residual,
+    validate_bounds,
+)
 
 _F64 = npt.NDArray[np.float64]
 
@@ -90,8 +96,10 @@ class OC:
                 l2 = lmid
             if (l2 - l1) <= self.bisection_tol * (1.0 + l2):
                 break
-        x_next = candidate(0.5 * (l1 + l2))
-        return StepResult(x_next=x_next, change=float(np.abs(x_next - x).max()))
+        lam_final = 0.5 * (l1 + l2)
+        x_next = candidate(lam_final)
+        kkt = kkt_residual(x, df0, g, dg, self._lower, self._upper, np.array([lam_final]))
+        return StepResult(x_next=x_next, change=float(np.abs(x_next - x).max()), kkt=kkt)
 
     def state(self) -> dict[str, Any]:
         """OC is stateless; returns an empty dict."""

@@ -24,8 +24,9 @@ Pre-alpha. Foundation layer only.
 | `topokit.parametrization` the unified SIMP chain | done |
 | `topokit.responses` compliance, volume, constraints | done |
 | `topokit.optimizers` OC + clean-room MMA | done |
-| `topokit.problem` Problem assembly + Study optimization loop | done |
-| Continuation, checkpoint/restart | next |
+| `topokit.problem` Problem + Study, continuation, checkpoint/restart | done |
+| `topokit.checkpoint` single-file `.topo` save/resume | done |
+| 2D benchmark classics (Phase 1 gate) | next |
 | CAD import/export, manufacturing constraints | planned |
 | Local daemon, Fusion 360 add-in | planned |
 
