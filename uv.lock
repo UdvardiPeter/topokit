@@ -9,6 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "topokit",
+    "topokit-bench",
     "topokit-workspace",
 ]
 
@@ -1189,6 +1190,35 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.9" },
     { name = "scipy-stubs", specifier = ">=1.17" },
+]
+
+[[package]]
+name = "topokit-bench"
+version = "0.0.1.dev0"
+source = { editable = "benchmarks" }
+dependencies = [
+    { name = "numpy" },
+    { name = "topokit" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.2" },
+    { name = "topokit", editable = "topokit" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.14" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "ruff", specifier = ">=0.9" },
 ]
 
 [[package]]

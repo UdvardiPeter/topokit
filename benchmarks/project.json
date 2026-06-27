@@ -1,0 +1,33 @@
+{
+  "name": "benchmarks",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "benchmarks/src",
+  "targets": {
+    "sync": { "executor": "@nxlv/python:sync", "options": {} },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "benchmarks",
+        "commands": [
+          "uv run ruff check src tests scripts",
+          "uv run ruff format --check src tests scripts"
+        ]
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "benchmarks", "command": "uv run mypy" }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": { "cwd": "benchmarks", "command": "uv run pytest -m 'not regression'" }
+    },
+    "test-regression": {
+      "executor": "nx:run-commands",
+      "inputs": ["default", "^default", "{projectRoot}/tests/data/**/*.npz"],
+      "options": { "cwd": "benchmarks", "command": "uv run pytest -m regression" }
+    }
+  },
+  "tags": []
+}
