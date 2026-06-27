@@ -341,6 +341,48 @@ def test_small_problem_does_not_warn() -> None:
         _problem(OC(move=0.2))  # the 20x10 cantilever is tiny
 
 
+def test_resume_completed_run_raises(tmp_path: Path) -> None:
+    # resuming a checkpoint that is already at the end of its schedule, with the
+    # same schedule, has nothing to do -> clear error rather than a crash
+    path = tmp_path / "run.topo"
+    Study(
+        _problem(OC(move=0.2)),
+        schedule=Schedule.single(p=3.0, max_iter=8, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=8,
+    ).run()
+    resumed = Study.resume(_problem(OC(move=0.2)), str(path))  # same (finished) schedule
+    with pytest.raises(ProblemError, match="nothing to resume"):
+        resumed.run()
+
+
+def test_resume_rejects_changed_optimizer_params(tmp_path: Path) -> None:
+    path = tmp_path / "run.topo"
+    Study(
+        _problem(OC(move=0.2)),
+        schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=5,
+    ).run()
+    # same chain/objective, but a different optimizer hyperparameter
+    other = _problem(OC(move=0.5))
+    with pytest.raises(ProblemError, match="different problem"):
+        Study.resume(other, str(path))
+
+
+def test_continuation_sharpens_vs_single_stage() -> None:
+    # the point of continuation: ramping Heaviside beta drives the design toward
+    # 0/1, so the grey fraction is lower than a fixed-beta single stage.
+    def grey(rho: np.ndarray) -> float:
+        return float(np.mean((rho > 0.1) & (rho < 0.9)))
+
+    cont = Study(_problem_proj(), schedule=Schedule.default(max_iter=20, tol=1e-3)).run()
+    single = Study(
+        _problem_proj(), schedule=Schedule.single(p=3.0, beta=1.0, max_iter=20, tol=1e-3)
+    ).run()
+    assert grey(cont.design.values) < grey(single.design.values)
+
+
 def test_resume_rejects_wrong_problem(tmp_path: Path) -> None:
     path = tmp_path / "run.topo"
     Study(

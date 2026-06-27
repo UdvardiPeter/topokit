@@ -339,6 +339,10 @@ class Study:
     def resume(cls, problem: Problem, path: str, *, events: EventBus | None = None) -> Study:
         """Reconstruct a Study from a ``.topo`` and continue; ``problem`` must match."""
         manifest, arrays = read_topo(path)
+        if int(manifest.get("schema", -1)) != SCHEMA_VERSION:
+            raise ProblemError(
+                f"unsupported .topo schema {manifest.get('schema')!r}; expected {SCHEMA_VERSION}"
+            )
         schedule = _schedule_from_json(manifest["schedule"])
         study = cls(problem, schedule=schedule)
         if events is not None:
@@ -379,7 +383,7 @@ class Study:
             repr(p.chain.spec),
             p.objective.name,
             tuple((c.report_key, float(c.bound), c.sense) for c in p.constraints),
-            type(p.optimizer).__name__,
+            repr(p.optimizer),  # dataclass repr carries the hyperparameters
             tuple(tuple(sorted(d.items())) for d in _schedule_to_json(self.schedule)),
         )
 
@@ -480,6 +484,7 @@ class Study:
         t0 = time.perf_counter()
         self.events.publish(StudyStarted(config={"stages": len(self.schedule.stages)}))
 
+        ran_any = False
         prev_spec: Chain | None = None
         for stage_index, stage in enumerate(self.schedule.stages):
             if stage_index < start_stage:
@@ -515,6 +520,7 @@ class Study:
 
             for j in range(j_start, stage.max_iter + 1):
                 iteration += 1
+                ran_any = True
                 sol, f0, df0, gvals, dgs, responses = self._evaluate(x, chain)
                 if c0 is None:
                     c0 = abs(f0) if abs(f0) > 1e-30 else 1.0  # normalization scale (MMA)
@@ -574,6 +580,11 @@ class Study:
             self._reason = stage_reason
             self.events.publish(StageFinished(stage=stage_index, reason=stage_reason))
 
+        if not ran_any:
+            raise ProblemError(
+                "nothing to resume: the checkpoint is already at the end of its schedule; "
+                "extend the schedule (e.g. a larger max_iter) to continue"
+            )
         self._checkpoint(stage_index, j + 1, iteration, x, c0)
         self._timing = time.perf_counter() - t0
         self.events.publish(
