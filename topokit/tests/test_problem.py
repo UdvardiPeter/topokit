@@ -246,6 +246,29 @@ def test_symmetry_runs_in_reduced_space() -> None:
     assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
 
 
+def test_staged_chain_overrides_p_and_beta() -> None:
+    from topokit.parametrization import Heaviside
+    from topokit.problem import _staged_chain
+
+    model = _cantilever()
+    spec = DensityFilter(radius=1.5) | Heaviside(beta=1.0) | SIMP(p=3.0)
+    staged = _staged_chain(spec, model.mesh, p=2.0, beta=8.0)
+    links = {type(link).__name__: link for link in staged.spec.links}
+    assert links["SIMP"].p == 2.0
+    assert links["Heaviside"].beta == 8.0
+
+
+def test_staged_chains_equal_when_params_unchanged() -> None:
+    # a chain without Heaviside: beta changes produce identical specs (dedup)
+    from topokit.problem import _staged_chain
+
+    model = _cantilever()
+    spec = DensityFilter(radius=1.5) | SIMP(p=3.0)
+    a = _staged_chain(spec, model.mesh, p=3.0, beta=1.0)
+    b = _staged_chain(spec, model.mesh, p=3.0, beta=32.0)
+    assert a.spec == b.spec  # frozen-dataclass equality -> dedup
+
+
 def test_study_reports_kkt() -> None:
     study = Study(_problem(), max_iter=10, tol=0.0)
     iters: list[IterationFinished] = []

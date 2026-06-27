@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import numpy.typing as npt
@@ -35,8 +35,9 @@ from topokit.events import (
 )
 from topokit.fem import PhysicsModel
 from topokit.fields import DesignField
+from topokit.mesh import StructuredGrid
 from topokit.optimizers import OC, Optimizer
-from topokit.parametrization import BoundChain, Chain
+from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside
 from topokit.responses import Constraint, Response, Solution
 from topokit.solvers import LinearSolver, auto_solver
 
@@ -51,6 +52,24 @@ def _bind_chain(chain: Chain | BoundChain, model: PhysicsModel) -> BoundChain:
     if isinstance(chain, BoundChain):
         return chain
     return chain.bind(model.mesh)
+
+
+def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -> BoundChain:
+    """Rebind ``spec`` with SIMP ``p`` and Heaviside ``beta`` replaced (Option A).
+
+    Continuation overrides the authored ``SIMP.p``/``Heaviside.beta`` with the
+    stage values; other link types pass through. ``replace`` re-runs each
+    link's ``__post_init__``, so a bad staged value fails loud before the stage.
+    """
+    links = tuple(
+        replace(link, p=p)
+        if isinstance(link, SIMP)
+        else replace(link, beta=beta)
+        if isinstance(link, Heaviside)
+        else link
+        for link in spec.links
+    )
+    return Chain(links).bind(mesh)
 
 
 class Problem:
@@ -140,7 +159,7 @@ class Schedule:
 
     @classmethod
     def default(cls, *, max_iter: int = 200, tol: float = 0.01) -> Schedule:
-        """The doc-04 ramp: p 1->3, then beta doubling 1->32."""
+        """Return the doc-04 ramp: p 1->3, then beta doubling 1->32."""
         pairs = [(1, 1), (2, 1), (3, 1), (3, 2), (3, 4), (3, 8), (3, 16), (3, 32)]
         return cls(tuple(Stage(float(p), float(b), max_iter, tol) for p, b in pairs))
 
