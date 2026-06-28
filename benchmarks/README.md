@@ -21,11 +21,17 @@ reproduces the 88-line density filter (`ft = 2`). So a faithful single-stage
 run reproduces the 88-line, and the frozen `.npz` pins that result against
 drift.
 
-No external published *compliance number* is asserted: the 88-line paper prints
-none, and cross-method papers report their own method's value with the 88-line
-only "visually indistinguishable" (e.g. Biyikli & To 2015) — so there is no
-exact published figure to reproduce within 1%. The literature claim rests on the
-method-level faithfulness above; the frozen regression carries the precision.
+No external *compliance number* is asserted in this per-PR gate. The 88-line
+paper prints none, and cross-method papers report only their own method's value
+with the 88-line "visually indistinguishable" (e.g. Biyikli & To 2015). An
+*independent* end-to-end cross-check — running topopt.py or a clean-room top88
+and matching its compliance within 1% — is achievable (the method matches) and
+is deliberately deferred to the forthcoming public benchmark suite, which
+compares accuracy against the literature. Here the claim rests on method-level
+faithfulness — the exact element-level KE match above, the clean-room 88-line
+OC, and the radial filter reproducing the 88-line filter — plus the
+independently-validated FE / optimizer / filter pieces; the frozen regression
+carries the precision and guards drift.
 
 ## Regenerating references
 
