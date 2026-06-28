@@ -13,9 +13,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
-
 from topokit.optimizers import MMA, OC, Optimizer
 from topokit.problem import Problem, Schedule, Study
+
 from topokit_bench.problems import cantilever, mbb
 
 Builder = Callable[..., Problem]

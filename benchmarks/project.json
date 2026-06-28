@@ -26,7 +26,7 @@
     "test-regression": {
       "executor": "nx:run-commands",
       "inputs": ["default", "^default", "{projectRoot}/tests/data/**/*.npz"],
-      "options": { "cwd": "benchmarks", "command": "uv run pytest -m regression" }
+      "options": { "cwd": "benchmarks", "command": "uv run pytest -m regression -n auto" }
     }
   },
   "tags": []

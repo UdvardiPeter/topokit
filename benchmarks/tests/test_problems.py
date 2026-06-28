@@ -1,13 +1,17 @@
+from collections.abc import Callable
+
 import numpy as np
 import pytest
-
 from topokit.optimizers import OC
-from topokit.problem import Schedule, Study
+from topokit.problem import Problem, Schedule, Study
+
 from topokit_bench.problems import cantilever, mbb
+
+Builder = Callable[..., Problem]
 
 
 @pytest.mark.parametrize("build", [mbb, cantilever])
-def test_builder_makes_runnable_problem(build) -> None:
+def test_builder_makes_runnable_problem(build: Builder) -> None:
     p = build(20, 10, optimizer=OC(move=0.2))
     assert p.model.n_dof > 0
     assert p.chain.n_vars == 20 * 10  # all elements are design
@@ -22,7 +26,7 @@ def test_mbb_supports_are_nonempty() -> None:
 
 
 @pytest.mark.parametrize("build,volfrac", [(mbb, 0.5), (cantilever, 0.4)])
-def test_optimization_produces_sane_design(build, volfrac) -> None:
+def test_optimization_produces_sane_design(build: Builder, volfrac: float) -> None:
     p = build(60, 20, optimizer=OC(move=0.2))
     result = Study(p, schedule=Schedule.single(p=3.0, max_iter=120, tol=1e-3)).run()
     rho = result.design.values
