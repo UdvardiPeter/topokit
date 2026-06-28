@@ -5,6 +5,10 @@
 MAINTAINER ONLY. Never run in CI. Run deliberately and commit the resulting
 ``tests/data/*.npz`` with a changelog note explaining the change. The suite
 asserts against these frozen references; regenerating them resets the baseline.
+
+Prefer regenerating on the CI platform (Linux): the suite tolerances absorb
+cross-platform float drift, but a reference generated where CI runs leaves the
+full tolerance as margin for genuine numerical changes.
 """
 
 from __future__ import annotations

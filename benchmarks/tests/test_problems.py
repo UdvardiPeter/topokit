@@ -2,12 +2,43 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
+from topokit.fem import LinearElasticity, Material, PointLoad
+from topokit.mesh import StructuredGrid
 from topokit.optimizers import OC
 from topokit.problem import Problem, Schedule, Study
+from topokit.selection import NearPoint, PlaneSlab
 
 from topokit_bench.problems import cantilever, mbb
 
 Builder = Callable[..., Problem]
+
+
+def test_element_stiffness_matches_88line() -> None:
+    # The lineage anchor's foundation: TopoKit's Q4 plane-stress element
+    # reproduces the 88-line KE (Andreassen et al. 2011) exactly, so a faithful
+    # single-stage run reproduces the 88-line method. Eigenvalues are
+    # DOF-ordering-independent, so this is an exact, platform-independent check.
+    g = StructuredGrid.box(size=(2.0, 2.0), shape=(2, 2))
+    model = LinearElasticity(
+        g,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(PlaneSlab((0.0, 0.0), (1.0, 0.0), tol=1e-9), "all")],
+        loads=[PointLoad(NearPoint((2.0, 2.0)), (0.0, -1.0))],
+    )
+    nu = 0.3
+    a11 = np.array([[12, 3, -6, -3], [3, 12, 3, 0], [-6, 3, 12, -3], [-3, 0, -3, 12]])
+    a12 = np.array([[-6, -3, 0, 3], [-3, -6, -3, -6], [0, -3, -6, 3], [3, -6, 3, -6]])
+    b11 = np.array([[-4, 3, -2, 9], [3, -4, -9, 4], [-2, -9, -4, -3], [9, 4, -3, -4]])
+    b12 = np.array([[2, -3, 4, -9], [-3, 2, 9, -2], [4, 9, 2, 3], [-9, -2, 3, 2]])
+    ke = (
+        1.0
+        / (1.0 - nu**2)
+        / 24.0
+        * (np.block([[a11, a12], [a12.T, a11]]) + nu * np.block([[b11, b12], [b12.T, b11]]))
+    )
+    np.testing.assert_allclose(
+        np.linalg.eigvalsh(model.element_stiffness), np.linalg.eigvalsh(ke), atol=1e-12
+    )
 
 
 @pytest.mark.parametrize("build", [mbb, cantilever])
