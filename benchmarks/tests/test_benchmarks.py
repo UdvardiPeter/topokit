@@ -1,39 +1,26 @@
 """Tier-3 2D reference regression (pytest -m regression)."""
 
-from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import pytest
-from topokit.optimizers import MMA, OC, Optimizer
-from topokit.problem import Problem, Result, Schedule, Study
+from topokit.problem import Result, Schedule, Study
 
-from topokit_bench.problems import cantilever, mbb
+from topokit_bench.problems import BUILDERS, CASES, make_optimizer
 
-Builder = Callable[..., Problem]
 DATA = Path(__file__).resolve().parent / "data"
-CASES: list[tuple[str, Builder, int, int, str]] = [
-    (name, build, nelx, nely, opt_name)
-    for name, build in (("mbb", mbb), ("cantilever", cantilever))
-    for nelx, nely in ((60, 20), (150, 50))
-    for opt_name in ("oc", "mma")
-]
 
 
-def _optimizer(name: str) -> Optimizer:
-    return OC(move=0.2) if name == "oc" else MMA()
-
-
-def _run(build: Builder, nelx: int, nely: int, opt_name: str) -> Result:
-    problem = build(nelx, nely, optimizer=_optimizer(opt_name))
+def _run(name: str, nelx: int, nely: int, opt_name: str) -> Result:
+    problem = BUILDERS[name](nelx, nely, optimizer=make_optimizer(opt_name))
     return Study(problem, schedule=Schedule.single(p=3.0, max_iter=100, tol=1e-3)).run()
 
 
 @pytest.mark.regression
-@pytest.mark.parametrize("name,build,nelx,nely,opt_name", CASES)
-def test_matches_reference(name: str, build: Builder, nelx: int, nely: int, opt_name: str) -> None:
+@pytest.mark.parametrize("name,nelx,nely,opt_name", CASES)
+def test_matches_reference(name: str, nelx: int, nely: int, opt_name: str) -> None:
     ref = np.load(DATA / f"{name}_{nelx}x{nely}_{opt_name}.npz")
-    result = _run(build, nelx, nely, opt_name)
+    result = _run(name, nelx, nely, opt_name)
     # 1. volume held
     assert result.history["volume"][-1] == pytest.approx(float(ref["volume"]), abs=1e-3)
     # 2. compliance within 1% of the frozen reference

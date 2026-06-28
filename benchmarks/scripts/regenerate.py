@@ -13,36 +13,21 @@ full tolerance as margin for genuine numerical changes.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
-from topokit.optimizers import MMA, OC, Optimizer
-from topokit.problem import Problem, Schedule, Study
+from topokit.problem import Schedule, Study
 
-from topokit_bench.problems import cantilever, mbb
+from topokit_bench.problems import BUILDERS, CASES, make_optimizer
 
-Builder = Callable[..., Problem]
-
-CASES: list[tuple[str, Builder, int, int, str]] = [
-    (name, build, nelx, nely, opt_name)
-    for name, build in (("mbb", mbb), ("cantilever", cantilever))
-    for nelx, nely in ((60, 20), (150, 50))
-    for opt_name in ("oc", "mma")
-]
 DATA = Path(__file__).resolve().parent.parent / "tests" / "data"
-
-
-def optimizer(name: str) -> Optimizer:
-    """Return the optimizer instance for a case name."""
-    return OC(move=0.2) if name == "oc" else MMA()
 
 
 def main() -> None:
     """Run every case and write its reference .npz."""
     DATA.mkdir(parents=True, exist_ok=True)
-    for name, build, nelx, nely, opt_name in CASES:
-        problem = build(nelx, nely, optimizer=optimizer(opt_name))
+    for name, nelx, nely, opt_name in CASES:
+        problem = BUILDERS[name](nelx, nely, optimizer=make_optimizer(opt_name))
         # compliance is converged by ~iter 100 (within 0.1% of iter 300) while OC's
         # design-change criterion never trips, so cap there: literature-grade
         # compliance, ~3x faster, keeps the per-PR Tier-3 suite under budget.

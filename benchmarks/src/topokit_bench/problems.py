@@ -4,13 +4,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from topokit.fem import LinearElasticity, Material, PointLoad
 from topokit.mesh import StructuredGrid
-from topokit.optimizers import Optimizer
+from topokit.optimizers import MMA, OC, Optimizer
 from topokit.parametrization import SIMP, RadialDensityFilter
 from topokit.problem import Problem
 from topokit.responses import Compliance, Volume
 from topokit.selection import NearPoint, PlaneSlab
+
+Builder = Callable[..., Problem]
 
 
 def _grid(nelx: int, nely: int) -> StructuredGrid:
@@ -66,3 +70,19 @@ def cantilever(
     return Problem(
         model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
     )
+
+
+# The benchmark matrix, the single source of truth shared by the regression
+# suite and the reference-regeneration script.
+BUILDERS: dict[str, Builder] = {"mbb": mbb, "cantilever": cantilever}
+CASES: list[tuple[str, int, int, str]] = [
+    (name, nelx, nely, opt)
+    for name in BUILDERS
+    for nelx, nely in ((60, 20), (150, 50))
+    for opt in ("oc", "mma")
+]
+
+
+def make_optimizer(name: str) -> Optimizer:
+    """Map a case's optimizer name to a configured instance."""
+    return OC(move=0.2) if name == "oc" else MMA()

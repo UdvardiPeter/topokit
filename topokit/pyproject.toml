@@ -19,6 +19,7 @@ fast = ["pyamg>=5"]
 dev = [
   "pytest>=8.3",
   "pytest-cov>=6.0",
+  # <2: mypy 2.x (mypyc-compiled) crashes on CI Linux; revisit when stable
   "mypy>=1.14,<2",
   "ruff>=0.9",
   "import-linter>=2.1",
