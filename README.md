@@ -26,7 +26,9 @@ Pre-alpha. Foundation layer only.
 | `topokit.optimizers` OC + clean-room MMA | done |
 | `topokit.problem` Problem + Study, continuation, checkpoint/restart | done |
 | `topokit.checkpoint` single-file `.topo` save/resume | done |
-| 2D benchmark classics (Phase 1 gate) | next |
+| `benchmarks` 2D reference regression — MBB + cantilever vs 88-line (Phase 1 gate) | done |
+| `topokit.parametrization` radial density filter | done |
+| 3D scale, manufacturing constraints | next |
 | CAD import/export, manufacturing constraints | planned |
 | Local daemon, Fusion 360 add-in | planned |
 

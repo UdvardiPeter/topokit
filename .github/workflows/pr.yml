@@ -38,6 +38,8 @@ jobs:
         run: npx nx affected -t test
       - name: FD gradient tests
         run: npx nx affected -t test-fd
+      - name: Regression (Tier 3)
+        run: npx nx affected -t test-regression
       - name: Build
         run: npx nx affected -t build
       - name: Docs build
