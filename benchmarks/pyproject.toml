@@ -9,7 +9,7 @@ dependencies = ["topokit", "numpy>=2.2"]
 topokit = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8.3", "pytest-xdist>=3.6", "mypy>=1.14", "ruff>=0.9"]
+dev = ["pytest>=8.3", "pytest-xdist>=3.6", "mypy>=1.14,<2", "ruff>=0.9"]
 
 [build-system]
 requires = ["uv_build>=0.8.9,<0.9.0"]
@@ -33,7 +33,9 @@ convention = "numpy"
 [tool.mypy]
 strict = true
 files = ["src", "tests", "scripts"]
-cache_dir = "../.mypy_cache"
+# Own cache dir: Nx runs benchmarks:typecheck in parallel with topokit:typecheck,
+# and a shared cache_dir races (mypy INTERNAL ERROR). Keep them separate.
+cache_dir = ".mypy_cache"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
