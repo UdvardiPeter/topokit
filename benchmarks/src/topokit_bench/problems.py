@@ -7,7 +7,7 @@ from __future__ import annotations
 from topokit.fem import LinearElasticity, Material, PointLoad
 from topokit.mesh import StructuredGrid
 from topokit.optimizers import Optimizer
-from topokit.parametrization import SIMP, DensityFilter
+from topokit.parametrization import SIMP, RadialDensityFilter
 from topokit.problem import Problem
 from topokit.responses import Compliance, Volume
 from topokit.selection import NearPoint, PlaneSlab
@@ -37,7 +37,7 @@ def mbb(
         supports=[(left, "x"), (bottom_right, "y")],
         loads=[PointLoad(top_left, (0.0, -1.0))],
     )
-    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    chain = RadialDensityFilter(radius=rmin) | SIMP(p=penal)
     return Problem(
         model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
     )
@@ -62,7 +62,7 @@ def cantilever(
         supports=[(left, "all")],
         loads=[PointLoad(mid_right, (0.0, -1.0))],
     )
-    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    chain = RadialDensityFilter(radius=rmin) | SIMP(p=penal)
     return Problem(
         model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
     )
