@@ -71,6 +71,33 @@ def _separable_correlate(grid: _F64, axis_weights: list[_F64]) -> _F64:
 register_kernel("separable_correlate", "generic", _separable_correlate)
 
 
+def _radial_correlate(grid: _F64, kernel: _F64) -> _F64:
+    """Correlate with a dense N-D kernel, zero outside the domain.
+
+    The kernel is symmetric under reflection (a function of distance), so the
+    correlation is self-adjoint and serves as its own pullback.
+    """
+    out = np.zeros_like(grid)
+    halves = [(s - 1) // 2 for s in kernel.shape]
+    for idx in np.ndindex(kernel.shape):
+        w = float(kernel[idx])
+        if w == 0.0:
+            continue
+        src = [slice(None)] * grid.ndim
+        dst = [slice(None)] * grid.ndim
+        for axis, (i, half) in enumerate(zip(idx, halves, strict=True)):
+            k = i - half
+            if k < 0:
+                src[axis], dst[axis] = slice(-k, None), slice(None, k)
+            elif k > 0:
+                src[axis], dst[axis] = slice(None, -k), slice(k, None)
+        out[tuple(dst)] += w * grid[tuple(src)]
+    return out
+
+
+register_kernel("radial_correlate", "generic", _radial_correlate)
+
+
 @dataclass(frozen=True)
 class LinkSpec:
     """Base for chain links; compose with ``|``."""
@@ -412,6 +439,66 @@ class _BoundDensityFilter(_BoundLink):
         mesh = self.mesh
         scaled = np.where(mesh.active_elements, grad_out / self._denom, 0.0)
         back = self._correlate(mesh.to_grid(scaled), self._weights)
+        return mesh.to_flat(back) * self._active
+
+
+@dataclass(frozen=True)
+class RadialDensityFilter(LinkSpec):
+    """Radial-cone density filter; the topology-optimization literature standard.
+
+    Weights ``max(0, radius - dist)`` over the Euclidean element-center
+    distance, mask-aware (void excluded, solid pinned at 1) and row-normalized.
+    Unlike :class:`DensityFilter` (a cheaper separable approximation) the reach
+    is isotropic, reproducing the 88-line density filter (``ft = 2``); use it
+    when matching published references. Cost is O(n*r^dim) vs the separable
+    O(n*r), traded for a literature-faithful, orientation-independent kernel.
+    """
+
+    radius: float = 1.5
+
+    def __post_init__(self) -> None:
+        if self.radius <= 0.0:
+            raise ParametrizationError(f"radius must be > 0, got {self.radius}")
+
+    def _build(self, mesh: StructuredGrid) -> _BoundRadialDensityFilter:
+        """Precompute the radial kernel and the mask normalization."""
+        return _BoundRadialDensityFilter(mesh, self.radius)
+
+    @classmethod
+    def fd_example(cls, mesh: StructuredGrid) -> RadialDensityFilter:
+        """FD meta-test instance."""
+        return cls(radius=1.6 * max(mesh.spacing))
+
+
+class _BoundRadialDensityFilter(_BoundLink):
+    def __init__(self, mesh: StructuredGrid, radius: float) -> None:
+        self.mesh = mesh
+        axes = []
+        for axis in range(mesh.dim):
+            h = mesh.spacing[axis]
+            half = max(0, math.ceil(radius / h) - 1)
+            axes.append(np.arange(-half, half + 1) * h)
+        offsets = np.meshgrid(*axes, indexing="ij")
+        dist = np.sqrt(sum(o**2 for o in offsets))
+        self._kernel = np.maximum(0.0, radius - dist)
+        self._correlate = get_kernel("radial_correlate", "numpy")
+        active = mesh.active_elements.astype(np.float64)
+        self._active = active
+        denom = self._correlate(mesh.to_grid(active), self._kernel)
+        self._denom = np.maximum(mesh.to_flat(denom), 1e-300)
+
+    def apply(self, x: _F64) -> _F64:
+        mesh = self.mesh
+        num = self._correlate(mesh.to_grid(x * self._active), self._kernel)
+        out = mesh.to_flat(num) / self._denom
+        return np.where(mesh.active_elements, out, 0.0)
+
+    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
+        # forward is A D^-1 C A with the radial correlation C symmetric; the
+        # transpose is A C D^-1 A (diagonal factors commute), as below.
+        mesh = self.mesh
+        scaled = np.where(mesh.active_elements, grad_out / self._denom, 0.0)
+        back = self._correlate(mesh.to_grid(scaled), self._kernel)
         return mesh.to_flat(back) * self._active
 
 
