@@ -9,6 +9,7 @@ from topokit.parametrization import (
     SIMP,
     DensityFilter,
     Heaviside,
+    RadialDensityFilter,
     SensitivityFilter,
     SymmetryMap,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "IterationState",
     "LinearElasticity",
     "Problem",
+    "RadialDensityFilter",
     "Result",
     "Schedule",
     "SensitivityFilter",
@@ -50,6 +52,9 @@ registry.register("solvers", "direct", Direct, source="topokit.solvers")
 registry.register("solvers", "amg_cg", AmgCG, source="topokit.solvers")
 registry.register("chain_links", "symmetry", SymmetryMap, source="topokit.parametrization")
 registry.register("chain_links", "density_filter", DensityFilter, source="topokit.parametrization")
+registry.register(
+    "chain_links", "radial_density_filter", RadialDensityFilter, source="topokit.parametrization"
+)
 registry.register("chain_links", "heaviside", Heaviside, source="topokit.parametrization")
 registry.register("chain_links", "simp", SIMP, source="topokit.parametrization")
 registry.register(

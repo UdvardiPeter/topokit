@@ -11,6 +11,7 @@ from topokit.parametrization import (
     DensityFilter,
     Heaviside,
     ParametrizationError,
+    RadialDensityFilter,
     SensitivityFilter,
     SymmetryMap,
 )
@@ -111,6 +112,35 @@ def test_density_filter_solid_pulls_neighbors_up() -> None:
     assert out[0] == pytest.approx(1.0)  # solid pinned
     assert out[1] > 0.0  # influenced by the solid neighbor
     assert out[3] == pytest.approx(0.0)  # out of filter reach
+
+
+def test_radial_filter_reduces_to_separable_in_1d() -> None:
+    # in 1D the radial and separable kernels are proportional, so identical
+    # after the row normalization
+    g = StructuredGrid(shape=(3, 1), spacing=(1.0, 1.0))
+    x = np.array([1.0, 0.0, 0.0])
+    sep = (DensityFilter(radius=1.1) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(x)
+    rad = (RadialDensityFilter(radius=1.1) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(x)
+    np.testing.assert_allclose(rad, sep, rtol=1e-12)
+
+
+def test_radial_differs_from_separable_in_2d() -> None:
+    # in 2D the radial cone weights diagonal neighbors less than the separable box
+    g = StructuredGrid(shape=(3, 3), spacing=(1.0, 1.0))
+    impulse = np.zeros(9)
+    impulse[4] = 1.0  # center element (x-fastest id 4 = (1, 1))
+    sep = (DensityFilter(radius=1.5) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(impulse)
+    rad = (RadialDensityFilter(radius=1.5) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(impulse)
+    assert not np.allclose(rad, sep)
+    gs, gr = g.to_grid(sep), g.to_grid(rad)
+    # diagonal-to-face response ratio is smaller under the radial cone
+    assert gr[0, 0] / gr[1, 0] < gs[0, 0] / gs[1, 0]
+
+
+def test_radial_uniform_invariance() -> None:
+    g = StructuredGrid(shape=(4, 3), spacing=(0.7, 0.45))
+    bound = (RadialDensityFilter(radius=1.2) | SIMP(p=1.0, scale_min=0.0)).bind(g)
+    np.testing.assert_allclose(bound.apply(np.full(bound.n_vars, 0.6)), 0.6, rtol=1e-12)
 
 
 def test_symmetry_map_explicit_orbits() -> None:
