@@ -21,12 +21,25 @@
     },
     "test": {
       "executor": "nx:run-commands",
-      "options": { "cwd": "benchmarks", "command": "uv run pytest -m 'not regression'" }
+      "options": {
+        "cwd": "benchmarks",
+        "command": "uv run pytest -m 'not regression and not regression_full'"
+      }
     },
     "test-regression": {
       "executor": "nx:run-commands",
       "inputs": ["default", "^default", "{projectRoot}/tests/data/**/*.npz"],
       "options": { "cwd": "benchmarks", "command": "uv run pytest -m regression -n auto" }
+    },
+    "test-regression-full": {
+      "executor": "nx:run-commands",
+      "inputs": ["default", "^default", "{projectRoot}/tests/data/**/*.npz"],
+      "options": { "cwd": "benchmarks", "command": "uv run pytest -m regression_full -n auto" }
+    },
+    "bench": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": { "cwd": "benchmarks", "command": "uv run python scripts/bench.py" }
     }
   },
   "tags": []

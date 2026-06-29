@@ -39,4 +39,7 @@ cache_dir = ".mypy_cache"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["regression: Tier-3 2D reference regression tests"]
+markers = [
+  "regression: Tier-3 2D reference regression tests",
+  "regression_full: Tier-3 full 3D + Michell + robustness tests (nightly only)",
+]
