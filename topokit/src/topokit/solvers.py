@@ -112,6 +112,16 @@ class Direct:
         return x
 
 
+class _IterCounter:
+    """Counts CG iterations via the scipy callback protocol."""
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def __call__(self, _xk: Any) -> None:
+        self.count += 1
+
+
 class AmgCG:
     """Conjugate gradients with a pyamg smoothed-aggregation preconditioner.
 
@@ -125,6 +135,7 @@ class AmgCG:
             raise SolverError(f"max_iter must be >= 1, got {max_iter}")
         self.tol = float(tol)
         self.max_iter = max_iter
+        self.last_iterations: int = 0
         self._matrix: scipy.sparse.csr_array | None = None
         self._preconditioner: Any = None
 
@@ -157,7 +168,9 @@ class AmgCG:
         single = b.ndim == 1
         cols = b[:, None] if single else b
         out = np.empty_like(cols)
+        worst = 0
         for j in range(cols.shape[1]):
+            counter = _IterCounter()
             x, info = scipy.sparse.linalg.cg(
                 self._matrix,
                 cols[:, j],
@@ -165,12 +178,15 @@ class AmgCG:
                 atol=0.0,
                 maxiter=self.max_iter,
                 M=self._preconditioner,
+                callback=counter,
             )
             if info != 0:
                 raise SolverError(
                     f"CG did not converge (info={info}, tol={self.tol}, maxiter={self.max_iter})"
                 )
             out[:, j] = x
+            worst = max(worst, counter.count)
+        self.last_iterations = worst
         return out[:, 0] if single else out
 
 
