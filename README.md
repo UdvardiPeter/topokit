@@ -28,7 +28,9 @@ Pre-alpha. Foundation layer only.
 | `topokit.checkpoint` single-file `.topo` save/resume | done |
 | `benchmarks` 2D reference regression — MBB + cantilever vs 88-line (Phase 1 gate) | done |
 | `topokit.parametrization` radial density filter | done |
-| 3D scale, manufacturing constraints | next |
+| `benchmarks` 3D regression — cantilever + Michell + robustness sweep (nightly) | done |
+| `benchmarks` perf scaling-study baseline + `nightly.yml` cron | done |
+| manufacturing constraints | next |
 | CAD import/export, manufacturing constraints | planned |
 | Local daemon, Fusion 360 add-in | planned |
 
