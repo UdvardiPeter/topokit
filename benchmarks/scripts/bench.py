@@ -8,14 +8,16 @@ the CI platform (Linux) for comparable numbers; needs pyamg (topokit dev group)
 for the larger 3D sizes.
 
 Each case runs in its own subprocess so peak RSS is per-case, not a monotonic
-process-lifetime high-water mark. The 1M-element gate (doc 08) is aspirational /
-dedicated-hardware; this committed study stops at CI-feasible sizes (60^3 ~ 216k
-elements).
+process-lifetime high-water mark. Heavy cases (``heavy: True``, e.g. 60^3 at
+~6.6 GB peak) are skipped unless ``TOPOKIT_BENCH_HEAVY`` is set, so the default
+study fits a 7 GB CI runner; the committed baseline carries the heavy cases from
+dedicated hardware. The 1M-element gate (doc 08) is aspirational / dedicated-hardware.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import platform
 import resource
 import subprocess
@@ -40,7 +42,14 @@ BENCH_ITERS = 8
 CASES: list[dict[str, Any]] = [
     {"label": "cantilever_3d_20", "build": "c3d", "n": 20, "iters": BENCH_ITERS, "tol": 0.0},
     {"label": "cantilever_3d_40", "build": "c3d", "n": 40, "iters": BENCH_ITERS, "tol": 0.0},
-    {"label": "cantilever_3d_60", "build": "c3d", "n": 60, "iters": BENCH_ITERS, "tol": 0.0},
+    {
+        "label": "cantilever_3d_60",
+        "build": "c3d",
+        "n": 60,
+        "iters": BENCH_ITERS,
+        "tol": 0.0,
+        "heavy": True,
+    },
     {"label": "mbb_150x50_full", "build": "mbb", "n": 0, "iters": 100, "tol": 1e-3},
 ]
 
@@ -109,9 +118,16 @@ def _worker(label: str) -> None:
 
 
 def main() -> None:
-    """Run each case in a subprocess; aggregate into the committed baseline."""
+    """Run each case in a subprocess; aggregate into the committed baseline.
+
+    Heavy cases are skipped unless ``TOPOKIT_BENCH_HEAVY`` is set (CI runners cap
+    at ~7 GB; 60^3 peaks at ~6.6 GB). The committed baseline carries the heavy
+    cases from a dedicated-hardware run.
+    """
+    include_heavy = os.environ.get("TOPOKIT_BENCH_HEAVY", "") not in ("", "0")
+    cases = [c for c in CASES if include_heavy or not c.get("heavy")]
     records: list[dict[str, Any]] = []
-    for spec in CASES:
+    for spec in cases:
         proc = subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), "--worker", spec["label"]],
             capture_output=True,

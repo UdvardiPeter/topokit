@@ -62,11 +62,15 @@ a published 3D compliance number.
 ## Perf baseline
 
 `bench` (nightly only, never cached) runs a scaling study — 3D cantilever at
-`20^3 / 40^3 / 60^3` plus the 2D `150x50` full run — recording per-iteration wall
-time, peak RSS, solver, and AMG CG iterations to `bench/baseline.json` (committed;
+`20^3 / 40^3` plus the 2D `150x50` full run — recording per-iteration wall time,
+peak RSS, solver, and AMG CG iterations to `bench/baseline.json` (committed;
 refreshed by `uv run python scripts/bench.py`). It is a **soft baseline**: no
-assertions, no gating. Hard perf budgets land in WP-2.2. The 1M-element target is
-aspirational / dedicated-hardware; the committed study stops at CI-feasible sizes.
+assertions, no gating. Hard perf budgets land in WP-2.2.
+
+`60^3` (~6.6 GB peak) is a **heavy** case: it is skipped by default so the study
+fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
+~8+ GB free). The committed baseline carries the `60^3` row from dedicated
+hardware. The 1M-element target is aspirational / dedicated-hardware.
 
 The nightly workflow (`.github/workflows/nightly.yml`) runs these tiers on a daily
 cron against `main` and uploads `baseline.json` as an artifact for drift
