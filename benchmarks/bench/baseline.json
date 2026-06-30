@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "python": "3.12.11",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "generated": "2026-06-30T22:53:54+00:00"
+  },
+  "cases": [
+    {
+      "label": "cantilever_3d_20",
+      "elements": 8000,
+      "dof": 26460,
+      "solver": "AmgCG",
+      "iterations": 8,
+      "wall_total_s": 10.6871,
+      "wall_per_iter_s": 1.3359,
+      "amg_iterations": 57,
+      "peak_rss_kb": 354112
+    },
+    {
+      "label": "cantilever_3d_40",
+      "elements": 64000,
+      "dof": 201720,
+      "solver": "AmgCG",
+      "iterations": 8,
+      "wall_total_s": 147.533,
+      "wall_per_iter_s": 18.4416,
+      "amg_iterations": 107,
+      "peak_rss_kb": 2468080
+    },
+    {
+      "label": "cantilever_3d_60",
+      "elements": 216000,
+      "dof": 669780,
+      "solver": "AmgCG",
+      "iterations": 8,
+      "wall_total_s": 712.0939,
+      "wall_per_iter_s": 89.0117,
+      "amg_iterations": 155,
+      "peak_rss_kb": 5450880
+    },
+    {
+      "label": "mbb_150x50_full",
+      "elements": 7500,
+      "dof": 15350,
+      "solver": "Direct",
+      "iterations": 100,
+      "wall_total_s": 13.8805,
+      "wall_per_iter_s": 0.1388,
+      "amg_iterations": null,
+      "peak_rss_kb": 165968
+    }
+  ]
+}
