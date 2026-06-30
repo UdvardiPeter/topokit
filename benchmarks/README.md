@@ -46,9 +46,9 @@ e.g. `--only full` regenerates just the 3D + Michell references below.
 correctness on top of the per-PR 2D gate:
 
 - **3D cantilever** (`24x12x12`, OC) and **Michell** (`90x30`, OC + MMA) —
-  frozen-reference regression, same five assertions as the 2D suite. The Michell
-  reference is additionally asserted mirror-symmetric about the horizontal
-  centreline (topology sanity).
+  frozen-reference regression with the same reference assertions as the 2D suite
+  (volume, compliance, density field, iteration band) plus OC/MMA agreement, and
+  a mirror-symmetry topology check on the Michell reference.
 - **Robustness sweep** (`test_robustness.py`) — `volfrac x rmin x resolution`
   over the 2D builders plus small 3D points, asserting *clean convergence*
   (finite field in `[0, 1]`, volume on target, net objective progress, no

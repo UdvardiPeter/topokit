@@ -31,6 +31,15 @@ def test_matches_reference(case: FullCase, opt: str) -> None:
 
 
 @pytest.mark.regression_full
+def test_michell_oc_and_mma_agree() -> None:
+    # the two optimizers reach the same Michell optimum (checked on the frozen
+    # refs, mirroring the 2D suite's agreement gate).
+    c_oc = float(np.load(DATA / "michell_90x30_oc.npz")["compliance"])
+    c_mma = float(np.load(DATA / "michell_90x30_mma.npz")["compliance"])
+    assert abs(c_mma - c_oc) / c_oc < 0.05
+
+
+@pytest.mark.regression_full
 def test_michell_reference_is_vertically_symmetric() -> None:
     # topology-sanity: the committed Michell reference is mirror-symmetric about
     # the horizontal centreline (symmetric BCs + load).

@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
-"""Regenerate the frozen reference fields for the 2D benchmarks.
+"""Regenerate the frozen reference fields for the benchmark suites.
+
+Covers the per-PR 2D references and the nightly 3D + Michell references; ``--only
+{2d,full,all}`` limits which set is rewritten.
 
 MAINTAINER ONLY. Never run in CI. Run deliberately and commit the resulting
 ``tests/data/*.npz`` with a changelog note explaining the change. The suite
