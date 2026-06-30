@@ -1,0 +1,33 @@
+name: Nightly
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC daily
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # pyamg is in topokit's dev group, so the standard sync installs it and the
+      # AmgCG path exercises on the larger 3D bench sizes.
+      - run: uv sync --all-packages --frozen
+      - name: Heavy tiers (run-many; main HEAD, no PR diff)
+        run: npx nx run-many -t test test-fd test-regression test-regression-full bench --skip-nx-cache
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-baseline
+          path: benchmarks/bench/baseline.json
