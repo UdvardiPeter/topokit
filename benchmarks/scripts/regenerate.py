@@ -13,34 +13,55 @@ full tolerance as margin for genuine numerical changes.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
-from topokit.problem import Schedule, Study
+from topokit.problem import Result, Schedule, Study
 
-from topokit_bench.problems import BUILDERS, CASES, make_optimizer
+from topokit_bench.problems import BUILDERS, CASES, FULL_CASES, make_optimizer
 
 DATA = Path(__file__).resolve().parent.parent / "tests" / "data"
 
 
-def main() -> None:
-    """Run every case and write its reference .npz."""
-    DATA.mkdir(parents=True, exist_ok=True)
+def _freeze(path: Path, result: Result) -> None:
+    np.savez(
+        path,
+        density=result.design.values,
+        compliance=np.float64(result.objective),
+        volume=np.float64(result.history["volume"][-1]),
+        iterations=np.int64(result.iterations),
+    )
+    print(f"{path.name}: c={result.objective:.4f} it={result.iterations}")
+
+
+def regenerate_2d() -> None:
+    """The per-PR Tier-3 2D references."""
     for name, nelx, nely, opt_name in CASES:
         problem = BUILDERS[name](nelx, nely, optimizer=make_optimizer(opt_name))
-        # compliance is converged by ~iter 100 (within 0.1% of iter 300) while OC's
-        # design-change criterion never trips, so cap there: literature-grade
-        # compliance, ~3x faster, keeps the per-PR Tier-3 suite under budget.
         result = Study(problem, schedule=Schedule.single(p=3.0, max_iter=100, tol=1e-3)).run()
-        path = DATA / f"{name}_{nelx}x{nely}_{opt_name}.npz"
-        np.savez(
-            path,
-            density=result.design.values,
-            compliance=np.float64(result.objective),
-            volume=np.float64(result.history["volume"][-1]),
-            iterations=np.int64(result.iterations),
-        )
-        print(f"{path.name}: c={result.objective:.4f} it={result.iterations}")
+        _freeze(DATA / f"{name}_{nelx}x{nely}_{opt_name}.npz", result)
+
+
+def regenerate_full() -> None:
+    """The nightly 3D + Michell references."""
+    for case in FULL_CASES:
+        for opt in case.optimizers:
+            problem = case.build(**case.kwargs, optimizer=make_optimizer(opt))
+            result = Study(problem, schedule=Schedule.single(p=3.0, max_iter=100, tol=1e-3)).run()
+            _freeze(DATA / f"{case.key}_{opt}.npz", result)
+
+
+def main() -> None:
+    """Regenerate frozen references; ``--only`` limits which set."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--only", choices=("2d", "full", "all"), default="all")
+    args = parser.parse_args()
+    DATA.mkdir(parents=True, exist_ok=True)
+    if args.only in ("2d", "all"):
+        regenerate_2d()
+    if args.only in ("full", "all"):
+        regenerate_full()
 
 
 if __name__ == "__main__":
