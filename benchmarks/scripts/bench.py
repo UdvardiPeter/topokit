@@ -82,6 +82,25 @@ def _peak_rss_kb() -> int:
     return int(rss)
 
 
+def _pyamg_version() -> str | None:
+    # the AMG iteration counts are pyamg-version-sensitive; record it for drift.
+    try:
+        import pyamg  # type: ignore[import-untyped]
+    except ImportError:
+        return None
+    return str(pyamg.__version__)
+
+
+def _git_sha() -> str | None:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True, cwd=ROOT
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    return out.stdout.strip()
+
+
 def _worker(label: str) -> None:
     spec = next(c for c in CASES if c["label"] == label)
     rec = run_case(spec)
@@ -103,7 +122,12 @@ def main() -> None:
             records.append({"label": spec["label"], "error": proc.stderr[-2000:].strip()})
             print(f"{spec['label']}: FAILED (see error field)")
             continue
-        rec = json.loads(proc.stdout)
+        try:
+            rec = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            records.append({"label": spec["label"], "error": f"unparseable worker output: {exc}"})
+            print(f"{spec['label']}: FAILED (unparseable worker output)")
+            continue
         records.append(rec)
         print(
             f"{rec['label']}: dof={rec['dof']} {rec['solver']} "
@@ -116,6 +140,8 @@ def main() -> None:
             "python": platform.python_version(),
             "numpy": np.__version__,
             "scipy": scipy.__version__,
+            "pyamg": _pyamg_version(),
+            "git_sha": _git_sha(),
             "generated": datetime.now(UTC).isoformat(timespec="seconds"),
         },
         "cases": records,
