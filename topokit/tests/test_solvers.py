@@ -88,6 +88,18 @@ def test_amg_cg_nonconvergence_raises() -> None:
         a.solve(f)
 
 
+def test_amg_cg_iteration_count_resets_on_failed_solve() -> None:
+    k, f = _cantilever_system()
+    a = AmgCG(tol=1e-10)
+    a.prepare(k)
+    a.solve(f)
+    assert a.last_iterations > 0  # a good solve recorded a count
+    a.max_iter = 1  # force non-convergence on the next solve
+    with pytest.raises(SolverError, match="converge"):
+        a.solve(f)
+    assert a.last_iterations == 0  # reset up front, not left stale from the prior solve
+
+
 def test_amg_cg_missing_pyamg_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
     import topokit.solvers as solvers_mod
 
@@ -144,6 +156,24 @@ def test_satisfies_protocol_and_registry() -> None:
     assert s is not None
     assert registry.get("solvers", "direct") is Direct
     assert registry.get("solvers", "amg_cg") is AmgCG
+
+
+def test_amg_cg_records_iteration_count() -> None:
+    k, f = _cantilever_system()
+    a = AmgCG(tol=1e-10)
+    assert a.last_iterations == 0  # nothing solved yet
+    a.prepare(k)
+    a.solve(f)
+    assert isinstance(a.last_iterations, int)
+    assert 0 < a.last_iterations <= 2000
+
+
+def test_amg_cg_iteration_count_is_worst_over_rhs() -> None:
+    k, f = _cantilever_system()
+    a = AmgCG(tol=1e-10)
+    a.prepare(k)
+    a.solve(np.stack([f, 2.0 * f], axis=1))
+    assert a.last_iterations > 0
 
 
 def test_amg_cg_multi_rhs() -> None:

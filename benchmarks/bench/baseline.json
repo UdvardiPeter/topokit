@@ -1,0 +1,57 @@
+{
+  "meta": {
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "python": "3.12.11",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "pyamg": "5.3.0",
+    "git_sha": "d770abf45ad4cd040e17b3003efbc65caa459c89",
+    "generated": "2026-06-30T23:19:24+00:00"
+  },
+  "cases": [
+    {
+      "label": "cantilever_3d_20",
+      "elements": 8000,
+      "dof": 26460,
+      "solver": "AmgCG",
+      "iterations": 8,
+      "wall_total_s": 10.4775,
+      "wall_per_iter_s": 1.3097,
+      "amg_iterations": 57,
+      "peak_rss_kb": 354176
+    },
+    {
+      "label": "cantilever_3d_40",
+      "elements": 64000,
+      "dof": 201720,
+      "solver": "AmgCG",
+      "iterations": 8,
+      "wall_total_s": 142.2061,
+      "wall_per_iter_s": 17.7758,
+      "amg_iterations": 107,
+      "peak_rss_kb": 2519568
+    },
+    {
+      "label": "cantilever_3d_60",
+      "elements": 216000,
+      "dof": 669780,
+      "solver": "AmgCG",
+      "iterations": 8,
+      "wall_total_s": 702.5394,
+      "wall_per_iter_s": 87.8174,
+      "amg_iterations": 155,
+      "peak_rss_kb": 6564752
+    },
+    {
+      "label": "mbb_150x50_full",
+      "elements": 7500,
+      "dof": 15350,
+      "solver": "Direct",
+      "iterations": 100,
+      "wall_total_s": 13.5579,
+      "wall_per_iter_s": 0.1356,
+      "amg_iterations": null,
+      "peak_rss_kb": 164864
+    }
+  ]
+}

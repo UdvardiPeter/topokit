@@ -68,3 +68,28 @@ def test_optimization_produces_sane_design(build: Builder, volfrac: float) -> No
     # toward 0/1 without demanding the crisp result projection would give.
     grey = float(np.mean((rho > 0.1) & (rho < 0.9)))
     assert grey < 0.6
+
+
+def test_cantilever_3d_builds_and_runs() -> None:
+    from topokit.problem import Schedule, Study
+
+    from topokit_bench.problems import cantilever_3d, make_optimizer
+
+    problem = cantilever_3d(8, 4, 4, optimizer=make_optimizer("oc"))
+    assert problem.model.mesh.dim == 3
+    assert problem.model.mesh.element_kind == "hex8"
+    result = Study(problem, schedule=Schedule.single(p=3.0, max_iter=5, tol=1e-3)).run()
+    assert np.all(np.isfinite(result.design.values))
+    assert result.history["volume"][-1] == pytest.approx(0.3, abs=1e-3)
+
+
+def test_michell_builds_and_is_symmetric() -> None:
+    from topokit.problem import Schedule, Study
+
+    from topokit_bench.problems import make_optimizer, michell
+
+    problem = michell(30, 12, optimizer=make_optimizer("oc"))
+    assert problem.model.mesh.dim == 2
+    result = Study(problem, schedule=Schedule.single(p=3.0, max_iter=20, tol=1e-3)).run()
+    field = result.design.values.reshape(12, 30)  # (nely, nelx), x-fastest
+    assert float(np.mean(np.abs(field - field[::-1, :]))) < 2e-2

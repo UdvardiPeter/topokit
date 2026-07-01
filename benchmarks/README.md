@@ -37,4 +37,41 @@ carries the precision and guards drift.
 
 Reference `.npz` under `tests/data/` are regenerated only by deliberate
 maintainer action: `uv run python scripts/regenerate.py` (commit with a
-changelog note; never run in CI).
+changelog note; never run in CI). Use `--only {2d,full,all}` to limit the set —
+e.g. `--only full` regenerates just the 3D + Michell references below.
+
+## Nightly full suite
+
+`test-regression-full` (nightly only, `pytest -m regression_full`) adds 3D
+correctness on top of the per-PR 2D gate:
+
+- **3D cantilever** (`24x12x12`, OC) and **Michell** (`90x30`, OC + MMA) —
+  frozen-reference regression with the same reference assertions as the 2D suite
+  (volume, compliance, density field, iteration band) plus OC/MMA agreement, and
+  a mirror-symmetry topology check on the Michell reference.
+- **Robustness sweep** (`test_robustness.py`) — `volfrac x rmin x resolution`
+  over the 2D builders plus small 3D points, asserting *clean convergence*
+  (finite field in `[0, 1]`, volume on target, net objective progress, no
+  blow-up) rather than frozen values.
+
+3D / Michell references are regenerated with `scripts/regenerate.py --only full`
+(maintainer-only). The anchor is the same as the 2D suite — method-level lineage
+(hex8 element, SIMP, compliance, BCs) plus the frozen `.npz` guarding drift — not
+a published 3D compliance number.
+
+## Perf baseline
+
+`bench` (nightly only, never cached) runs a scaling study — 3D cantilever at
+`20^3 / 40^3` plus the 2D `150x50` full run — recording per-iteration wall time,
+peak RSS, solver, and AMG CG iterations to `bench/baseline.json` (committed;
+refreshed by `uv run python scripts/bench.py`). It is a **soft baseline**: no
+assertions, no gating. Hard perf budgets land in WP-2.2.
+
+`60^3` (~6.6 GB peak) is a **heavy** case: it is skipped by default so the study
+fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
+~8+ GB free). The committed baseline carries the `60^3` row from dedicated
+hardware. The 1M-element target is aspirational / dedicated-hardware.
+
+The nightly workflow (`.github/workflows/nightly.yml`) runs these tiers on a daily
+cron against `main` and uploads `baseline.json` as an artifact for drift
+inspection.
