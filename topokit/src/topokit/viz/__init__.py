@@ -9,4 +9,6 @@ PyVista for 3D iso-surfaces. Everything is headless-safe.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from topokit.viz._convergence import plot_convergence
+
+__all__ = ["plot_convergence"]
