@@ -96,6 +96,15 @@ def test_view_slices_2d_raises() -> None:
         view_slices(_design_2d(4, 3))
 
 
+def test_view_slices_rejects_bad_axis_and_n() -> None:
+    from topokit.viz import VizError, view_slices
+
+    with pytest.raises(VizError, match="axis"):
+        view_slices(_design_3d(6), axis="w")
+    with pytest.raises(VizError, match="n must be"):
+        view_slices(_design_3d(6), n=0)
+
+
 def test_liveview_headless_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     import topokit.viz._live as live_mod
     from topokit.events import EventBus, FieldSnapshot

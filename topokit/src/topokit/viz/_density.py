@@ -75,6 +75,10 @@ def view_slices(obj: Any, *, axis: str = "z", n: int = 3) -> Figure:
     values, mesh = _resolve(obj)
     if mesh.dim != 3:
         raise VizError("view_slices needs a 3D field; a 2D field is already a slice — use view()")
+    if axis not in _AXES:
+        raise VizError(f"axis must be one of {sorted(_AXES)}; got {axis!r}")
+    if n < 1:
+        raise VizError(f"n must be >= 1; got {n}")
     require_matplotlib()
     from matplotlib.figure import Figure
 
