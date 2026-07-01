@@ -76,3 +76,22 @@ def test_view_3d_returns_isosurface_with_points() -> None:
     plotter = view(design, iso=0.5, off_screen=True)
     assert isinstance(plotter, pv.Plotter)
     assert any(getattr(m, "n_points", 0) > 0 for m in plotter.meshes)
+
+
+def test_view_slices_3d_returns_n_subplots() -> None:
+    from matplotlib.figure import Figure
+
+    from topokit.viz import view_slices
+
+    fig = view_slices(_design_3d(6), axis="z", n=3)
+    assert isinstance(fig, Figure)
+    assert len(fig.axes) == 3
+
+
+def test_view_slices_2d_raises() -> None:
+    import pytest
+
+    from topokit.viz import VizError, view_slices
+
+    with pytest.raises(VizError, match="2D"):
+        view_slices(_design_2d(4, 3))

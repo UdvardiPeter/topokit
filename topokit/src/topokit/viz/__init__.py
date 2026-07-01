@@ -10,6 +10,6 @@ PyVista for 3D iso-surfaces. Everything is headless-safe.
 from __future__ import annotations
 
 from topokit.viz._convergence import plot_convergence
-from topokit.viz._density import VizError, view
+from topokit.viz._density import VizError, view, view_slices
 
-__all__ = ["VizError", "plot_convergence", "view"]
+__all__ = ["VizError", "plot_convergence", "view", "view_slices"]
