@@ -29,9 +29,14 @@ def _image_data(values: np.ndarray, mesh: Any) -> Any:
     """Build a PyVista ImageData with density as cell data (x-fastest = VTK order)."""
     pv = require_pyvista()
     dims = tuple(n + 1 for n in mesh.shape)  # point dims = cells + 1 per axis
-    grid = pv.ImageData(dimensions=dims, spacing=tuple(mesh.spacing), origin=(0.0, 0.0, 0.0))
+    grid = pv.ImageData(dimensions=dims, spacing=tuple(mesh.spacing), origin=tuple(mesh.origin))
     grid.cell_data["rho"] = values
     return grid
+
+
+def _isosurface(values: np.ndarray, mesh: Any, iso: float) -> Any:
+    """Density iso-surface at ``iso`` (cell data → point data → contour)."""
+    return _image_data(values, mesh).cell_data_to_point_data().contour([iso], scalars="rho")
 
 
 def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Plotter:
@@ -51,9 +56,8 @@ def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Pl
         ax.set_ylabel("y")
         return fig
     pv = require_pyvista()
-    surface = _image_data(values, mesh).cell_data_to_point_data().contour([iso], scalars="rho")
     plotter: Plotter = pv.Plotter(off_screen=off_screen or not has_display())
-    plotter.add_mesh(surface, color="tan")
+    plotter.add_mesh(_isosurface(values, mesh, iso), color="tan")
     return plotter
 
 
@@ -61,7 +65,11 @@ _AXES = {"x": 0, "y": 1, "z": 2}
 
 
 def view_slices(obj: Any, *, axis: str = "z", n: int = 3) -> Figure:
-    """3D density as a grid of ``n`` cross-sections along ``axis`` (matplotlib)."""
+    """3D density as a grid of ``n`` cross-sections along ``axis`` (matplotlib).
+
+    The interactive PyVista plane-widget variant is deferred to a later WP; this
+    v1 renders the static, headless-testable small-multiples grid.
+    """
     values, mesh = _resolve(obj)
     if mesh.dim != 3:
         raise VizError("view_slices needs a 3D field; a 2D field is already a slice — use view()")

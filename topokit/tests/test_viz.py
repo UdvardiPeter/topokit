@@ -125,6 +125,25 @@ def test_liveview_broken_render_does_not_raise(monkeypatch: pytest.MonkeyPatch) 
     bus.publish(FieldSnapshot(iteration=5, rho=np.linspace(0, 1, grid.n_elements), mesh=grid))
 
 
+def test_liveview_tracks_iteration_hud(monkeypatch: pytest.MonkeyPatch) -> None:
+    import topokit.viz._live as live_mod
+    from topokit.events import EventBus, IterationFinished
+    from topokit.viz import LiveView
+
+    monkeypatch.setattr(live_mod, "has_display", lambda: False)  # HUD tracks even headless
+    lv = LiveView()
+    bus = EventBus()
+    bus.subscribe(IterationFinished, lv)
+    bus.publish(
+        IterationFinished(
+            iteration=7, design_change=0.1, responses={"compliance": 12.5}, wall_time=0.0
+        )
+    )
+    assert lv._hud is not None and lv._hud[0] == 7
+    assert "iter 7" in lv._hud_title()
+    assert "compliance=12.5" in lv._hud_title()
+
+
 def test_result_sugar_delegates_to_viz() -> None:
     from matplotlib.figure import Figure
 
