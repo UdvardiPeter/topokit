@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 fast = ["pyamg>=5"]
+viz = ["pyvista>=0.44", "matplotlib>=3.8"]
 
 [dependency-groups]
 dev = [
@@ -25,6 +26,8 @@ dev = [
   "import-linter>=2.1",
   "scipy-stubs>=1.17",
   "pyamg>=5",
+  "pyvista>=0.44",
+  "matplotlib>=3.8",
 ]
 
 [build-system]
@@ -66,6 +69,7 @@ root_package = "topokit"
 name = "L0 layering: selection consumes mesh; the rest are independent"
 type = "layers"
 layers = [
+  "topokit.viz",
   "topokit.problem",
   "topokit.responses",
   "topokit.fem : topokit.solvers : topokit.parametrization : topokit.optimizers",
@@ -73,3 +77,4 @@ layers = [
   "topokit.mesh",
   "topokit.backend : topokit.events : topokit.fields : topokit.registry : topokit.testing : topokit.checkpoint",
 ]
+ignore_imports = ["topokit.problem -> topokit.viz"]

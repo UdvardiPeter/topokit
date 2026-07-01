@@ -46,6 +46,7 @@ class FieldSnapshot(Event):
 
     iteration: int
     rho: object
+    mesh: object
 
 
 @dataclass(frozen=True, slots=True)

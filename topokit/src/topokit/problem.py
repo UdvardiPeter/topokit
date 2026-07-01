@@ -24,6 +24,7 @@ import time
 import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -276,6 +277,24 @@ class Result:
     reason: str
     timing: float
     kkt: float
+
+    def view(self, **kwargs: Any) -> object:
+        """Render the final design (2D heatmap / 3D iso-surface). Needs ``[viz]``."""
+        from topokit.viz import view
+
+        return view(self, **kwargs)
+
+    def plot_convergence(self, **kwargs: Any) -> object:
+        """Plot objective/constraint/Δx curves. Needs ``[viz]``."""
+        from topokit.viz import plot_convergence
+
+        return plot_convergence(self, **kwargs)
+
+    def view_slices(self, **kwargs: Any) -> object:
+        """Render 3D density cross-sections. Needs ``[viz]``."""
+        from topokit.viz import view_slices
+
+        return view_slices(self, **kwargs)
 
 
 @dataclass
@@ -568,7 +587,9 @@ class Study:
                     )
                 )
                 if self.snapshot_every and iteration % self.snapshot_every == 0:
-                    self.events.publish(FieldSnapshot(iteration=iteration, rho=sol.density))
+                    self.events.publish(
+                        FieldSnapshot(iteration=iteration, rho=sol.density, mesh=sol.mesh)
+                    )
 
                 self._final = IterationState(
                     iteration=iteration,
