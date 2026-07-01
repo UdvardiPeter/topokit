@@ -123,3 +123,28 @@ def test_liveview_broken_render_does_not_raise(monkeypatch: pytest.MonkeyPatch) 
     grid = _design_2d(4, 3).mesh
     # EventBus catches subscriber exceptions; the run must survive a broken view
     bus.publish(FieldSnapshot(iteration=5, rho=np.linspace(0, 1, grid.n_elements), mesh=grid))
+
+
+def test_result_sugar_delegates_to_viz() -> None:
+    from matplotlib.figure import Figure
+
+    from topokit.problem import Result
+
+    design = _design_2d(4, 3)
+    result = Result(
+        design=design,
+        x=design.values,
+        objective=1.0,
+        best_design=design,
+        best_x=design.values,
+        best_objective=1.0,
+        history={"objective": [2.0, 1.0], "change": [0.5, 0.1]},
+        iterations=2,
+        stages_run=1,
+        converged=True,
+        reason="tol",
+        timing=0.1,
+        kkt=0.0,
+    )
+    assert isinstance(result.view(), Figure)
+    assert isinstance(result.plot_convergence(), Figure)

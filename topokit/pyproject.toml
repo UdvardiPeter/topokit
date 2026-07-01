@@ -77,3 +77,4 @@ layers = [
   "topokit.mesh",
   "topokit.backend : topokit.events : topokit.fields : topokit.registry : topokit.testing : topokit.checkpoint",
 ]
+ignore_imports = ["topokit.problem -> topokit.viz"]
