@@ -1,6 +1,7 @@
 """Tier-1 tests for topokit.viz (headless: asserts on data/geometry, not pixels)."""
 
 import numpy as np
+import pytest
 
 from topokit.fields import DesignField
 from topokit.mesh import StructuredGrid
@@ -89,9 +90,36 @@ def test_view_slices_3d_returns_n_subplots() -> None:
 
 
 def test_view_slices_2d_raises() -> None:
-    import pytest
-
     from topokit.viz import VizError, view_slices
 
     with pytest.raises(VizError, match="2D"):
         view_slices(_design_2d(4, 3))
+
+
+def test_liveview_headless_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import topokit.viz._live as live_mod
+    from topokit.events import EventBus, FieldSnapshot
+    from topokit.viz import LiveView
+
+    monkeypatch.setattr(live_mod, "has_display", lambda: False)
+    bus = EventBus()
+    lv = LiveView()
+    bus.subscribe(FieldSnapshot, lv)
+    grid = _design_2d(4, 3).mesh
+    bus.publish(FieldSnapshot(iteration=5, rho=np.linspace(0, 1, grid.n_elements), mesh=grid))
+    assert lv.rendered == 0  # headless: no render happened
+
+
+def test_liveview_broken_render_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    import topokit.viz._live as live_mod
+    from topokit.events import EventBus, FieldSnapshot
+    from topokit.viz import LiveView
+
+    monkeypatch.setattr(live_mod, "has_display", lambda: True)
+    lv = LiveView()
+    monkeypatch.setattr(lv, "_draw", lambda snap: (_ for _ in ()).throw(RuntimeError("boom")))
+    bus = EventBus()
+    bus.subscribe(FieldSnapshot, lv)
+    grid = _design_2d(4, 3).mesh
+    # EventBus catches subscriber exceptions; the run must survive a broken view
+    bus.publish(FieldSnapshot(iteration=5, rho=np.linspace(0, 1, grid.n_elements), mesh=grid))
