@@ -88,6 +88,18 @@ def test_amg_cg_nonconvergence_raises() -> None:
         a.solve(f)
 
 
+def test_amg_cg_iteration_count_resets_on_failed_solve() -> None:
+    k, f = _cantilever_system()
+    a = AmgCG(tol=1e-10)
+    a.prepare(k)
+    a.solve(f)
+    assert a.last_iterations > 0  # a good solve recorded a count
+    a.max_iter = 1  # force non-convergence on the next solve
+    with pytest.raises(SolverError, match="converge"):
+        a.solve(f)
+    assert a.last_iterations == 0  # reset up front, not left stale from the prior solve
+
+
 def test_amg_cg_missing_pyamg_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
     import topokit.solvers as solvers_mod
 

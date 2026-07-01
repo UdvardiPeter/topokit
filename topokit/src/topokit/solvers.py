@@ -164,6 +164,7 @@ class AmgCG:
         """Run preconditioned CG per right-hand side."""
         if self._matrix is None:
             raise SolverError("call prepare() before solve()")
+        self.last_iterations = 0  # reset up front; a mid-solve failure leaves no stale count
         b = np.asarray(rhs, dtype=np.float64)
         single = b.ndim == 1
         cols = b[:, None] if single else b
