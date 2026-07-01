@@ -568,7 +568,9 @@ class Study:
                     )
                 )
                 if self.snapshot_every and iteration % self.snapshot_every == 0:
-                    self.events.publish(FieldSnapshot(iteration=iteration, rho=sol.density))
+                    self.events.publish(
+                        FieldSnapshot(iteration=iteration, rho=sol.density, mesh=sol.mesh)
+                    )
 
                 self._final = IterationState(
                     iteration=iteration,

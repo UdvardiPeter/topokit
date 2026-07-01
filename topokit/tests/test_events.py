@@ -73,7 +73,7 @@ def test_events_are_frozen() -> None:
 
 def test_all_event_types_constructible() -> None:
     StudyStarted(config={"volume_fraction": 0.3})
-    FieldSnapshot(iteration=5, rho=object())
+    FieldSnapshot(iteration=5, rho=object(), mesh=object())
     StageFinished(stage=2, reason="design change below tol")
     CheckResult(name="enclosed_voids", passed=False, details={"count": 1})
     StudyFinished(reason="max iterations", summary={"iterations": 200})

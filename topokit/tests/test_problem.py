@@ -207,6 +207,17 @@ def test_study_emits_events() -> None:
     assert "volume" in iters[-1].responses
 
 
+def test_field_snapshot_carries_mesh() -> None:
+    problem = _problem()
+    study = Study(problem, schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0))
+    seen: list[FieldSnapshot] = []
+    study.events.subscribe(FieldSnapshot, seen.append)
+    study.run()
+    assert seen, "expected at least one FieldSnapshot"
+    snap = seen[-1]
+    assert snap.mesh is problem.model.mesh
+
+
 def test_iterate_matches_run() -> None:
     states = list(
         Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=15, tol=0.0)).iterate()
