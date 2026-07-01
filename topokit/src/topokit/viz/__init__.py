@@ -12,10 +12,13 @@ Display notes:
   object-oriented ``Figure`` objects — they display inline in Jupyter and save via
   ``fig.savefig(...)``, but are not tied to ``pyplot`` so ``plt.show()`` won't pick
   them up in a plain script.
-- 3D ``view`` returns a PyVista ``Plotter``; call ``.show()`` (window) or
-  ``.screenshot(...)`` (file). Interactive 3D *inline in Jupyter* needs the trame
-  backend, which ``[viz]`` keeps out to stay lean: ``pip install "pyvista[jupyter]"``
-  enables it. 2D/curve views and static 3D screenshots need nothing extra.
+- 3D ``view`` returns a PyVista ``Plotter``; ``.show()`` (window) or
+  ``.screenshot(...)`` (file). 3D rendering needs a display: on a **headless**
+  server, install a virtual framebuffer or an OSMesa/EGL VTK and call
+  ``pyvista.start_xvfb()`` first — otherwise off-screen VTK can crash. Interactive
+  3D *inline in Jupyter* additionally needs the trame backend
+  (``pip install "pyvista[jupyter]"``); ``[viz]`` keeps both out to stay lean.
+- 2D and curve views (matplotlib) need nothing extra and are fully headless.
 """
 
 from __future__ import annotations

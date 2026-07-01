@@ -187,16 +187,19 @@ def test_require_matplotlib_missing_gives_actionable_hint(monkeypatch: pytest.Mo
 
 
 def test_view_3d_offscreen_screenshot_renders() -> None:
-    # validates actual off-screen rendering (not just VTK geometry); skips where the
-    # pyvista wheel has no headless GL context (no OSMesa/EGL) rather than false-failing.
+    # Validates actual off-screen rendering. On a bare headless box (no display, no
+    # OSMesa/xvfb) VTK can HARD-CRASH (segfault) here — uncatchable by try/except — so
+    # skip before rendering when there is no display. The VTK geometry pipeline is
+    # covered headless by test_view_3d_returns_isosurface_with_points.
+    from topokit.viz import _backend
+
+    if not _backend.has_display():
+        pytest.skip("off-screen 3D rendering needs a display or virtual framebuffer (xvfb/OSMesa)")
     import pyvista as pv
 
     from topokit.viz import view
 
     plotter = view(_design_3d(6), iso=0.5, off_screen=True)
     assert isinstance(plotter, pv.Plotter)
-    try:
-        img = plotter.screenshot(return_img=True)
-    except Exception as exc:  # environment-dependent headless GL context
-        pytest.skip(f"off-screen rendering unavailable in this environment: {exc}")
+    img = plotter.screenshot(return_img=True)
     assert img is not None and np.asarray(img).size > 0
