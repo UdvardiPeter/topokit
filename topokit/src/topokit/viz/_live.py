@@ -21,6 +21,15 @@ class LiveView:
 
     Rendering is on the main thread inside the callback; cadence is throttled
     upstream by ``Study.snapshot_every``. With no display it is a silent no-op.
+
+    Examples
+    --------
+    Attach to a study (renders live when a display is present)::
+
+        from topokit.viz import LiveView
+
+        LiveView.attach(study)
+        study.run()
     """
 
     def __init__(self, *, iso: float = 0.5) -> None:
