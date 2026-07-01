@@ -42,7 +42,9 @@ def _isosurface(values: np.ndarray, mesh: Any, iso: float) -> Any:
 def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Plotter:
     """Render a density field: 2D heatmap or 3D iso-surface at ``iso``.
 
-    2D returns a matplotlib ``Figure``; 3D returns a PyVista ``Plotter``.
+    2D returns a matplotlib ``Figure`` (display inline in Jupyter or ``fig.savefig``);
+    3D returns a PyVista ``Plotter`` (``.show()`` for a window, ``.screenshot()`` for
+    a file). Pass ``off_screen=True`` to render the 3D scene without a window.
     """
     values, mesh = _resolve(obj)
     if mesh.dim == 2:

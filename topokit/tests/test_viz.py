@@ -167,3 +167,27 @@ def test_result_sugar_delegates_to_viz() -> None:
     )
     assert isinstance(result.view(), Figure)
     assert isinstance(result.plot_convergence(), Figure)
+
+
+def test_require_matplotlib_missing_gives_actionable_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "matplotlib", None)  # make `import matplotlib` raise
+    with pytest.raises(ImportError, match=r"\[viz\]"):
+        _backend.require_matplotlib()
+
+
+def test_view_3d_offscreen_screenshot_renders() -> None:
+    # validates actual off-screen rendering (not just VTK geometry); skips where the
+    # pyvista wheel has no headless GL context (no OSMesa/EGL) rather than false-failing.
+    import pyvista as pv
+
+    from topokit.viz import view
+
+    plotter = view(_design_3d(6), iso=0.5, off_screen=True)
+    assert isinstance(plotter, pv.Plotter)
+    try:
+        img = plotter.screenshot(return_img=True)
+    except Exception as exc:  # environment-dependent headless GL context
+        pytest.skip(f"off-screen rendering unavailable in this environment: {exc}")
+    assert img is not None and np.asarray(img).size > 0
