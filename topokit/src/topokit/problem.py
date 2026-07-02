@@ -43,7 +43,7 @@ from topokit.fields import DesignField
 from topokit.mesh import StructuredGrid
 from topokit.optimizers import OC, Optimizer
 from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside
-from topokit.responses import Constraint, Response, Solution
+from topokit.responses import Compliance, Constraint, Response, Solution
 from topokit.solvers import LinearSolver, auto_solver
 
 _F64 = npt.NDArray[np.float64]
@@ -165,6 +165,23 @@ class Problem:
                 )
             seen.add(key)
         self.optimizer = optimizer if optimizer is not None else OC()
+        # Fail-loud at construction, not after the first (possibly expensive)
+        # FE solve: OC's single-constraint requirement and Compliance's
+        # per-case weight count are both knowable here.
+        if isinstance(self.optimizer, OC) and len(self.constraints) != 1:
+            raise ProblemError(
+                f"OC handles exactly one constraint, got {len(self.constraints)}; "
+                "use MMA for general constraint sets"
+            )
+        for resp in (objective, *(c.response for c in self.constraints)):
+            if (
+                isinstance(resp, Compliance)
+                and resp.weights is not None
+                and len(resp.weights) != model.n_cases
+            ):
+                raise ProblemError(
+                    f"{resp.name}: {len(resp.weights)} weights for {model.n_cases} load cases"
+                )
         if isinstance(solver, str):
             if solver != "auto":
                 raise ProblemError(f"unknown solver {solver!r}; use 'auto' or a LinearSolver")

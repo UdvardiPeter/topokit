@@ -521,3 +521,26 @@ def test_study_reports_kkt() -> None:
     assert all(np.isfinite(it.kkt) for it in iters)
     assert np.isfinite(result.kkt)
     assert len(result.history["kkt"]) == result.iterations
+
+
+def test_oc_constraint_count_validated_at_construction() -> None:
+    model = _cantilever()
+    chain = DensityFilter(radius=1.5) | SIMP(p=3.0)
+    with pytest.raises(ProblemError, match="exactly one constraint"):
+        Problem(model, chain, objective=Compliance(), optimizer=OC())
+    two = [Volume() <= 0.4, (Volume(region="all") <= 0.5).labeled("volume_all")]
+    with pytest.raises(ProblemError, match="exactly one constraint"):
+        Problem(model, chain, objective=Compliance(), constraints=two, optimizer=OC())
+
+
+def test_compliance_weights_validated_at_construction() -> None:
+    model = _cantilever()  # one load case
+    chain = DensityFilter(radius=1.5) | SIMP(p=3.0)
+    with pytest.raises(ProblemError, match="load case"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(weights=(1.0, 2.0)),
+            constraints=[Volume() <= 0.4],
+            optimizer=MMA(),
+        )
