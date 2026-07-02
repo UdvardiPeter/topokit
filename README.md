@@ -8,8 +8,7 @@ Open-source topology optimization for engineers
 
 ## Status
 
-Pre-alpha. The numerical core runs end to end (2D and 3D); geometry I/O and
-manufacturing constraints are next.
+Pre-alpha. The numerical core runs end to end (2D and 3D)
 
 | Module | State |
 |---|---|
