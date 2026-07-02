@@ -1,9 +1,9 @@
-# TopoKit
+# topokit
 
-Open-source topology optimization for engineers: real CAD geometry in,
-manufacturable geometry out, scriptable in Python.
+This 0.0.0 upload only reserves the package name. There is nothing to
+install yet.
 
-TopoKit is under active development. This 0.0.0 release is a placeholder
-holding the name; the first usable release lands with the public launch.
+TopoKit is a topology optimization library for Python, currently in
+development in a private repo. The first real release will replace this.
 
-Contact: udvardi.peter98@gmail.com
+Questions: udvardi.peter98@gmail.com
