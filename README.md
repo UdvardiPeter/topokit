@@ -8,9 +8,9 @@ Open-source topology optimization for engineers
 
 ## Quickstart
 
-A 60×20 cantilever, left edge fixed, downward tip load. Runs in ~15 s
-(not on PyPI yet — from a checkout: `uv sync --all-packages`, then
-`uv run python quickstart.py`):
+A 60×20 cantilever, left edge fixed, downward tip load, runs in about 15 s.
+Install with `pip install --pre topokit` (pre-alpha, published as a dev
+release):
 
 ```python
 from topokit import (
