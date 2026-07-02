@@ -3,7 +3,20 @@
 """Open-source topology optimization for engineers."""
 
 from topokit.backend import default_backend
-from topokit.fem import LinearElasticity
+from topokit.events import EventBus
+from topokit.fem import (
+    ABS,
+    ALUMINUM_6061,
+    PA12,
+    RESIN_SLA,
+    STEEL,
+    BodyForce,
+    LinearElasticity,
+    Material,
+    PointLoad,
+    SurfaceTraction,
+)
+from topokit.mesh import StructuredGrid
 from topokit.optimizers import MMA, OC
 from topokit.parametrization import (
     SIMP,
@@ -15,33 +28,64 @@ from topokit.parametrization import (
 )
 from topokit.problem import IterationState, Problem, Result, Schedule, Stage, Study
 from topokit.registry import registry
-from topokit.responses import Compliance, Volume
+from topokit.responses import Compliance, Constraint, Volume, von_mises
+from topokit.selection import (
+    Box,
+    Cylinder,
+    FaceSetSelector,
+    NearPoint,
+    OnBoundary,
+    PlaneSlab,
+    Predicate,
+    Sphere,
+)
 from topokit.solvers import AmgCG, Direct
 
 __version__ = "0.0.1.dev0"
 
 __all__ = [
+    "ABS",
+    "ALUMINUM_6061",
     "MMA",
     "OC",
+    "PA12",
+    "RESIN_SLA",
     "SIMP",
+    "STEEL",
     "AmgCG",
+    "BodyForce",
+    "Box",
     "Compliance",
+    "Constraint",
+    "Cylinder",
     "DensityFilter",
     "Direct",
+    "EventBus",
+    "FaceSetSelector",
     "Heaviside",
     "IterationState",
     "LinearElasticity",
+    "Material",
+    "NearPoint",
+    "OnBoundary",
+    "PlaneSlab",
+    "PointLoad",
+    "Predicate",
     "Problem",
     "RadialDensityFilter",
     "Result",
     "Schedule",
     "SensitivityFilter",
+    "Sphere",
     "Stage",
+    "StructuredGrid",
     "Study",
+    "SurfaceTraction",
     "SymmetryMap",
     "Volume",
     "default_backend",
     "registry",
+    "von_mises",
 ]
 
 # Convention: the backends group stores instances; component groups
