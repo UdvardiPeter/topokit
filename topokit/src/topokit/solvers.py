@@ -19,6 +19,7 @@ default CG tolerance of 1e-8 keeps the measured displacement error around
 
 from __future__ import annotations
 
+import contextlib
 import warnings
 from typing import Any, Protocol, runtime_checkable
 
@@ -82,15 +83,18 @@ class Direct:
         """Factorize ``matrix``."""
         csr = _to_scipy_csr(matrix)
         self._matrix = csr
-        try:
+        factorize: Any = None
+        with contextlib.suppress(ImportError):
             from sksparse.cholmod import cholesky  # type: ignore[import-not-found]
 
-            self._solve_fn = cholesky(csr.tocsc())
-        except ImportError:
-            try:
+            factorize = cholesky
+        try:
+            if factorize is not None:
+                self._solve_fn = factorize(csr.tocsc())
+            else:
                 self._solve_fn = scipy.sparse.linalg.splu(csr.tocsc()).solve
-            except RuntimeError as exc:
-                raise SolverError(f"factorization failed: {exc}; check supports") from exc
+        except Exception as exc:  # CHOLMOD raises its own hierarchy, splu RuntimeError
+            raise SolverError(f"factorization failed: {exc}; check supports") from exc
 
     def solve(self, rhs: Any) -> Any:
         """Solve for ``rhs`` using the stored factorization."""
