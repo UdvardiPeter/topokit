@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for the array backend.
 
 Kernel-registry state is module-global, so kernel tests use unique names

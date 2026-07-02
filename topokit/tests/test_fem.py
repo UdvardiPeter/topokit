@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tier-1 tests for linear elasticity: elements, loads, patch and analytic cases."""
 
 import numpy as np

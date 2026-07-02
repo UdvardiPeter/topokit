@@ -44,6 +44,10 @@
 
 ::: topokit.checkpoint
 
+## topokit.viz
+
+::: topokit.viz
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance

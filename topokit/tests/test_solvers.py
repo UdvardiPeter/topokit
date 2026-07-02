@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for linear solvers."""
 
 from typing import Any
@@ -265,3 +267,22 @@ def test_amg_cg_does_not_disturb_global_rng() -> None:
     a = AmgCG()
     a.prepare(k)
     np.testing.assert_array_equal(np.random.random(3), expected)
+
+
+def test_direct_wraps_cholmod_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    # a numerical CHOLMOD failure must surface as SolverError, like the splu path
+    import sys
+    import types
+
+    def failing_cholesky(csc: Any) -> object:
+        raise RuntimeError("matrix not positive definite")
+
+    chol = types.ModuleType("sksparse.cholmod")
+    chol.cholesky = failing_cholesky  # type: ignore[attr-defined]
+    sk = types.ModuleType("sksparse")
+    sk.cholmod = chol  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "sksparse", sk)
+    monkeypatch.setitem(sys.modules, "sksparse.cholmod", chol)
+    k, _b, _x = _spd_system()
+    with pytest.raises(SolverError, match="factorization failed"):
+        Direct().prepare(k)

@@ -15,6 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 fast = ["pyamg>=5"]
 viz = ["pyvista>=0.44", "matplotlib>=3.8"]
+all = ["topokit[fast,viz]"]
 
 [dependency-groups]
 dev = [

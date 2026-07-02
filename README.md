@@ -8,7 +8,7 @@ Open-source topology optimization for engineers
 
 ## Status
 
-Pre-alpha. Foundation layer only.
+Pre-alpha. The numerical core runs end to end (2D and 3D)
 
 | Module | State |
 |---|---|
@@ -30,8 +30,9 @@ Pre-alpha. Foundation layer only.
 | `topokit.parametrization` radial density filter | done |
 | `benchmarks` 3D regression — cantilever + Michell + robustness sweep (nightly) | done |
 | `benchmarks` perf scaling-study baseline + `nightly.yml` cron | done |
-| manufacturing constraints | next |
-| CAD import/export, manufacturing constraints | planned |
+| `topokit.viz` convergence curves, density views, slices, LiveView (`[viz]` extra) | done |
+| performance pass (`assemble` hot kernel, numba `[fast]`), manufacturing constraints | next |
+| CAD import/export | planned |
 | Local daemon, Fusion 360 add-in | planned |
 
 ## Dev quick start

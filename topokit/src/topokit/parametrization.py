@@ -156,9 +156,9 @@ class Chain:
             if link.is_reduced_input:
                 raise ParametrizationError(f"{type(link).__name__} must be the first link")
         kinds = {type(link).__name__ for link in links}
-        if "DensityFilter" in kinds and "SensitivityFilter" in kinds:
+        if kinds & {"DensityFilter", "RadialDensityFilter"} and "SensitivityFilter" in kinds:
             warnings.warn(
-                "combining DensityFilter with SensitivityFilter mixes a real filter "
+                "combining a density filter with SensitivityFilter mixes a real filter "
                 "with a gradient heuristic; use one of them",
                 stacklevel=2,
             )

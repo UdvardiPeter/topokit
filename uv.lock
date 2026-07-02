@@ -1563,6 +1563,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "matplotlib" },
+    { name = "pyamg" },
+    { name = "pyvista" },
+]
 fast = [
     { name = "pyamg" },
 ]
@@ -1591,8 +1596,9 @@ requires-dist = [
     { name = "pyamg", marker = "extra == 'fast'", specifier = ">=5" },
     { name = "pyvista", marker = "extra == 'viz'", specifier = ">=0.44" },
     { name = "scipy", specifier = ">=1.15" },
+    { name = "topokit", extras = ["fast", "viz"], marker = "extra == 'all'" },
 ]
-provides-extras = ["fast", "viz"]
+provides-extras = ["fast", "viz", "all"]
 
 [package.metadata.requires-dev]
 dev = [
