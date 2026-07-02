@@ -28,6 +28,7 @@ manufacturing constraints land next.
 | `topokit.optimizers` | OC and clean-room MMA optimizers |
 | `topokit.problem` | Problem, the Study loop, SIMP/Heaviside continuation |
 | `topokit.checkpoint` | single-file `.topo` checkpoint save and resume |
+| `topokit.viz` | convergence curves, density views, slices, LiveView (`[viz]` extra) |
 | `topokit.registry` | plugin resolution by group and name |
 | `topokit.events` | typed event bus for the optimization loop |
 | `topokit.fields` | validated field containers (design, element, nodal) |
