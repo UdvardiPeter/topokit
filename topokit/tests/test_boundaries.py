@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Meta-tests for the import-linter layer contract.
 
 import-linter silently ignores modules that are not listed in a contract;

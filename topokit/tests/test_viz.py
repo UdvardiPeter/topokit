@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tier-1 tests for topokit.viz (headless: asserts on data/geometry, not pixels)."""
 
 import numpy as np
