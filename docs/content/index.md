@@ -7,6 +7,46 @@ assembles mesh, physics, parametrization, objective, constraints, and an
 optimizer, and a `Study` drives the loop to convergence. CAD I/O and
 manufacturing constraints land next.
 
+## Quickstart
+
+A 60×20 cantilever, left edge fixed, downward tip load (~15 s):
+
+```python
+from topokit import (
+    MMA,
+    SIMP,
+    Compliance,
+    DensityFilter,
+    LinearElasticity,
+    Material,
+    NearPoint,
+    PlaneSlab,
+    PointLoad,
+    Problem,
+    StructuredGrid,
+    Study,
+    Volume,
+)
+
+mesh = StructuredGrid.box(size=(60.0, 20.0), shape=(60, 20))
+model = LinearElasticity(
+    mesh,
+    Material(E=1.0, nu=0.3, rho=1.0),
+    supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0)), "all")],
+    loads=[PointLoad(NearPoint((60.0, 10.0)), force=(0.0, -1.0))],
+)
+chain = DensityFilter(radius=1.5) | SIMP()
+problem = Problem(
+    model, chain, objective=Compliance(), constraints=[Volume() <= 0.4], optimizer=MMA()
+)
+result = Study(problem).run()  # SIMP continuation on by default
+
+result.design.save("cantilever.npz")
+```
+
+With the `[viz]` extra, `result.view()` renders the density field and
+`result.plot_convergence()` the convergence curves.
+
 ## Goals
 
 - Import CAD geometry, export manufacturable geometry

@@ -6,6 +6,50 @@ Open-source topology optimization for engineers
 - Dev setup: see [CONTRIBUTING.md](CONTRIBUTING.md)
 - Architecture overview: see [ARCHITECTURE.md](ARCHITECTURE.md)
 
+## Quickstart
+
+A 60×20 cantilever, left edge fixed, downward tip load. Runs in ~15 s
+(not on PyPI yet — from a checkout: `uv sync --all-packages`, then
+`uv run python quickstart.py`):
+
+```python
+from topokit import (
+    MMA,
+    SIMP,
+    Compliance,
+    DensityFilter,
+    LinearElasticity,
+    Material,
+    NearPoint,
+    PlaneSlab,
+    PointLoad,
+    Problem,
+    StructuredGrid,
+    Study,
+    Volume,
+)
+
+mesh = StructuredGrid.box(size=(60.0, 20.0), shape=(60, 20))
+model = LinearElasticity(
+    mesh,
+    Material(E=1.0, nu=0.3, rho=1.0),
+    supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0)), "all")],
+    loads=[PointLoad(NearPoint((60.0, 10.0)), force=(0.0, -1.0))],
+)
+chain = DensityFilter(radius=1.5) | SIMP()
+problem = Problem(
+    model, chain, objective=Compliance(), constraints=[Volume() <= 0.4], optimizer=MMA()
+)
+result = Study(problem).run()  # SIMP continuation on by default
+
+result.design.save("cantilever.npz")
+print(f"compliance {result.objective:.1f} after {result.iterations} iterations")
+```
+
+With the `[viz]` extra, `result.view()` renders the density field and
+`result.plot_convergence()` the objective/constraint/design-change curves.
+The nightly suite executes this snippet; if it drifts from the code, CI fails.
+
 ## Status
 
 Pre-alpha. The numerical core runs end to end (2D and 3D)
