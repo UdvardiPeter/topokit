@@ -213,16 +213,16 @@ class Constraint:
         return replace(self, label=label)
 
     def _scale(self) -> float:
-        if self.bound == 0.0:
-            return 1.0 if self.sense == "<=" else -1.0
-        return (1.0 if self.sense == "<=" else -1.0) / self.bound
+        # dividing by |bound| (not bound) keeps the inequality direction for
+        # negative bounds; for positive bounds this is the familiar
+        # value/bound - 1 form.
+        sign = 1.0 if self.sense == "<=" else -1.0
+        return sign if self.bound == 0.0 else sign / abs(self.bound)
 
     def value(self, solution: Solution) -> float:
-        """Constraint value in ``g <= 0`` form (g = value/bound - 1 for ``<=``)."""
+        """Constraint value in ``g <= 0`` form (g = (value - bound) / |bound| for ``<=``)."""
         v = self.response.value(solution)
-        if self.bound == 0.0:
-            return self._scale() * v
-        return self._scale() * v - (1.0 if self.sense == "<=" else -1.0)
+        return self._scale() * (v - self.bound)
 
     def grad_field(self, solution: Solution) -> _F64:
         """Gradient of the normalized constraint w.r.t. the response's field basis."""

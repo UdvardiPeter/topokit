@@ -1,6 +1,8 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for objective/constraint responses."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
@@ -11,6 +13,7 @@ from topokit.parametrization import SIMP, DensityFilter
 from topokit.responses import (
     Compliance,
     Constraint,
+    FieldBasis,
     ResponseError,
     Solution,
     Volume,
@@ -361,3 +364,35 @@ def test_volume_active_region_gradient_with_solid() -> None:
 def test_constraint_rejects_bad_sense() -> None:
     with pytest.raises(ResponseError, match="sense"):
         Constraint(Volume(), 0.3, "==")
+
+
+class _Fixed:
+    # stub response with a fixed value, for constraint-normalization tests
+    name: ClassVar[str] = "fixed"
+    field_basis: ClassVar[FieldBasis] = "density"
+    n_extra_adjoints: ClassVar[int] = 0
+
+    def __init__(self, v: float) -> None:
+        self.v = v
+
+    def value(self, solution: Solution) -> float:
+        return self.v
+
+    def grad_field(self, solution: Solution) -> Any:
+        return np.full(1, 2.0)
+
+
+def test_constraint_negative_bound_keeps_sign() -> None:
+    # A negative bound must not flip the inequality: v <= -2 is satisfied at
+    # v=-3 (g <= 0) and violated at v=-1 (g > 0); mirrored for >=.
+    sol: Any = None  # the stub ignores it
+    assert Constraint(_Fixed(-3.0), -2.0, "<=").value(sol) < 0.0
+    assert Constraint(_Fixed(-1.0), -2.0, "<=").value(sol) > 0.0
+    assert Constraint(_Fixed(-1.0), -2.0, ">=").value(sol) < 0.0
+    assert Constraint(_Fixed(-3.0), -2.0, ">=").value(sol) > 0.0
+    # gradient scale matches d(g)/d(value) = sign / |bound| (response grad is 2.0)
+    assert Constraint(_Fixed(-3.0), -2.0, "<=").grad_field(sol)[0] == pytest.approx(1.0)
+    assert Constraint(_Fixed(-3.0), -2.0, ">=").grad_field(sol)[0] == pytest.approx(-1.0)
+    # positive bounds keep the established normalization
+    assert Constraint(_Fixed(0.6), 0.3, "<=").value(sol) == pytest.approx(1.0)
+    assert Constraint(_Fixed(0.6), 0.3, ">=").value(sol) == pytest.approx(-1.0)
