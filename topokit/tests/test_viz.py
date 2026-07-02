@@ -48,6 +48,8 @@ def test_plot_convergence_plots_objective_and_change() -> None:
     }
     result = SimpleNamespace(history=history)
     fig = plot_convergence(result)
+    # one subplot per non-bookkeeping series (mixed scales never share an axis)
+    assert [ax.get_ylabel() for ax in fig.axes] == ["objective", "change", "volume"]
     labels = {ln.get_label() for ax in fig.axes for ln in ax.get_lines()}
     assert "objective" in labels
     assert "change" in labels
@@ -55,6 +57,33 @@ def test_plot_convergence_plots_objective_and_change() -> None:
     assert "kkt" not in labels and "stage" not in labels  # bookkeeping excluded
     obj_line = next(ln for ax in fig.axes for ln in ax.get_lines() if ln.get_label() == "objective")
     assert list(obj_line.get_ydata()) == history["objective"]  # type: ignore[arg-type]
+    assert fig.axes[-1].get_xlabel() == "iteration"
+
+
+def test_plot_convergence_keys_select_subplots() -> None:
+    from types import SimpleNamespace
+
+    from topokit.viz import plot_convergence
+
+    history = {"objective": [10.0, 6.0], "change": [1.0, 0.3]}
+    fig = plot_convergence(SimpleNamespace(history=history), keys=["change"])
+    assert [ax.get_ylabel() for ax in fig.axes] == ["change"]
+
+
+def test_plot_convergence_marks_stage_boundaries() -> None:
+    from types import SimpleNamespace
+
+    from topokit.viz import plot_convergence
+
+    history = {
+        "objective": [10.0, 6.0, 5.0, 4.0],
+        "stage": [0.0, 0.0, 1.0, 1.0],
+    }
+    fig = plot_convergence(SimpleNamespace(history=history))
+    (ax,) = fig.axes
+    vlines = [ln for ln in ax.get_lines() if ln.get_label() != "objective"]
+    assert len(vlines) == 1  # one boundary, where stage 0 -> 1
+    assert list(np.asarray(vlines[0].get_xdata())) == [2, 2]
 
 
 def test_view_2d_returns_figure_with_correct_orientation() -> None:
