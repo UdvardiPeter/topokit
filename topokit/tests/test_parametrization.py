@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for the unified parametrization chain."""
 
 import numpy as np
@@ -349,3 +351,8 @@ def test_simp_requires_p_at_least_one() -> None:
     with pytest.raises(ParametrizationError, match="p must be >= 1"):
         SIMP(p=0.0)
     SIMP(p=1.0)  # linear is allowed
+
+
+def test_radial_filter_with_sensitivity_filter_warns() -> None:
+    with pytest.warns(UserWarning, match="SensitivityFilter"):
+        (RadialDensityFilter(radius=1.5) | SensitivityFilter(radius=1.5) | SIMP()).bind(G42)
