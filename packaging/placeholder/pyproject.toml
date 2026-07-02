@@ -1,0 +1,24 @@
+# Placeholder distribution holding the `topokit` name on PyPI (doc 10: register
+# at the first private-repo milestone, do not wait for launch). Published once,
+# as 0.0.0, by .github/workflows/publish-placeholder.yml. Real releases build
+# from topokit/pyproject.toml and start above 0.0.0.
+[project]
+name = "topokit"
+version = "0.0.0"
+description = "Open-source topology optimization for engineers (placeholder; under active development)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "LGPL-2.1-or-later"
+authors = [{ name = "Peter Udvardi", email = "udvardi.peter98@gmail.com" }]
+keywords = ["topology optimization", "structural optimization", "SIMP", "FEM"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.9,<0.9.0"]
+build-backend = "uv_build"
