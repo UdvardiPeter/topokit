@@ -1,0 +1,24 @@
+# Manually triggered: builds the topokit package and publishes it to PyPI via
+# trusted publishing (OIDC, no secrets). The tag-triggered release pipeline
+# with installers arrives with WP-4.3.
+name: Publish to PyPI
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # PyPI trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build sdist and wheel
+        run: uv build --package topokit --out-dir dist
+      - name: List artifacts
+        run: ls -l dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
