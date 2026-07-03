@@ -78,7 +78,8 @@ Pre-alpha. The numerical core runs end to end (2D and 3D)
 | `benchmarks` 3D regression — cantilever + Michell + robustness sweep (nightly) | done |
 | `benchmarks` perf scaling-study baseline + `nightly.yml` cron | done |
 | `topokit.viz` convergence curves, density views, slices, LiveView (`[viz]` extra) | done |
-| performance pass (`assemble` hot kernel, numba `[fast]`), manufacturing constraints | next |
+| `topokit.jax` JAX backend + assembly kernels via `use_backend("jax")` (`[jax]` extra) | done |
+| AMG near-nullspace + perf budgets/gates, manufacturing constraints | next |
 | CAD import/export | planned |
 | Local daemon, Fusion 360 add-in | planned |
 
