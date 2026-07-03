@@ -80,3 +80,9 @@ class NumpyBackend:
         """Build CSR from COO triplets. scipy sums duplicates on conversion."""
         coo = scipy.sparse.coo_array((vals, (rows, cols)), shape=shape)
         return _ScipyCsr(coo.tocsr())
+
+    def csr_from_parts(
+        self, data: _F64, indices: _Arr, indptr: _Arr, shape: tuple[int, int]
+    ) -> SparseMatrix:
+        """CSR from prebuilt arrays; no copy, no sort."""
+        return _ScipyCsr(scipy.sparse.csr_array((data, indices, indptr), shape=shape))

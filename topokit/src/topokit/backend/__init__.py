@@ -94,6 +94,16 @@ class ArrayBackend(Protocol):
         """Build a CSR matrix from COO triplets. Duplicate entries are summed."""
         ...
 
+    def csr_from_parts(
+        self, data: Any, indices: Any, indptr: Any, shape: tuple[int, int]
+    ) -> SparseMatrix:
+        """Build a CSR matrix from prebuilt arrays without sorting or deduplication.
+
+        The per-iteration assembly path: the pattern is fixed, only ``data``
+        changes. Callers guarantee a valid canonical CSR layout.
+        """
+        ...
+
 
 class KernelError(LookupError):
     """Unknown kernel or conflicting kernel registration."""
