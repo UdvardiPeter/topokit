@@ -36,7 +36,7 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
-from topokit.backend import ArrayBackend, SparseMatrix, default_backend
+from topokit.backend import SparseMatrix, active_backend, get_kernel, register_kernel
 from topokit.fields import FieldSpec, NodeField
 from topokit.mesh import StructuredGrid
 from topokit.selection import Selector
@@ -303,6 +303,59 @@ def _parse_comps(dofs: str | Sequence[str | int], dim: int) -> tuple[int, ...]:
     return comps
 
 
+def _csr_pattern_positions(
+    edofs_free: _I64, n_dof: int, chunk: int = 16384
+) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32]]:
+    """CSR pattern and per-entry data positions for a fixed element DOF map.
+
+    Returns ``(indptr, indices, pos)`` with ``pos[k, e]`` the CSR data slot of
+    element ``e``'s local stiffness entry ``k = a*m + b``; entries touching a
+    fixed DOF point at the trailing dump slot ``nnz``. Chunked so setup
+    transients stay bounded.
+    """
+    n_ae, m = edofs_free.shape
+    keys_unique = np.empty(0, dtype=np.int64)
+    for lo in range(0, n_ae, chunk):
+        ef = edofs_free[lo : lo + chunk].astype(np.int64)
+        rows = np.repeat(ef, m, axis=1).ravel()
+        cols = np.tile(ef, (1, m)).ravel()
+        keep = (rows >= 0) & (cols >= 0)
+        keys_unique = np.union1d(keys_unique, rows[keep] * n_dof + cols[keep])
+    nnz = int(keys_unique.size)
+    indices = (keys_unique % n_dof).astype(np.int32)
+    counts = np.bincount((keys_unique // n_dof).astype(np.int64), minlength=n_dof)
+    indptr = np.concatenate([[0], np.cumsum(counts)]).astype(np.int32)
+    pos = np.full((m * m, n_ae), nnz, dtype=np.int32)
+    for lo in range(0, n_ae, chunk):
+        ef = edofs_free[lo : lo + chunk].astype(np.int64)
+        rows = np.repeat(ef, m, axis=1)
+        cols = np.tile(ef, (1, m))
+        keys = (rows * n_dof + cols).ravel()
+        found = np.searchsorted(keys_unique, keys).clip(max=max(nnz - 1, 0))
+        ok = (rows.ravel() >= 0) & (cols.ravel() >= 0)
+        p = np.where(ok, found, nnz).astype(np.int32)
+        pos[:, lo : lo + ef.shape[0]] = p.reshape(ef.shape[0], m * m).T
+    return indptr, indices, pos
+
+
+def _assemble_csr_data(scale_active: Any, ke_flat: Any, pos: Any, nnz: int) -> _F64:
+    """Fill CSR data with one scatter pass per local-stiffness entry pair.
+
+    Coerces inputs to host numpy so it stays correct (if slow) as the
+    fallback for device-array backends.
+    """
+    sa = np.asarray(scale_active, dtype=np.float64)
+    ke = np.asarray(ke_flat, dtype=np.float64)
+    p = np.asarray(pos)
+    data = np.zeros(nnz + 1)
+    for k in range(p.shape[0]):
+        np.add.at(data, p[k], ke[k] * sa)
+    return data[:-1]
+
+
+register_kernel("assemble_csr_data", "generic", _assemble_csr_data)
+
+
 class LinearElasticity:
     """Linear static elasticity on a structured grid."""
 
@@ -315,12 +368,10 @@ class LinearElasticity:
         supports: Sequence[tuple[Selector, str | Sequence[str | int]]],
         loads: Sequence[Load] | Sequence[Sequence[Load]],
         mode: str = "plane_stress",
-        backend: ArrayBackend | None = None,
     ) -> None:
         self.mesh = mesh
         self.material = material
         self.mode = mode
-        self._backend = backend if backend is not None else default_backend()
         dim = mesh.dim
         if dim == 3 and mode != "plane_stress":
             raise FemError("mode is a 2D setting; remove it for 3D meshes")
@@ -359,14 +410,11 @@ class LinearElasticity:
         nen = conn.shape[1]
         cdofs = (cn[conn][:, :, None] * dim + np.arange(dim)).reshape(-1, nen * dim)
         self._edofs_free = self._free_index[cdofs]  # (n_ae, nen*dim), -1 where fixed
-        rows = np.repeat(self._edofs_free, nen * dim, axis=1).ravel()
-        cols = np.tile(self._edofs_free, (1, nen * dim)).ravel()
-        keep = (rows >= 0) & (cols >= 0)
-        # int32 halves the dominant pattern memory; n_dof is always < 2**31.
-        self._rows = rows[keep].astype(np.int32)
-        self._cols = cols[keep].astype(np.int32)
-        self._keep = keep
         self._ke_flat = self._ke.ravel()
+        self._indptr, self._indices, self._pos = _csr_pattern_positions(
+            self._edofs_free.astype(np.int64), self._n_dof
+        )
+        self._nnz = int(self._indices.size)
 
         self._loads = self._build_loads(loads, cn, dim, n_cdof, free)
         self._loads.flags.writeable = False
@@ -485,11 +533,12 @@ class LinearElasticity:
     def assemble(self, scale: Any) -> SparseMatrix:
         """Free-DOF stiffness matrix for per-element ``scale`` multipliers."""
         arr = self._check_scale(scale)
-        bk = self._backend
         sa = arr[self.mesh.active_elements]
-        vals = bk.einsum("e,k->ek", bk.asarray(sa), bk.asarray(self._ke_flat)).ravel()
-        return bk.coo_to_csr(
-            self._rows, self._cols, vals[self._keep], shape=(self._n_dof, self._n_dof)
+        backend = active_backend()
+        kernel = get_kernel("assemble_csr_data")
+        data = kernel(backend.asarray(sa), self._ke_flat, self._pos, self._nnz)
+        return backend.csr_from_parts(
+            data, self._indices, self._indptr, shape=(self._n_dof, self._n_dof)
         )
 
     def loads(self) -> _F64:
