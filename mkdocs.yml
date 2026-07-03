@@ -1,5 +1,6 @@
 site_name: TopoKit
 site_description: Open-source topology optimization for engineers
+site_url: https://topokit.readthedocs.io/
 repo_url: https://github.com/UdvardiPeter/topokit
 docs_dir: docs/content
 theme:
