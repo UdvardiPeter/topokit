@@ -25,7 +25,11 @@ Repository = "https://github.com/UdvardiPeter/topokit"
 [project.optional-dependencies]
 fast = ["pyamg>=5"]
 viz = ["pyvista>=0.44", "matplotlib>=3.8"]
-all = ["topokit[fast,viz]"]
+jax = ["jax>=0.10"]
+all = ["topokit[fast,viz,jax]"]
+
+[project.entry-points."topokit.backends"]
+jax = "topokit.jax:BACKEND"
 
 [dependency-groups]
 dev = [
@@ -39,6 +43,7 @@ dev = [
   "pyamg>=5",
   "pyvista>=0.44",
   "matplotlib>=3.8",
+  "jax>=0.10",
 ]
 
 [build-system]
@@ -84,7 +89,7 @@ layers = [
   "topokit.problem",
   "topokit.responses",
   "topokit.fem : topokit.solvers : topokit.parametrization : topokit.optimizers",
-  "topokit.selection",
+  "topokit.selection : topokit.jax",
   "topokit.mesh",
   "topokit.backend : topokit.events : topokit.fields : topokit.testing : topokit.checkpoint",
   "topokit.registry",
