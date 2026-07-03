@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Open-source topology optimization for engineers."""
 
-from topokit.backend import default_backend
+from topokit.backend import active_backend, default_backend, use_backend
 from topokit.events import EventBus
 from topokit.fem import (
     ABS,
@@ -83,8 +83,10 @@ __all__ = [
     "SurfaceTraction",
     "SymmetryMap",
     "Volume",
+    "active_backend",
     "default_backend",
     "registry",
+    "use_backend",
     "von_mises",
 ]
 

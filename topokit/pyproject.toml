@@ -86,6 +86,7 @@ layers = [
   "topokit.fem : topokit.solvers : topokit.parametrization : topokit.optimizers",
   "topokit.selection",
   "topokit.mesh",
-  "topokit.backend : topokit.events : topokit.fields : topokit.registry : topokit.testing : topokit.checkpoint",
+  "topokit.backend : topokit.events : topokit.fields : topokit.testing : topokit.checkpoint",
+  "topokit.registry",
 ]
 ignore_imports = ["topokit.problem -> topokit.viz"]

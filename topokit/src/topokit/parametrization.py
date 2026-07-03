@@ -418,7 +418,7 @@ class _BoundDensityFilter(_BoundLink):
             offs = np.arange(-half, half + 1)
             w = np.maximum(0.0, 1.0 - np.abs(offs) * h / radius)
             self._weights.append(w)
-        self._correlate = get_kernel("separable_correlate", "numpy")
+        self._correlate = get_kernel("separable_correlate")
         active = mesh.active_elements.astype(np.float64)
         self._active = active
         denom = self._correlate(mesh.to_grid(active), self._weights)
@@ -481,7 +481,7 @@ class _BoundRadialDensityFilter(_BoundLink):
         offsets = np.meshgrid(*axes, indexing="ij")
         dist = np.sqrt(sum(o**2 for o in offsets))
         self._kernel = np.maximum(0.0, radius - dist)
-        self._correlate = get_kernel("radial_correlate", "numpy")
+        self._correlate = get_kernel("radial_correlate")
         active = mesh.active_elements.astype(np.float64)
         self._active = active
         denom = self._correlate(mesh.to_grid(active), self._kernel)
