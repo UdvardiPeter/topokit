@@ -4,6 +4,7 @@
 
 import numpy as np
 import pytest
+import scipy.sparse
 
 from topokit.fem import (
     ALUMINUM_6061,
@@ -527,3 +528,38 @@ def test_unsupported_element_kind_rejected() -> None:
         LinearElasticity(
             g, STEEL, supports=[(NearPoint((0.0, 0.0)), "all")], loads=[BodyForce((0.0, -1.0))]
         )
+
+
+def test_assemble_matches_dense_reference() -> None:
+    void = np.zeros(8, dtype=bool)
+    void[5] = True
+    solid = np.zeros(8, dtype=bool)
+    solid[0] = True
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.5), solid=solid, void=void)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    tip = NearPoint((4.0, 1.5))
+    model = LinearElasticity(
+        g,
+        Material(E=7.0, nu=0.28, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(tip, (0.0, -1.0))],
+    )
+    rng = np.random.default_rng(3)
+    scale = rng.uniform(0.2, 1.0, g.n_elements)
+    k = model.assemble(scale)
+    indptr, indices, data = k.csr_arrays()
+    dense = scipy.sparse.csr_array(
+        (np.asarray(data), np.asarray(indices), np.asarray(indptr)), shape=k.shape
+    ).toarray()
+    ref = np.zeros((model.n_dof, model.n_dof))
+    ke = model.element_stiffness
+    for e in np.flatnonzero(g.active_elements):
+        dofs = [model.dof_index(int(n), c) for n in g.element_nodes[e] for c in range(2)]
+        for a, da in enumerate(dofs):
+            if da < 0:
+                continue
+            for b, db in enumerate(dofs):
+                if db < 0:
+                    continue
+                ref[da, db] += scale[e] * ke[a, b]
+    np.testing.assert_allclose(dense, ref, rtol=1e-12, atol=1e-12)
