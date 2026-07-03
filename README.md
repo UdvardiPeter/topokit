@@ -2,7 +2,10 @@
 
 Open-source topology optimization for engineers
 
+[![Docs](https://app.readthedocs.org/projects/topokit/badge/?version=latest)](https://topokit.readthedocs.io/en/latest/)
+
 - Python ≥3.12 · LGPL-2.1-or-later · Nx + uv monorepo
+- Docs: [topokit.readthedocs.io](https://topokit.readthedocs.io/)
 - Dev setup: see [CONTRIBUTING.md](CONTRIBUTING.md)
 - Architecture overview: see [ARCHITECTURE.md](ARCHITECTURE.md)
 
