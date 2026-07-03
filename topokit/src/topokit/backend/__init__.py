@@ -6,9 +6,13 @@ Numerics modules are written against ``ArrayBackend`` instead of importing
 numpy directly, so GPU and AD backends can be added without changing them.
 The protocol stays minimal: ops are added when a module needs them.
 
+The active backend is a context selection: ``use_backend`` scopes it for a
+block (strings resolve through the plugin registry's ``backends`` group);
+outside any context the NumPy default applies.
+
 Performance-critical kernels can have backend-specific implementations.
-``get_kernel`` resolves by ``(name, backend_name)`` and falls back to the
-``"generic"`` implementation.
+``get_kernel(name)`` resolves at call time by the active backend — first
+``(name, active_backend().name)``, then the ``(name, "generic")`` fallback.
 
 Implementations live in their own modules; ``topokit.backend.numpy`` ships
 the default. The conformance suite for implementations is in
