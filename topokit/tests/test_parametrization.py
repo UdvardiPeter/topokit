@@ -356,3 +356,29 @@ def test_simp_requires_p_at_least_one() -> None:
 def test_radial_filter_with_sensitivity_filter_warns() -> None:
     with pytest.warns(UserWarning, match="SensitivityFilter"):
         (RadialDensityFilter(radius=1.5) | SensitivityFilter(radius=1.5) | SIMP()).bind(G42)
+
+
+def test_filter_kernel_resolves_at_call_time() -> None:
+    from topokit.backend import NumpyBackend, register_kernel, use_backend
+    from topokit.parametrization import _separable_correlate
+
+    class Named(NumpyBackend):
+        @property
+        def name(self) -> str:
+            return "filter_ctx"
+
+    calls: list[str] = []
+
+    def marker(grid: np.ndarray, weights: list[np.ndarray]) -> np.ndarray:
+        calls.append("variant")
+        return _separable_correlate(grid, weights)
+
+    register_kernel("separable_correlate", "filter_ctx", marker)
+    bound = (DensityFilter(radius=1.5) | SIMP()).bind(G42)  # bound OUTSIDE the context
+    x = np.full(bound.n_vars, 0.5)
+    with use_backend(Named()):
+        bound.apply(x)
+    assert calls, "a chain bound outside the context must still honor it at call time"
+    n = len(calls)
+    bound.apply(x)  # outside again: back to generic
+    assert len(calls) == n
