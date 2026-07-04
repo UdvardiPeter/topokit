@@ -420,6 +420,9 @@ class _BoundDensityFilter(_BoundLink):
             self._weights.append(w)
         active = mesh.active_elements.astype(np.float64)
         self._active = active
+        # Bakes in the bind-context kernel (unlike apply/pullback, which
+        # resolve per call); fine under the kernels' rtol<=1e-12 agreement
+        # contract.
         denom = self._kern()(mesh.to_grid(active), self._weights)
         self._denom = np.maximum(mesh.to_flat(denom), 1e-300)
 

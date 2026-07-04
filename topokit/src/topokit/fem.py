@@ -322,6 +322,12 @@ def _csr_pattern_positions(
         keep = (rows >= 0) & (cols >= 0)
         keys_unique = np.union1d(keys_unique, rows[keep] * n_dof + cols[keep])
     nnz = int(keys_unique.size)
+    # int32 halves the pattern memory; positions index the data array, so the
+    # binding bound is nnz (~81 per DOF in 3D), not n_dof. ~8.5e9 entries
+    # overflow int32 far beyond any grid this path can hold in memory, but
+    # fail loud rather than silently wrap.
+    if nnz >= np.iinfo(np.int32).max:
+        raise FemError(f"CSR pattern has {nnz} nonzeros, exceeding int32 indexing")
     indices = (keys_unique % n_dof).astype(np.int32)
     counts = np.bincount((keys_unique // n_dof).astype(np.int64), minlength=n_dof)
     indptr = np.concatenate([[0], np.cumsum(counts)]).astype(np.int32)
