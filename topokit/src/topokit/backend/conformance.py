@@ -120,3 +120,13 @@ class ArrayBackendConformance:
             shape=(3, 3),
         )
         np.testing.assert_allclose(np.asarray(m.diagonal()), [5.0, 6.0, 7.0])
+
+    def test_csr_from_parts_matches_dense(self) -> None:
+        indptr = self.backend.asarray([0, 2, 3, 4], dtype=np.int32)
+        indices = self.backend.asarray([0, 2, 1, 2], dtype=np.int32)
+        data = self.backend.asarray([1.0, 2.0, 3.0, 4.0])
+        m = self.backend.csr_from_parts(data, indices, indptr, shape=(3, 3))
+        dense = np.array([[1.0, 0.0, 2.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]])
+        x = np.array([1.0, 2.0, 3.0])
+        np.testing.assert_allclose(np.asarray(m.matvec(x)), dense @ x)
+        assert m.shape == (3, 3)

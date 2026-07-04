@@ -48,6 +48,10 @@
 
 ::: topokit.viz
 
+## topokit.jax
+
+::: topokit.jax
+
 ## topokit.backend.conformance
 
 ::: topokit.backend.conformance

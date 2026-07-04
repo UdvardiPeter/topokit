@@ -418,15 +418,21 @@ class _BoundDensityFilter(_BoundLink):
             offs = np.arange(-half, half + 1)
             w = np.maximum(0.0, 1.0 - np.abs(offs) * h / radius)
             self._weights.append(w)
-        self._correlate = get_kernel("separable_correlate", "numpy")
         active = mesh.active_elements.astype(np.float64)
         self._active = active
-        denom = self._correlate(mesh.to_grid(active), self._weights)
+        # Bakes in the bind-context kernel (unlike apply/pullback, which
+        # resolve per call); fine under the kernels' rtol<=1e-12 agreement
+        # contract.
+        denom = self._kern()(mesh.to_grid(active), self._weights)
         self._denom = np.maximum(mesh.to_flat(denom), 1e-300)
+
+    def _kern(self) -> Any:
+        # resolved per call: use_backend must apply to chains bound outside it
+        return get_kernel("separable_correlate")
 
     def apply(self, x: _F64) -> _F64:
         mesh = self.mesh
-        num = self._correlate(mesh.to_grid(x * self._active), self._weights)
+        num = self._kern()(mesh.to_grid(x * self._active), self._weights)
         out = mesh.to_flat(num) / self._denom
         return np.where(mesh.active_elements, out, 0.0)
 
@@ -438,7 +444,7 @@ class _BoundDensityFilter(_BoundLink):
         # before reordering these operations.
         mesh = self.mesh
         scaled = np.where(mesh.active_elements, grad_out / self._denom, 0.0)
-        back = self._correlate(mesh.to_grid(scaled), self._weights)
+        back = self._kern()(mesh.to_grid(scaled), self._weights)
         return mesh.to_flat(back) * self._active
 
 
@@ -481,15 +487,21 @@ class _BoundRadialDensityFilter(_BoundLink):
         offsets = np.meshgrid(*axes, indexing="ij")
         dist = np.sqrt(sum(o**2 for o in offsets))
         self._kernel = np.maximum(0.0, radius - dist)
-        self._correlate = get_kernel("radial_correlate", "numpy")
         active = mesh.active_elements.astype(np.float64)
         self._active = active
-        denom = self._correlate(mesh.to_grid(active), self._kernel)
+        # Bakes in the bind-context kernel (unlike apply/pullback, which
+        # resolve per call); fine under the kernels' rtol<=1e-12 agreement
+        # contract.
+        denom = self._kern()(mesh.to_grid(active), self._kernel)
         self._denom = np.maximum(mesh.to_flat(denom), 1e-300)
+
+    def _kern(self) -> Any:
+        # resolved per call: use_backend must apply to chains bound outside it
+        return get_kernel("radial_correlate")
 
     def apply(self, x: _F64) -> _F64:
         mesh = self.mesh
-        num = self._correlate(mesh.to_grid(x * self._active), self._kernel)
+        num = self._kern()(mesh.to_grid(x * self._active), self._kernel)
         out = mesh.to_flat(num) / self._denom
         return np.where(mesh.active_elements, out, 0.0)
 
@@ -498,7 +510,7 @@ class _BoundRadialDensityFilter(_BoundLink):
         # transpose is A C D^-1 A (diagonal factors commute), as below.
         mesh = self.mesh
         scaled = np.where(mesh.active_elements, grad_out / self._denom, 0.0)
-        back = self._correlate(mesh.to_grid(scaled), self._kernel)
+        back = self._kern()(mesh.to_grid(scaled), self._kernel)
         return mesh.to_flat(back) * self._active
 
 
@@ -620,6 +632,6 @@ class _BoundSensitivityFilter(_BoundLink):
     def pullback(self, x: _F64, grad_out: _F64) -> _F64:
         mesh = self.mesh
         inner = self._inner
-        num = inner._correlate(mesh.to_grid(x * grad_out * inner._active), inner._weights)
+        num = inner._kern()(mesh.to_grid(x * grad_out * inner._active), inner._weights)
         weighted = mesh.to_flat(num) / (inner._denom * np.maximum(x, 1e-3))
         return np.where(mesh.active_elements, weighted, 0.0)

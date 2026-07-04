@@ -6,9 +6,13 @@ Numerics modules are written against ``ArrayBackend`` instead of importing
 numpy directly, so GPU and AD backends can be added without changing them.
 The protocol stays minimal: ops are added when a module needs them.
 
+The active backend is a context selection: ``use_backend`` scopes it for a
+block (strings resolve through the plugin registry's ``backends`` group);
+outside any context the NumPy default applies.
+
 Performance-critical kernels can have backend-specific implementations.
-``get_kernel`` resolves by ``(name, backend_name)`` and falls back to the
-``"generic"`` implementation.
+``get_kernel(name)`` resolves at call time by the active backend — first
+``(name, active_backend().name)``, then the ``(name, "generic")`` fallback.
 
 Implementations live in their own modules; ``topokit.backend.numpy`` ships
 the default. The conformance suite for implementations is in
@@ -21,11 +25,15 @@ module-level instance, not a class.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Final, Protocol, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
+
+from topokit.registry import registry
 
 
 @runtime_checkable
@@ -58,6 +66,7 @@ class SparseMatrix(Protocol):
         ...
 
 
+@runtime_checkable
 class ArrayBackend(Protocol):
     """Minimal array op set the numerics need."""
 
@@ -94,6 +103,16 @@ class ArrayBackend(Protocol):
         """Build a CSR matrix from COO triplets. Duplicate entries are summed."""
         ...
 
+    def csr_from_parts(
+        self, data: Any, indices: Any, indptr: Any, shape: tuple[int, int]
+    ) -> SparseMatrix:
+        """Build a CSR matrix from prebuilt arrays without sorting or deduplication.
+
+        The per-iteration assembly path: the pattern is fixed, only ``data``
+        changes. Callers guarantee a valid canonical CSR layout.
+        """
+        ...
+
 
 class KernelError(LookupError):
     """Unknown kernel or conflicting kernel registration."""
@@ -115,8 +134,13 @@ def register_kernel(name: str, backend_name: str, fn: Callable[..., Any]) -> Non
     _KERNELS[key] = fn
 
 
-def get_kernel(name: str, backend_name: str) -> Callable[..., Any]:
-    """Resolve the ``name`` kernel for ``backend_name``, falling back to ``"generic"``."""
+def get_kernel(name: str) -> Callable[..., Any]:
+    """Resolve ``name`` for the active backend, falling back to ``"generic"``.
+
+    Resolve at every call site invocation — never cache the result — so
+    :func:`use_backend` takes effect regardless of when objects were built.
+    """
+    backend_name = active_backend().name
     for key in ((name, backend_name), (name, "generic")):
         if key in _KERNELS:
             return _KERNELS[key]
@@ -133,12 +157,46 @@ def default_backend() -> ArrayBackend:
     return _DEFAULT
 
 
+_ACTIVE: ContextVar[ArrayBackend | None] = ContextVar("topokit_backend", default=None)
+
+
+def active_backend() -> ArrayBackend:
+    """Return the context-selected backend, or the NumPy default outside any context."""
+    backend = _ACTIVE.get()
+    return backend if backend is not None else _DEFAULT
+
+
+@contextmanager
+def use_backend(backend: str | ArrayBackend) -> Iterator[None]:
+    """Select the active backend for the dynamic extent of the block.
+
+    Strings resolve through the plugin registry's ``backends`` group (entry
+    points load lazily, so ``use_backend("jax")`` works without importing
+    ``topokit.jax`` first). Scoped and nestable (innermost wins); thread- and
+    async-local, so concurrent studies control their own selection. The
+    context governs backend and kernel *resolution at call time*, not
+    objects: where a model or chain was created is irrelevant.
+    """
+    resolved: ArrayBackend = (
+        registry.get("backends", backend) if isinstance(backend, str) else backend
+    )
+    if not isinstance(resolved, ArrayBackend):
+        raise TypeError(f"use_backend expects a backend name or ArrayBackend, got {resolved!r}")
+    token = _ACTIVE.set(resolved)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(token)
+
+
 __all__ = [
     "ArrayBackend",
     "KernelError",
     "NumpyBackend",
     "SparseMatrix",
+    "active_backend",
     "default_backend",
     "get_kernel",
     "register_kernel",
+    "use_backend",
 ]
