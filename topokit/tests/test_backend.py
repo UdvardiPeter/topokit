@@ -128,3 +128,53 @@ def test_get_kernel_keys_off_active_backend() -> None:
         assert get_kernel("ctx_demo")() == "special"
         assert get_kernel("ctx_partial")() == "generic"  # partial coverage falls through
     assert get_kernel("ctx_demo")() == "generic"
+
+
+def test_use_backend_rejects_non_backend_object() -> None:
+    from topokit.backend import use_backend
+
+    with pytest.raises(TypeError, match="use_backend expects"), use_backend(object()):  # type: ignore[arg-type]
+        pass
+
+
+def test_use_backend_failing_entry_point_does_not_block_other_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken plugin entry point in the ``backends`` group must not stop
+    :func:`use_backend` from resolving other, healthy names.
+
+    ``use_backend`` always consults the process-global registry, and that
+    registry has already scanned the ``backends`` group by the time this
+    test runs (earlier tests in this module resolve ``"numpy"`` through
+    it) -- entry-point scanning happens once per group, so re-patching
+    ``importlib.metadata.entry_points`` here would have no effect on it.
+    To exercise the actual codepath ``use_backend`` relies on, inject one
+    broken *pending* entry point directly into the global registry's
+    internal state (``monkeypatch.setitem`` restores it afterwards) rather
+    than building a throwaway ``Registry``.
+    """
+    import typing
+    from importlib.metadata import EntryPoint
+
+    from topokit.backend import active_backend, default_backend, use_backend
+    from topokit.registry import registry as global_registry
+
+    class FailingEP:
+        name = "failing"
+        value = "fake.mod:failing"
+
+        def load(self) -> object:
+            raise ImportError("needs the [nope] extra")
+
+    global_registry._scan_entry_points("backends")  # ensure the group is scanned
+    monkeypatch.setitem(
+        global_registry._pending["backends"],
+        "failing",
+        typing.cast(EntryPoint, FailingEP()),
+    )
+
+    with pytest.raises(ImportError, match=r"\[nope\] extra"), use_backend("failing"):
+        pass
+
+    with use_backend("numpy"):
+        assert active_backend() is default_backend()

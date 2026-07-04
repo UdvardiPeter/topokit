@@ -85,3 +85,97 @@ def test_entry_points_loaded_lazily_per_group(monkeypatch: pytest.MonkeyPatch) -
     reg = Registry()
     assert reg.get("solvers", "thirdparty") is loaded
     assert "thirdparty" in reg.names("solvers")
+
+
+def test_failing_entry_point_does_not_block_others_and_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.metadata as ilm
+
+    healthy = object()
+
+    class HealthyEP:
+        name = "healthy"
+        value = "fake.mod:healthy"
+
+        def load(self) -> object:
+            return healthy
+
+    class FailingEP:
+        name = "failing"
+        value = "fake.mod:failing"
+        load_calls = 0
+
+        def load(self) -> object:
+            type(self).load_calls += 1
+            raise ImportError("needs the [x] extra")
+
+    def fake_entry_points(*, group: str) -> Iterator[object]:
+        return iter([HealthyEP(), FailingEP()]) if group == "topokit.exporters" else iter([])
+
+    monkeypatch.setattr(ilm, "entry_points", fake_entry_points)
+    reg = Registry()
+
+    assert reg.get("exporters", "healthy") is healthy
+
+    with pytest.raises(ImportError, match=r"\[x\] extra"):
+        reg.get("exporters", "failing")
+    assert FailingEP.load_calls == 1
+
+    # A second lookup retries the load (and re-raises), rather than
+    # degrading to "unknown name".
+    with pytest.raises(ImportError, match=r"\[x\] extra"):
+        reg.get("exporters", "failing")
+    assert FailingEP.load_calls == 2
+
+    assert reg.get("exporters", "healthy") is healthy
+
+
+def test_names_lists_pending_entry_points_without_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.metadata as ilm
+
+    class NeverLoadedEP:
+        name = "neverloaded"
+        value = "fake.mod:neverloaded"
+        loaded = False
+
+        def load(self) -> object:
+            type(self).loaded = True
+            return object()
+
+    def fake_entry_points(*, group: str) -> Iterator[object]:
+        return iter([NeverLoadedEP()]) if group == "topokit.importers" else iter([])
+
+    monkeypatch.setattr(ilm, "entry_points", fake_entry_points)
+    reg = Registry()
+
+    assert "neverloaded" in reg.names("importers")
+    assert NeverLoadedEP.loaded is False
+
+
+def test_pending_duplicate_of_registered_name_raises_at_first_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.metadata as ilm
+
+    class DupEP:
+        name = "dup"
+        value = "fake.mod:dup"
+        loaded = False
+
+        def load(self) -> object:
+            type(self).loaded = True
+            return object()
+
+    def fake_entry_points(*, group: str) -> Iterator[object]:
+        return iter([DupEP()]) if group == "topokit.constraints" else iter([])
+
+    monkeypatch.setattr(ilm, "entry_points", fake_entry_points)
+    reg = Registry()
+    reg.register("constraints", "dup", object(), source="tests")
+
+    with pytest.raises(RegistryError, match="dup"):
+        reg.get("constraints", "dup")
+    assert DupEP.loaded is False

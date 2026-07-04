@@ -66,6 +66,7 @@ class SparseMatrix(Protocol):
         ...
 
 
+@runtime_checkable
 class ArrayBackend(Protocol):
     """Minimal array op set the numerics need."""
 
@@ -179,6 +180,8 @@ def use_backend(backend: str | ArrayBackend) -> Iterator[None]:
     resolved: ArrayBackend = (
         registry.get("backends", backend) if isinstance(backend, str) else backend
     )
+    if not isinstance(resolved, ArrayBackend):
+        raise TypeError(f"use_backend expects a backend name or ArrayBackend, got {resolved!r}")
     token = _ACTIVE.set(resolved)
     try:
         yield
