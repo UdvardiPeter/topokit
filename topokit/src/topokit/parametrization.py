@@ -489,6 +489,9 @@ class _BoundRadialDensityFilter(_BoundLink):
         self._kernel = np.maximum(0.0, radius - dist)
         active = mesh.active_elements.astype(np.float64)
         self._active = active
+        # Bakes in the bind-context kernel (unlike apply/pullback, which
+        # resolve per call); fine under the kernels' rtol<=1e-12 agreement
+        # contract.
         denom = self._kern()(mesh.to_grid(active), self._kernel)
         self._denom = np.maximum(mesh.to_flat(denom), 1e-300)
 
