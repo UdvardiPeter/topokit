@@ -326,13 +326,16 @@ class ChainEval:
 
     Caches the forward arrays only; the links resolve their kernels per
     pullback call, so ``use_backend`` still governs every computation.
+    ``density`` and ``field`` are read-only views; copy them before mutating.
     """
 
     def __init__(self, chain: BoundChain, inputs: list[_F64], pinned: _F64) -> None:
+        pinned.setflags(write=False)
         self._chain = chain
         self._inputs = inputs
         self.density = pinned
         self.field: _F64 = chain._terminal.apply(pinned)
+        self.field.setflags(write=False)
 
     def pullback(self, grad_field: Any) -> _F64:
         """Chain-rule ``dF/d(field)`` back to ``dF/dx`` using the cached forward."""

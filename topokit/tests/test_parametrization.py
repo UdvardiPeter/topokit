@@ -437,3 +437,17 @@ def test_evaluate_pullbacks_are_reusable() -> None:
     ev = bound.evaluate(x)
     first = ev.pullback(g)
     np.testing.assert_array_equal(ev.pullback(g), first)  # inputs not consumed
+
+
+def test_evaluate_arrays_are_frozen() -> None:
+    bound = (DensityFilter(radius=1.5) | SIMP()).bind(G42)
+    x = np.full(bound.n_vars, 0.5)
+    g = np.ones(bound.mesh.n_elements)
+    ev = bound.evaluate(x)
+    with pytest.raises(ValueError):
+        ev.density[0] = 1.0
+    with pytest.raises(ValueError):
+        ev.field[0] = 1.0
+    # a caller's failed mutation attempt must not have corrupted the cached
+    # linearization point used by pullback
+    np.testing.assert_array_equal(ev.pullback(g), bound.pullback(x, g))
