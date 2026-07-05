@@ -333,6 +333,18 @@ def test_set_near_nullspace_validation() -> None:
         s2.prepare(k)
 
 
+def test_failed_prepare_leaves_solver_unprepared() -> None:
+    pytest.importorskip("pyamg")
+    model = _cantilever_3d_model(2)
+    k = model.assemble(np.full(model.mesh.n_elements, 0.5))
+    s = AmgCG()
+    s.set_near_nullspace(np.ones((3, 6)))  # wrong row count
+    with pytest.raises(SolverError, match="rows"):
+        s.prepare(k)
+    with pytest.raises(SolverError, match="prepare"):
+        s.solve(model.loads())
+
+
 def test_near_nullspace_deterministic_hierarchy() -> None:
     pytest.importorskip("pyamg")
     model = _cantilever_3d_model(4)

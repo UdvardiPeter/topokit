@@ -168,17 +168,17 @@ class AmgCG:
                 "AmgCG needs pyamg; install the extra: pip install topokit[fast]"
             ) from exc
         csr = _to_scipy_csr(matrix)
+        b = self._near_nullspace
+        if b is not None and b.shape[0] != csr.shape[0]:
+            raise SolverError(
+                f"near-nullspace has {b.shape[0]} rows for a {csr.shape[0]}-DOF system"
+            )
         self._matrix = csr
         # pyamg estimates spectral radii with numpy's global RNG; seed it so
         # hierarchies (and therefore runs) are reproducible, then restore.
         state = np.random.get_state()
         np.random.seed(0)
         try:
-            b = self._near_nullspace
-            if b is not None and b.shape[0] != csr.shape[0]:
-                raise SolverError(
-                    f"near-nullspace has {b.shape[0]} rows for a {csr.shape[0]}-DOF system"
-                )
             self._preconditioner = pyamg.smoothed_aggregation_solver(
                 scipy.sparse.csr_matrix(csr), B=b
             ).aspreconditioner()
