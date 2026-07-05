@@ -546,6 +546,40 @@ def test_compliance_weights_validated_at_construction() -> None:
         )
 
 
+def test_problem_wires_near_nullspace_into_solver() -> None:
+    pytest.importorskip("pyamg")
+    from topokit.solvers import AmgCG
+
+    class Spy(AmgCG):
+        def __init__(self) -> None:
+            super().__init__()
+            self.received: object = None
+
+        def set_near_nullspace(self, modes: object) -> None:
+            super().set_near_nullspace(modes)
+            self.received = modes
+
+    spy = Spy()
+    model = _cantilever()
+    chain = DensityFilter(radius=1.5) | SIMP(p=3.0)
+    Problem(
+        model,
+        chain,
+        objective=Compliance(),
+        constraints=[Volume() <= 0.4],
+        optimizer=OC(move=0.2),
+        solver=spy,
+    )
+    assert spy.received is not None
+    assert np.asarray(spy.received).shape == (model.n_dof, 3)
+
+
+def test_problem_direct_solver_needs_no_modes() -> None:
+    # Direct has no set_near_nullspace; construction must not try to wire it
+    p = _problem(solver=Direct())
+    assert not hasattr(p.solver, "set_near_nullspace")
+
+
 def test_iteration_shares_one_filter_forward_pass() -> None:
     from topokit.backend import NumpyBackend, register_kernel, use_backend
     from topokit.parametrization import _separable_correlate

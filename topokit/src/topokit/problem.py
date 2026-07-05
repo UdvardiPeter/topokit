@@ -188,6 +188,11 @@ class Problem:
             self.solver: LinearSolver = auto_solver(model.n_dof, model.mesh.dim)
         else:
             self.solver = solver
+        # AMG solvers benefit from the model's rigid-body modes; wired by
+        # capability so neither protocol has to grow (a solver or model
+        # without the pairing is simply left alone).
+        if hasattr(self.solver, "set_near_nullspace") and hasattr(model, "near_nullspace"):
+            self.solver.set_near_nullspace(model.near_nullspace())
         _warn_if_memory_tight(model)
 
     def default_volume_fraction(self) -> float:
