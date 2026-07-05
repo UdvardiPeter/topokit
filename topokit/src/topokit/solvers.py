@@ -24,10 +24,13 @@ import warnings
 from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
+import numpy.typing as npt
 import scipy.sparse
 import scipy.sparse.linalg
 
 from topokit.backend import SparseMatrix
+
+_F64 = npt.NDArray[np.float64]
 
 AUTO_DIRECT_LIMIT_2D = 150_000
 AUTO_DIRECT_LIMIT_3D = 15_000
@@ -142,6 +145,19 @@ class AmgCG:
         self.last_iterations: int = 0
         self._matrix: scipy.sparse.csr_array | None = None
         self._preconditioner: Any = None
+        self._near_nullspace: _F64 | None = None
+
+    def set_near_nullspace(self, modes: Any) -> None:
+        """Provide near-nullspace modes (e.g. rigid-body modes) for the hierarchy.
+
+        Cuts elasticity CG iteration counts typically 2-3x versus pyamg's
+        default constant-vector hint. The orchestration layer wires this
+        automatically when the physics model can supply modes.
+        """
+        b = np.asarray(modes, dtype=np.float64)
+        if b.ndim != 2 or b.shape[1] < 1:
+            raise SolverError(f"modes must have shape (n_dof, k), got {b.shape}")
+        self._near_nullspace = b
 
     def prepare(self, matrix: SparseMatrix) -> None:
         """Build the AMG hierarchy for ``matrix``."""
@@ -158,8 +174,13 @@ class AmgCG:
         state = np.random.get_state()
         np.random.seed(0)
         try:
+            b = self._near_nullspace
+            if b is not None and b.shape[0] != csr.shape[0]:
+                raise SolverError(
+                    f"near-nullspace has {b.shape[0]} rows for a {csr.shape[0]}-DOF system"
+                )
             self._preconditioner = pyamg.smoothed_aggregation_solver(
-                scipy.sparse.csr_matrix(csr)
+                scipy.sparse.csr_matrix(csr), B=b
             ).aspreconditioner()
         finally:
             np.random.set_state(state)

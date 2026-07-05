@@ -10,7 +10,7 @@ import pytest
 from topokit.backend import NumpyBackend, SparseMatrix
 from topokit.fem import LinearElasticity, Material, PointLoad
 from topokit.mesh import StructuredGrid
-from topokit.selection import Box, PlaneSlab
+from topokit.selection import Box, NearPoint, PlaneSlab
 from topokit.solvers import AmgCG, Direct, LinearSolver, SolverError, auto_solver
 
 BK = NumpyBackend()
@@ -286,3 +286,61 @@ def test_direct_wraps_cholmod_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     k, _b, _x = _spd_system()
     with pytest.raises(SolverError, match="factorization failed"):
         Direct().prepare(k)
+
+
+def _cantilever_3d_model(n: int) -> LinearElasticity:
+    g = StructuredGrid.box(size=(float(2 * n), float(n), float(n)), shape=(2 * n, n, n))
+    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    return LinearElasticity(
+        g,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(NearPoint((float(2 * n), n / 2.0, n / 2.0)), (0.0, -1.0, 0.0))],
+    )
+
+
+def test_near_nullspace_cuts_cg_iterations() -> None:
+    pytest.importorskip("pyamg")
+    model = _cantilever_3d_model(10)  # 20x10x10, ~7k free DOFs
+    k = model.assemble(np.full(model.mesh.n_elements, 0.5))
+    base = AmgCG()
+    base.prepare(k)
+    base.solve(model.loads())
+    rbm = AmgCG()
+    rbm.set_near_nullspace(model.near_nullspace())
+    rbm.prepare(k)
+    u = rbm.solve(model.loads())
+    assert rbm.last_iterations <= 0.75 * base.last_iterations  # conservative; ~2-3x expected
+    # and the answer is still the answer (atol above the ~1e-8-tol CG noise floor,
+    # not 1e-12: two independently-converged solves agree elementwise only down
+    # to their own residual tolerance, and ~9% of free DOFs here are small enough
+    # for that noise to dominate a per-element check at 1e-12)
+    np.testing.assert_allclose(
+        np.asarray(u), np.asarray(base.solve(model.loads())), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_set_near_nullspace_validation() -> None:
+    s = AmgCG()
+    with pytest.raises(SolverError, match="modes"):
+        s.set_near_nullspace(np.ones(5))  # 1-D
+    pytest.importorskip("pyamg")
+    model = _cantilever_3d_model(2)
+    k = model.assemble(np.full(model.mesh.n_elements, 0.5))
+    s2 = AmgCG()
+    s2.set_near_nullspace(np.ones((3, 6)))  # wrong row count
+    with pytest.raises(SolverError, match="rows"):
+        s2.prepare(k)
+
+
+def test_near_nullspace_deterministic_hierarchy() -> None:
+    pytest.importorskip("pyamg")
+    model = _cantilever_3d_model(4)
+    k = model.assemble(np.full(model.mesh.n_elements, 0.5))
+    us = []
+    for _ in range(2):
+        s = AmgCG()
+        s.set_near_nullspace(model.near_nullspace())
+        s.prepare(k)
+        us.append(np.asarray(s.solve(model.loads())))
+    np.testing.assert_array_equal(us[0], us[1])
