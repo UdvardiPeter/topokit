@@ -179,3 +179,23 @@ def test_pending_duplicate_of_registered_name_raises_at_first_access(
     with pytest.raises(RegistryError, match="dup"):
         reg.get("constraints", "dup")
     assert DupEP.loaded is False
+
+
+def test_register_conflicts_with_pending_entry_point(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.metadata as ilm
+
+    class FakeEP:
+        name = "dupe"
+        value = "fake.module:THING"
+
+        def load(self) -> object:
+            raise AssertionError("duplicate detection must not load the entry point")
+
+    def fake_entry_points(*, group: str) -> Iterator[FakeEP]:
+        return iter([FakeEP()]) if group == "topokit.backends" else iter([])
+
+    monkeypatch.setattr(ilm, "entry_points", fake_entry_points)
+    reg = Registry()
+    reg.names("backends")  # triggers the scan; "dupe" is now pending, unloaded
+    with pytest.raises(RegistryError, match="dupe"):
+        reg.register("backends", "dupe", object(), source="tests")
