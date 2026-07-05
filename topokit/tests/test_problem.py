@@ -544,3 +544,30 @@ def test_compliance_weights_validated_at_construction() -> None:
             constraints=[Volume() <= 0.4],
             optimizer=MMA(),
         )
+
+
+def test_iteration_shares_one_filter_forward_pass() -> None:
+    from topokit.backend import NumpyBackend, register_kernel, use_backend
+    from topokit.parametrization import _separable_correlate
+
+    class Named(NumpyBackend):
+        @property
+        def name(self) -> str:
+            return "fwd_count"
+
+    calls: list[int] = []
+
+    def counting(grid: np.ndarray, weights: list[np.ndarray]) -> np.ndarray:
+        calls.append(1)
+        return _separable_correlate(grid, weights)
+
+    register_kernel("separable_correlate", "fwd_count", counting)
+    problem = _problem()  # DensityFilter chain, Compliance objective, Volume <= 0.4, OC
+    study = Study(problem, schedule=Schedule.single(max_iter=2, tol=0.0), snapshot_every=0)
+    it = study.iterate()
+    next(it)  # prime: consumes the per-stage chain (re)bind, unrelated to _evaluate
+    with use_backend(Named()):
+        next(it)  # second iteration reuses the already-bound chain
+    # 1 shared forward + 1 backward for the compliance pullback
+    # + 1 backward for the volume pullback_density
+    assert len(calls) == 3

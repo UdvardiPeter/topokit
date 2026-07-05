@@ -357,8 +357,9 @@ class Study:
     ) -> tuple[Solution, float, _F64, _F64, _F64, dict[str, float]]:
         """Solve the physics at ``x`` through ``chain`` and return values+grads."""
         p = self.problem
-        scale = chain.apply(x)
-        rho = chain.physical_density(x)
+        ev = chain.evaluate(x)
+        scale = ev.field
+        rho = ev.density
         p.solver.prepare(p.model.assemble(scale))
         u = np.atleast_2d(np.asarray(p.solver.solve(p.model.loads()))).reshape(p.model.n_dof, -1)
         sol = Solution(
@@ -368,8 +369,8 @@ class Study:
         def grad_to_x(thing: Response | Constraint) -> _F64:
             gf = thing.grad_field(sol)
             if thing.field_basis == "interpolated":
-                return np.asarray(chain.pullback(x, gf))
-            return np.asarray(chain.pullback_density(x, gf))
+                return np.asarray(ev.pullback(gf))
+            return np.asarray(ev.pullback_density(gf))
 
         f0 = p.objective.value(sol)
         df0 = grad_to_x(p.objective)
