@@ -306,6 +306,45 @@ class BoundChain:
         out[self.mesh.void] = 0.0
         return out
 
+    def evaluate(self, x: Any) -> ChainEval:
+        """Run the forward pass once and return a reusable evaluation.
+
+        ``ChainEval.field``/``.density`` are what :meth:`apply` and
+        :meth:`physical_density` return; its pullbacks equal
+        :meth:`pullback`/:meth:`pullback_density` bit-for-bit. Use it when a
+        loop needs several of these per design point (the orchestration
+        layer does), paying the filter forward pass once instead of four
+        times.
+        """
+        arr = self._check(x)
+        inputs, pinned = self._forward(arr)
+        return ChainEval(self, inputs, pinned)
+
+
+class ChainEval:
+    """One forward pass shared by field/density reads and their pullbacks.
+
+    Caches the forward arrays only; the links resolve their kernels per
+    pullback call, so ``use_backend`` still governs every computation.
+    """
+
+    def __init__(self, chain: BoundChain, inputs: list[_F64], pinned: _F64) -> None:
+        self._chain = chain
+        self._inputs = inputs
+        self.density = pinned
+        self.field: _F64 = chain._terminal.apply(pinned)
+
+    def pullback(self, grad_field: Any) -> _F64:
+        """Chain-rule ``dF/d(field)`` back to ``dF/dx`` using the cached forward."""
+        chain = self._chain
+        g = chain._terminal.pullback(self.density, chain._check_grad(grad_field))
+        return chain._density_pullback(self._inputs, g)
+
+    def pullback_density(self, grad_density: Any) -> _F64:
+        """Chain-rule ``dF/d(rho_bar)`` back to ``dF/dx`` using the cached forward."""
+        chain = self._chain
+        return chain._density_pullback(self._inputs, chain._check_grad(grad_density))
+
 
 @dataclass(frozen=True)
 class SymmetryMap(LinkSpec):

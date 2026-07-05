@@ -339,6 +339,22 @@ def test_heaviside_continuation_endpoint_fd() -> None:
     )
 
 
+@pytest.mark.fd
+def test_evaluate_pullback_fd() -> None:
+    bound = (DensityFilter(radius=1.6) | Heaviside(beta=3.0) | SIMP()).bind(G42)
+    rng = np.random.default_rng(13)
+    x = rng.uniform(0.2, 0.8, bound.n_vars)
+    w = rng.standard_normal(bound.mesh.n_elements)
+
+    def f(xx: np.ndarray) -> float:
+        return float(bound.evaluate(xx).field @ w)
+
+    def grad(xx: np.ndarray) -> np.ndarray:
+        return bound.evaluate(xx).pullback(w)
+
+    assert_gradient_matches(f, grad, x)
+
+
 def test_empty_design_region_raises() -> None:
     g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), solid=np.ones(4, dtype=bool))
     with pytest.raises(ParametrizationError, match="design region is empty"):
@@ -382,3 +398,42 @@ def test_filter_kernel_resolves_at_call_time() -> None:
     n = len(calls)
     bound.apply(x)  # outside again: back to generic
     assert len(calls) == n
+
+
+def _masked_grid() -> StructuredGrid:
+    solid = np.zeros(8, dtype=bool)
+    solid[0] = True
+    void = np.zeros(8, dtype=bool)
+    void[5] = True
+    return StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid, void=void)
+
+
+def test_evaluate_matches_separate_methods_bit_exact() -> None:
+    bound = (DensityFilter(radius=1.5) | Heaviside(beta=2.0) | SIMP()).bind(_masked_grid())
+    rng = np.random.default_rng(11)
+    x = rng.uniform(0.0, 1.0, bound.n_vars)
+    g = rng.standard_normal(bound.mesh.n_elements)
+    ev = bound.evaluate(x)
+    np.testing.assert_array_equal(ev.field, bound.apply(x))
+    np.testing.assert_array_equal(ev.density, bound.physical_density(x))
+    np.testing.assert_array_equal(ev.pullback(g), bound.pullback(x, g))
+    np.testing.assert_array_equal(ev.pullback_density(g), bound.pullback_density(x, g))
+
+
+def test_evaluate_matches_with_symmetry_reduction() -> None:
+    bound = (SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | SIMP()).bind(G42)
+    rng = np.random.default_rng(12)
+    x = rng.uniform(0.0, 1.0, bound.n_vars)
+    g = rng.standard_normal(bound.mesh.n_elements)
+    ev = bound.evaluate(x)
+    np.testing.assert_array_equal(ev.field, bound.apply(x))
+    np.testing.assert_array_equal(ev.pullback(g), bound.pullback(x, g))
+
+
+def test_evaluate_pullbacks_are_reusable() -> None:
+    bound = (DensityFilter(radius=1.5) | SIMP()).bind(G42)
+    x = np.full(bound.n_vars, 0.5)
+    g = np.ones(bound.mesh.n_elements)
+    ev = bound.evaluate(x)
+    first = ev.pullback(g)
+    np.testing.assert_array_equal(ev.pullback(g), first)  # inputs not consumed
