@@ -188,6 +188,11 @@ class Problem:
             self.solver: LinearSolver = auto_solver(model.n_dof, model.mesh.dim)
         else:
             self.solver = solver
+        # AMG solvers benefit from the model's rigid-body modes; wired by
+        # capability so neither protocol has to grow (a solver or model
+        # without the pairing is simply left alone).
+        if hasattr(self.solver, "set_near_nullspace") and hasattr(model, "near_nullspace"):
+            self.solver.set_near_nullspace(model.near_nullspace())
         _warn_if_memory_tight(model)
 
     def default_volume_fraction(self) -> float:
@@ -357,8 +362,9 @@ class Study:
     ) -> tuple[Solution, float, _F64, _F64, _F64, dict[str, float]]:
         """Solve the physics at ``x`` through ``chain`` and return values+grads."""
         p = self.problem
-        scale = chain.apply(x)
-        rho = chain.physical_density(x)
+        ev = chain.evaluate(x)
+        scale = ev.field
+        rho = ev.density
         p.solver.prepare(p.model.assemble(scale))
         u = np.atleast_2d(np.asarray(p.solver.solve(p.model.loads()))).reshape(p.model.n_dof, -1)
         sol = Solution(
@@ -368,8 +374,8 @@ class Study:
         def grad_to_x(thing: Response | Constraint) -> _F64:
             gf = thing.grad_field(sol)
             if thing.field_basis == "interpolated":
-                return np.asarray(chain.pullback(x, gf))
-            return np.asarray(chain.pullback_density(x, gf))
+                return np.asarray(ev.pullback(gf))
+            return np.asarray(ev.pullback_density(gf))
 
         f0 = p.objective.value(sol)
         df0 = grad_to_x(p.objective)

@@ -449,6 +449,36 @@ class LinearElasticity:
             return -1
         return int(self._free_index[cnid * self.mesh.dim + comp])
 
+    def near_nullspace(self) -> _F64:
+        """Rigid-body modes on the free DOFs, shape ``(n_dof, 3 in 2D / 6 in 3D)``.
+
+        The near-nullspace hint for AMG solvers: translations plus rotations
+        about the active-node centroid (centering keeps the mode basis well
+        conditioned). Supports truncate the modes; that is expected, the
+        hint only needs to span the low-energy space.
+        """
+        mesh = self.mesh
+        dim = mesh.dim
+        coords = mesh.nodes[mesh.active_nodes] - mesh.nodes[mesh.active_nodes].mean(axis=0)
+        n_modes = 3 if dim == 2 else 6
+        full = np.zeros((coords.shape[0] * dim, n_modes))
+        for comp in range(dim):
+            full[comp::dim, comp] = 1.0
+        if dim == 2:
+            full[0::2, 2] = -coords[:, 1]
+            full[1::2, 2] = coords[:, 0]
+        else:
+            full[0::3, 3] = -coords[:, 1]
+            full[1::3, 3] = coords[:, 0]
+            full[1::3, 4] = -coords[:, 2]
+            full[2::3, 4] = coords[:, 1]
+            full[0::3, 5] = coords[:, 2]
+            full[2::3, 5] = -coords[:, 0]
+        # condensed DOFs are active-node-major in node-id order and
+        # _free_index numbers free DOFs in that same condensed order, so
+        # this boolean mask lands each row in free-DOF order directly.
+        return full[self._free_index >= 0]
+
     def _build_loads(
         self,
         loads: Sequence[Load] | Sequence[Sequence[Load]],
