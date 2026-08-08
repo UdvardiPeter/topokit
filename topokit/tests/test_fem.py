@@ -563,3 +563,43 @@ def test_assemble_matches_dense_reference() -> None:
                     continue
                 ref[da, db] += scale[e] * ke[a, b]
     np.testing.assert_allclose(dense, ref, rtol=1e-12, atol=1e-12)
+
+
+def test_near_nullspace_matches_rigid_body_fields() -> None:
+    void = np.zeros(8, dtype=bool)
+    void[5] = True
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.5), void=void)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    model = LinearElasticity(
+        g,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(NearPoint((4.0, 1.5)), (0.0, -1.0))],
+    )
+    b = model.near_nullspace()
+    assert b.shape == (model.n_dof, 3)
+    assert np.linalg.matrix_rank(b) == 3
+    center = g.nodes[g.active_nodes].mean(axis=0)
+    for node in np.flatnonzero(g.active_nodes):
+        xy = g.nodes[node] - center
+        for comp in range(2):
+            i = model.dof_index(int(node), comp)
+            if i < 0:
+                continue
+            np.testing.assert_allclose(b[i, 0], 1.0 if comp == 0 else 0.0)
+            np.testing.assert_allclose(b[i, 1], 0.0 if comp == 0 else 1.0)
+            np.testing.assert_allclose(b[i, 2], -xy[1] if comp == 0 else xy[0])
+
+
+def test_near_nullspace_3d_shape() -> None:
+    g = StructuredGrid.box(size=(4.0, 2.0, 2.0), shape=(4, 2, 2))
+    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    model = LinearElasticity(
+        g,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(NearPoint((4.0, 1.0, 1.0)), (0.0, -1.0, 0.0))],
+    )
+    b = model.near_nullspace()
+    assert b.shape == (model.n_dof, 6)
+    assert np.linalg.matrix_rank(b) == 6

@@ -60,6 +60,12 @@ class Registry:
                 f"{group!r} already has {name!r} registered by {items[name][1]!r}; "
                 f"refusing duplicate from {source!r}"
             )
+        pending = self._pending[group]
+        if name in pending:
+            raise RegistryError(
+                f"{group!r} already declares {name!r} via entry point "
+                f"{pending[name].value!r}; refusing duplicate from {source!r}"
+            )
         items[name] = (obj, source)
 
     def get(self, group: str, name: str) -> Any:
