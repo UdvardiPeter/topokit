@@ -79,6 +79,40 @@ def test_machine_mismatch_fails() -> None:
     assert any("machine" in f for f in failures)
 
 
+def test_missing_meta_key_fails() -> None:
+    failures, _ = check_regressions(_report([_case()], system=None), _report([_case()]))
+    assert len(failures) == 1
+    assert "system missing" in failures[0]
+    assert "regenerate the baseline" in failures[0]
+
+
+def test_reports_without_meta_do_not_pass_on_none_equals_none() -> None:
+    failures, _ = check_regressions({"cases": [_case()]}, {"cases": [_case()]})
+    assert len(failures) == 2  # one per platform key, and no case comparison
+    assert any("system" in f for f in failures)
+    assert any("machine" in f for f in failures)
+
+
+def test_unlabelled_run_case_fails() -> None:
+    failures, _ = check_regressions(
+        _report([_case()]), _report([_case(), {"wall_per_iter_s": 1.0}])
+    )
+    assert len(failures) == 1
+    assert "no label" in failures[0]
+
+
+def test_duplicate_label_in_the_run_fails() -> None:
+    failures, _ = check_regressions(_report([_case()]), _report([_case(), _case()]))
+    assert len(failures) == 1
+    assert "appears 2 times in the run" in failures[0]
+
+
+def test_duplicate_label_in_the_baseline_fails() -> None:
+    failures, _ = check_regressions(_report([_case(), _case()]), _report([_case()]))
+    assert len(failures) == 1
+    assert "appears 2 times in the baseline" in failures[0]
+
+
 def test_pyamg_change_disables_only_the_amg_gate() -> None:
     failures, notes = check_regressions(
         _report([_case()], pyamg="5.2.0"), _report([_case(amg_iterations=99)])
@@ -91,8 +125,19 @@ def test_errored_case_fails() -> None:
     failures, _ = check_regressions(
         _report([_case()]), _report([{"label": "cantilever_3d_20", "error": "boom"}])
     )
-    assert len(failures) == 1
-    assert "failed to run" in failures[0]
+    # the only case errored, so the nothing-gated guard fires alongside it
+    assert len(failures) == 2
+    assert any("failed to run" in f for f in failures)
+    assert any("gated no metrics" in f for f in failures)
+
+
+def test_errored_baseline_case_is_a_note() -> None:
+    failures, notes = check_regressions(
+        _report([{"label": "cantilever_3d_20", "error": "boom"}, _case(label="mbb_150x50_full")]),
+        _report([_case(), _case(label="mbb_150x50_full")]),
+    )
+    assert failures == []
+    assert any("cantilever_3d_20: no baseline entry" in n for n in notes)
 
 
 def test_case_missing_from_run_is_a_note() -> None:
@@ -111,9 +156,64 @@ def test_case_missing_from_baseline_is_a_note() -> None:
     assert any("new_case" in n for n in notes)
 
 
-def test_missing_metric_is_a_note_not_a_failure() -> None:
+def test_amg_absent_from_both_sides_is_silent() -> None:
+    # 2D direct-solver cases have no AMG count on either side; not even a note
     failures, notes = check_regressions(
         _report([_case(amg_iterations=None)]), _report([_case(amg_iterations=None)])
     )
     assert failures == []
     assert notes == []
+
+
+def test_metric_absent_from_both_sides_is_a_note() -> None:
+    failures, notes = check_regressions(
+        _report([_case(peak_rss_kb=None)]), _report([_case(peak_rss_kb=None)])
+    )
+    assert failures == []
+    assert any("peak_rss_kb absent from both" in n for n in notes)
+
+
+def test_metric_only_in_the_run_is_a_note() -> None:
+    failures, notes = check_regressions(_report([_case(peak_rss_kb=None)]), _report([_case()]))
+    assert failures == []
+    assert any("peak_rss_kb not in the baseline" in n for n in notes)
+
+
+def test_metric_dropped_by_the_run_fails() -> None:
+    failures, _ = check_regressions(_report([_case()]), _report([_case(peak_rss_kb=None)]))
+    assert len(failures) == 1
+    assert "peak_rss_kb present in the baseline" in failures[0]
+    # a solver falling back to a direct factorization drops the AMG count
+    failures, _ = check_regressions(_report([_case()]), _report([_case(amg_iterations=None)]))
+    assert len(failures) == 1
+    assert "amg_iterations present in the baseline" in failures[0]
+
+
+def test_non_positive_run_value_fails() -> None:
+    failures, _ = check_regressions(_report([_case()]), _report([_case(wall_per_iter_s=0.0)]))
+    assert len(failures) == 1
+    assert "implausible" in failures[0]
+
+
+def test_non_positive_baseline_value_is_a_note() -> None:
+    failures, notes = check_regressions(_report([_case(peak_rss_kb=0)]), _report([_case()]))
+    assert failures == []
+    assert any("not usable" in n for n in notes)
+
+
+def test_empty_baseline_gates_nothing_and_fails() -> None:
+    failures, notes = check_regressions(_report([]), _report([_case()]))
+    assert len(failures) == 1
+    assert "gated no metrics" in failures[0]
+    assert any("no baseline entry" in n for n in notes)
+
+
+def test_near_threshold_failures_report_one_decimal() -> None:
+    # a +10.0% delta against a +10% limit must not render as "+10% vs +10%"
+    failures, _ = check_regressions(_report([_case()]), _report([_case(peak_rss_kb=1101)]))
+    assert "+10.1%" in failures[0]
+    assert "limit +10.0%" in failures[0]
+    failures, _ = check_regressions(
+        _report([_case(amg_iterations=25)]), _report([_case(amg_iterations=28)])
+    )
+    assert "limit 27.5" in failures[0]
