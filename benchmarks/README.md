@@ -59,7 +59,7 @@ correctness on top of the per-PR 2D gate:
 (hex8 element, SIMP, compliance, BCs) plus the frozen `.npz` guarding drift — not
 a published 3D compliance number.
 
-## Perf study
+## Scaling study
 
 `bench` (nightly only, never cached) runs a scaling study — 3D cantilever at
 `20^3 / 40^3` plus the 2D `150x50` full run — recording per-iteration wall time,
@@ -69,24 +69,30 @@ against the committed `bench/baseline.json`; see below.
 
 `60^3` (~6.6 GB peak) is a **heavy** case: it is skipped by default so the study
 fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
-~8+ GB free). The committed baseline carries the `60^3` row from dedicated
-hardware. The 1M-element target is aspirational / dedicated-hardware.
-
-The nightly workflow (`.github/workflows/nightly.yml`) runs these tiers on a daily
-cron against `main` and uploads `latest.json` as the `bench-latest` artifact for
-drift inspection.
+~8+ GB free). The 1M-element target is aspirational / dedicated-hardware.
 
 ## Performance baseline
 
-`bench/baseline.json` holds the committed reference numbers. The nightly runs
-`bench-check`, which re-runs the cases, writes `bench/latest.json`, and fails on a
-regression: peak RSS more than 10% above the baseline, AMG iterations above the
-+10%/+2 band, or per-iteration wall time more than 30% above. Wall time gets the
-loose gate because the CI runner is a shared 2-vCPU box whose timings vary by
-about 20% between runs; the tight gates ride the near-deterministic metrics.
+`bench/baseline.json` holds the committed reference numbers. The nightly workflow
+(`.github/workflows/nightly.yml`) runs `bench-check` on a daily cron against
+`main` and uploads the resulting `bench/latest.json` as the `bench-latest`
+artifact. A regression fails the job: peak RSS more than 10% above the baseline,
+AMG iterations above the +10%/+2 band, or per-iteration wall time more than 30%
+above. Wall time gets the loose gate because the CI runner is a shared 2-vCPU box
+whose timings vary by about 20% between runs; the tight gates ride the
+near-deterministic metrics.
 
 Numbers are only comparable within one platform, so the check refuses to compare a
 baseline generated elsewhere. To regenerate after an intended performance change:
 trigger the nightly workflow, download its `bench-latest` artifact from a run whose
 other steps are green, commit it as `bench/baseline.json`, and say in the PR what
 changed and why the numbers moved.
+
+A baseline holds exactly the cases of the run that produced it, and its `meta`
+describes that one platform and that one run. The nightly never sets
+`TOPOKIT_BENCH_HEAVY`, so the `bench-latest` artifact covers the three default
+cases and `cantilever_3d_60` is consequently not gated. Rows must not be merged
+in from another machine or another commit: they would sit under a `meta` that
+does not describe them. Gating the heavy case means running the whole study with
+`TOPOKIT_BENCH_HEAVY=1` on hardware that can hold it and committing that entire
+file as the baseline.

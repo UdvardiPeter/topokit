@@ -12,8 +12,9 @@ across them. Needs pyamg (topokit dev group) for the larger 3D sizes.
 Each case runs in its own subprocess so peak RSS is per-case, not a monotonic
 process-lifetime high-water mark. Heavy cases (``heavy: True``, e.g. 60^3 at
 ~6.6 GB peak) are skipped unless ``TOPOKIT_BENCH_HEAVY`` is set, so the default
-study fits a 7 GB CI runner; the committed baseline carries the heavy cases from
-dedicated hardware. The 1M-element gate (doc 08) is aspirational / dedicated-hardware.
+study fits a 7 GB CI runner. A baseline holds exactly the cases of the run that
+produced it, so one generated without that variable does not gate the heavy
+cases. The 1M-element gate (doc 08) is aspirational / dedicated-hardware.
 """
 
 from __future__ import annotations
@@ -129,8 +130,9 @@ def _load_baseline() -> dict[str, Any]:
     """Read the committed baseline, rejecting a shape the comparator cannot gate.
 
     The baseline is committed, so it can be hand-edited or truncated in a merge.
-    Without this the comparator raises a bare ``TypeError`` on a ``null`` case or
-    a string metric, which reads as a harness bug rather than a bad file.
+    Without this the comparator raises a bare ``TypeError`` or ``AttributeError``
+    on a ``null`` case, a scalar ``meta`` or a string metric, which reads as a
+    harness bug rather than a bad file.
     """
     try:
         data: Any = json.loads(BASELINE.read_text())
@@ -138,14 +140,22 @@ def _load_baseline() -> dict[str, Any]:
         raise _bad_baseline(f"not valid JSON ({exc})") from exc
     if not isinstance(data, dict):
         raise _bad_baseline(f"top level is {type(data).__name__}, expected an object")
+    meta = data.get("meta")
+    if meta is not None and not isinstance(meta, dict):
+        # The comparator reads meta first, so a scalar here fails before any case.
+        raise _bad_baseline(f"'meta' is {type(meta).__name__}, expected an object")
     cases = data.get("cases", [])
     if not isinstance(cases, list) or any(not isinstance(case, dict) for case in cases):
         raise _bad_baseline("'cases' is not a list of objects")
     for case in cases:
+        label = case.get("label")
+        if label is not None and not isinstance(label, str):
+            # Labels key the comparator's index, so a list or dict is unhashable there.
+            raise _bad_baseline(f"case label {label!r} is not a string")
         for field in ("wall_per_iter_s", "peak_rss_kb", "amg_iterations"):
             value = case.get(field)
             if value is not None and not isinstance(value, int | float):
-                raise _bad_baseline(f"case {case.get('label')!r} has non-numeric {field} {value!r}")
+                raise _bad_baseline(f"case {label!r} has non-numeric {field} {value!r}")
     return data
 
 
@@ -171,7 +181,7 @@ def _compare(report: dict[str, Any]) -> None:
     known = _labels(baseline)
     print(
         "no regressions against the committed baseline "
-        f"({len(known & _labels(report))} of {len(known)} baseline cases compared)"
+        f"({len(known & _labels(report))} of {len(known)} baseline cases present in this run)"
     )
 
 
@@ -181,8 +191,8 @@ def main(check: bool = False) -> None:
     With ``check``, the fresh numbers are gated against the committed baseline
     and a regression exits nonzero. Heavy cases are skipped unless
     ``TOPOKIT_BENCH_HEAVY`` is set (CI runners cap at ~7 GB; 60^3 peaks at
-    ~6.6 GB). The committed baseline carries the heavy cases from a
-    dedicated-hardware run.
+    ~6.6 GB). A baseline generated without that variable does not carry the heavy
+    cases and so cannot gate them.
     """
     include_heavy = os.environ.get("TOPOKIT_BENCH_HEAVY", "") not in ("", "0")
     cases = [c for c in CASES if include_heavy or not c.get("heavy")]
@@ -232,7 +242,12 @@ def main(check: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--worker":
-        _worker(sys.argv[2])
+    argv = sys.argv[1:]
+    if len(argv) == 2 and argv[0] == "--worker":
+        _worker(argv[1])
+    elif argv in ([], ["--check"]):
+        main(check=bool(argv))
     else:
-        main(check="--check" in sys.argv[1:])
+        # Not ignored: the nightly reads only the exit code, so a typo in the
+        # command would otherwise run the study, gate nothing and exit 0.
+        raise SystemExit(f"usage: {Path(__file__).name} [--check]")
