@@ -128,7 +128,7 @@ def test_errored_case_fails() -> None:
     # the only case errored, so the nothing-gated guard fires alongside it
     assert len(failures) == 2
     assert any("failed to run" in f for f in failures)
-    assert any("gated no metrics" in f for f in failures)
+    assert any("no metric was compared" in f for f in failures)
 
 
 def test_errored_baseline_case_is_a_note() -> None:
@@ -204,7 +204,7 @@ def test_non_positive_baseline_value_is_a_note() -> None:
 def test_empty_baseline_gates_nothing_and_fails() -> None:
     failures, notes = check_regressions(_report([]), _report([_case()]))
     assert len(failures) == 1
-    assert "gated no metrics" in failures[0]
+    assert "no metric was compared" in failures[0]
     assert any("no baseline entry" in n for n in notes)
 
 

@@ -16,7 +16,7 @@ that gated no metric at all are all failures rather than silence.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
+from typing import Any, Literal
 
 WALL_TOLERANCE = 0.30
 RSS_TOLERANCE = 0.10
@@ -52,7 +52,9 @@ def _structural_failures(baseline: dict[str, Any], latest: dict[str, Any]) -> li
     return failures
 
 
-def _uncomparable(label: str, field: str, old: Any, now: Any) -> tuple[str, str] | None:
+def _uncomparable(
+    label: str, field: str, old: Any, now: Any
+) -> tuple[Literal["failure", "note"], str] | None:
     """Return ``("failure" | "note", message)`` when ``field`` cannot be compared.
 
     ``None`` means both sides carry a usable positive number, so the caller may
@@ -65,9 +67,11 @@ def _uncomparable(label: str, field: str, old: Any, now: Any) -> tuple[str, str]
             return "note", f"{label}: {field} absent from both, not gated"
         return "note", f"{label}: {field} not in the baseline, not gated"
     if not (old > 0):
-        # Zero, negative or NaN: useless as a denominator and meaningless as a
-        # bound. This is the old ``not old`` guard, kept so the comparison below
-        # can never raise ZeroDivisionError while formatting its percentage.
+        # Zero, negative or NaN: useless as a denominator and meaningless as a bound.
+        # For all three metrics (wall time, RSS, AMG iterations), zero in a fresh run is
+        # a deliberate hard failure: it signals a broken counter, not a valid measurement.
+        # This is the old ``not old`` guard, kept so the comparison below can never raise
+        # ZeroDivisionError while formatting its percentage.
         return "note", f"{label}: {field} baseline value {old!r} is not usable, not gated"
     if now is None:
         return "failure", (
@@ -169,8 +173,5 @@ def check_regressions(
     for label in sorted(set(base_cases) - set(new_cases)):
         notes.append(f"{label}: in the baseline but not this run")
     if gated == 0:
-        failures.append(
-            "the run gated no metrics against the baseline; the baseline is stale "
-            "or empty and needs regenerating"
-        )
+        failures.append("no metric was compared against the baseline; the run is not gated")
     return failures, notes
