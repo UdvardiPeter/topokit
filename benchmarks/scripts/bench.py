@@ -246,7 +246,7 @@ if __name__ == "__main__":
     if len(argv) == 2 and argv[0] == "--worker":
         _worker(argv[1])
     elif argv in ([], ["--check"]):
-        main(check=bool(argv))
+        main(check=argv == ["--check"])
     else:
         # Not ignored: the nightly reads only the exit code, so a typo in the
         # command would otherwise run the study, gate nothing and exit 0.

@@ -90,9 +90,10 @@ changed and why the numbers moved.
 
 A baseline holds exactly the cases of the run that produced it, and its `meta`
 describes that one platform and that one run. The nightly never sets
-`TOPOKIT_BENCH_HEAVY`, so the `bench-latest` artifact covers the three default
-cases and `cantilever_3d_60` is consequently not gated. Rows must not be merged
-in from another machine or another commit: they would sit under a `meta` that
-does not describe them. Gating the heavy case means running the whole study with
-`TOPOKIT_BENCH_HEAVY=1` on hardware that can hold it and committing that entire
-file as the baseline.
+`TOPOKIT_BENCH_HEAVY`, so the `bench-latest` artifact covers the non-heavy cases
+and `cantilever_3d_60` is consequently not gated. Rows must not be merged in from
+another machine or another commit: they would sit under a `meta` that does not
+describe them. Gating the heavy case means running the whole study with
+`TOPOKIT_BENCH_HEAVY=1` on Linux x86_64 hardware that can hold it, matching the
+runner the check compares against, and committing that entire file as the
+baseline.
