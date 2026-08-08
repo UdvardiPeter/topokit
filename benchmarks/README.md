@@ -59,13 +59,13 @@ correctness on top of the per-PR 2D gate:
 (hex8 element, SIMP, compliance, BCs) plus the frozen `.npz` guarding drift — not
 a published 3D compliance number.
 
-## Perf baseline
+## Perf study
 
 `bench` (nightly only, never cached) runs a scaling study — 3D cantilever at
 `20^3 / 40^3` plus the 2D `150x50` full run — recording per-iteration wall time,
-peak RSS, solver, and AMG CG iterations to `bench/baseline.json` (committed;
-refreshed by `uv run python scripts/bench.py`). It is a **soft baseline**: no
-assertions, no gating. Hard perf budgets land in WP-2.2.
+peak RSS, solver, and AMG CG iterations to `bench/latest.json` (gitignored;
+written by every run). `bench-check` runs the same study and gates the numbers
+against the committed `bench/baseline.json`; see below.
 
 `60^3` (~6.6 GB peak) is a **heavy** case: it is skipped by default so the study
 fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
@@ -73,5 +73,20 @@ fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
 hardware. The 1M-element target is aspirational / dedicated-hardware.
 
 The nightly workflow (`.github/workflows/nightly.yml`) runs these tiers on a daily
-cron against `main` and uploads `baseline.json` as an artifact for drift
-inspection.
+cron against `main` and uploads `latest.json` as the `bench-latest` artifact for
+drift inspection.
+
+## Performance baseline
+
+`bench/baseline.json` holds the committed reference numbers. The nightly runs
+`bench-check`, which re-runs the cases, writes `bench/latest.json`, and fails on a
+regression: peak RSS more than 10% above the baseline, AMG iterations above the
++10%/+2 band, or per-iteration wall time more than 30% above. Wall time gets the
+loose gate because the CI runner is a shared 2-vCPU box whose timings vary by
+about 20% between runs; the tight gates ride the near-deterministic metrics.
+
+Numbers are only comparable within one platform, so the check refuses to compare a
+baseline generated elsewhere. To regenerate after an intended performance change:
+trigger the nightly workflow, download its `bench-latest` artifact from a run whose
+other steps are green, commit it as `bench/baseline.json`, and say in the PR what
+changed and why the numbers moved.

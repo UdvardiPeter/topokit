@@ -27,9 +27,9 @@ jobs:
       # test-regression (2D smalls) is a per-PR tier; the nightly runs the heavy
       # tiers the per-PR gate skips. e2e is deferred (Phase 3/4).
       - name: Heavy tiers (run-many; main HEAD, no PR diff)
-        run: npx nx run-many -t test test-fd test-regression-full bench --skip-nx-cache
+        run: npx nx run-many -t test test-fd test-regression-full bench-check --skip-nx-cache
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bench-baseline
-          path: benchmarks/bench/baseline.json
+          name: bench-latest
+          path: benchmarks/bench/latest.json
