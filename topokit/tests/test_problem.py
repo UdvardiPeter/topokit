@@ -605,3 +605,59 @@ def test_iteration_shares_one_filter_forward_pass() -> None:
     # 1 shared forward + 1 backward for the compliance pullback
     # + 1 backward for the volume pullback_density
     assert len(calls) == 3
+
+
+def test_resume_with_extended_schedule_continues(tmp_path: Path) -> None:
+    # the "nothing to resume" error tells the user to extend the schedule; this
+    # is the API that makes that possible
+    path = tmp_path / "run.topo"
+    done = Study(
+        _problem(OC(move=0.2)),
+        schedule=Schedule.single(p=3.0, max_iter=8, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=8,
+    ).run()
+    assert done.iterations == 8
+    resumed = Study.resume(
+        _problem(OC(move=0.2)),
+        str(path),
+        schedule=Schedule.single(p=3.0, max_iter=16, tol=0.0),
+    ).run()
+    assert resumed.iterations == 16
+
+
+def test_resume_schedule_override_still_rejects_a_different_problem(tmp_path: Path) -> None:
+    # the override relaxes the run parameters, never the problem identity check
+    path = tmp_path / "run.topo"
+    Study(
+        _problem(OC(move=0.2)),
+        schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=5,
+    ).run()
+    with pytest.raises(ProblemError, match="different problem"):
+        Study.resume(
+            _problem_proj(OC(move=0.2)),
+            str(path),
+            schedule=Schedule.single(p=3.0, max_iter=50, tol=0.0),
+        )
+
+
+def test_resume_schedule_override_rejects_a_shorter_schedule(tmp_path: Path) -> None:
+    # the checkpoint cursor points at stage 1; a one-stage schedule cannot host it
+    path = tmp_path / "run.topo"
+    two = Schedule(
+        (Stage(p=1.0, beta=1.0, max_iter=4, tol=0.0), Stage(p=3.0, beta=1.0, max_iter=4, tol=0.0))
+    )
+    Study(
+        _problem(OC(move=0.2)),
+        schedule=two,
+        checkpoint_path=str(path),
+        checkpoint_every=4,
+    ).run()
+    with pytest.raises(ProblemError, match="stage"):
+        Study.resume(
+            _problem(OC(move=0.2)),
+            str(path),
+            schedule=Schedule.single(p=3.0, max_iter=99, tol=0.0),
+        )

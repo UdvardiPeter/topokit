@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "platform": "macOS-26.3.1-arm64-arm-64bit",
+    "python": "3.12.11",
+    "numpy": "2.4.6",
+    "scipy": "1.17.1",
+    "pyamg": "5.3.0",
+    "git_sha": "07a0118c1a60756586e9f56270fd172cab0e4695",
+    "generated": "2026-08-08T22:36:48+00:00"
+  },
+  "cases": [
+    {
+      "label": "cantilever_3d_20",
+      "elements": 8000,
+      "dof": 26460,
+      "solver": "AmgCG",
+      "iterations": 8,
+      "wall_total_s": 5.4904,
+      "wall_per_iter_s": 0.6863,
+      "amg_iterations": 15,
+      "peak_rss_kb": 583344
+    },
+    {
+      "label": "cantilever_3d_40",
+      "elements": 64000,
+      "dof": 201720,
+      "solver": "AmgCG",
+      "iterations": 8,
+      "wall_total_s": 47.3002,
+      "wall_per_iter_s": 5.9125,
+      "amg_iterations": 16,
+      "peak_rss_kb": 2308944
+    },
+    {
+      "label": "mbb_150x50_full",
+      "elements": 7500,
+      "dof": 15350,
+      "solver": "Direct",
+      "iterations": 100,
+      "wall_total_s": 12.9104,
+      "wall_per_iter_s": 0.1291,
+      "amg_iterations": null,
+      "peak_rss_kb": 184336
+    }
+  ]
+}

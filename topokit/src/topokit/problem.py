@@ -389,19 +389,45 @@ class Study:
         return sol, f0, df0, gvals, dgs, responses
 
     @classmethod
-    def resume(cls, problem: Problem, path: str, *, events: EventBus | None = None) -> Study:
-        """Reconstruct a Study from a ``.topo`` and continue; ``problem`` must match."""
+    def resume(
+        cls,
+        problem: Problem,
+        path: str,
+        *,
+        events: EventBus | None = None,
+        schedule: Schedule | None = None,
+    ) -> Study:
+        """Reconstruct a Study from a ``.topo`` and continue; ``problem`` must match.
+
+        Pass ``schedule`` to continue under a different one, which is how a run
+        that reached the end of its schedule is extended (a larger per-stage
+        ``max_iter``, or more stages). The problem itself must match the
+        checkpoint either way: the fingerprint is always verified against the
+        schedule the checkpoint was written with, so the override relaxes the
+        run parameters and never the problem identity. Stages the checkpoint
+        already completed are history and are not re-run, so the override
+        governs only what remains.
+        """
         manifest, arrays = read_topo(path)
         if int(manifest.get("schema", -1)) != SCHEMA_VERSION:
             raise ProblemError(
                 f"unsupported .topo schema {manifest.get('schema')!r}; expected {SCHEMA_VERSION}"
             )
-        schedule = _schedule_from_json(manifest["schedule"])
-        study = cls(problem, schedule=schedule)
+        written = _schedule_from_json(manifest["schedule"])
+        study = cls(problem, schedule=written)
         if events is not None:
             study.events = events
         if config_fingerprint(study._config_parts()) != manifest["fingerprint"]:
             raise ProblemError("checkpoint was written for a different problem")
+        stage_index = int(manifest["stage_index"])
+        if schedule is not None:
+            if stage_index >= len(schedule.stages):
+                raise ProblemError(
+                    f"the checkpoint resumes at stage {stage_index}, but the given schedule "
+                    f"has only {len(schedule.stages)} stage(s); it must keep at least the "
+                    "stages the run already reached"
+                )
+            study.schedule = schedule
         opt_state: dict[str, object] = dict(manifest["opt_scalars"])
         for name in manifest["opt_none"]:
             opt_state[name] = None
@@ -409,7 +435,7 @@ class Study:
             if key.startswith("opt__"):
                 opt_state[key[len("opt__") :]] = arr
         study._resume = _Resume(
-            stage_index=int(manifest["stage_index"]),
+            stage_index=stage_index,
             iter_in_stage=int(manifest["iter_in_stage"]),
             iteration=int(manifest["iteration"]),
             x=arrays["x"],
@@ -645,7 +671,8 @@ class Study:
         if not ran_any:
             raise ProblemError(
                 "nothing to resume: the checkpoint is already at the end of its schedule; "
-                "extend the schedule (e.g. a larger max_iter) to continue"
+                "continue it with Study.resume(problem, path, schedule=...) carrying a "
+                "larger per-stage max_iter or more stages"
             )
         self._checkpoint(stage_index, j + 1, iteration, x, c0)
         self._timing = time.perf_counter() - t0
