@@ -69,9 +69,9 @@ def test_continuation_runs_stages_and_emits_stage_events() -> None:
     study = Study(p, schedule=Schedule.default(max_iter=15, tol=1e-3))
     study.events.subscribe(StageFinished, stages_seen.append)
     result = study.run()
-    assert len(stages_seen) == 8  # all stages executed (Heaviside present)
-    assert result.stages_run == 8
-    assert result.history["stage"][-1] == 7  # zero-based last stage index
+    assert len(stages_seen) == 7  # all stages executed (Heaviside present)
+    assert result.stages_run == 7
+    assert result.history["stage"][-1] == 6  # zero-based last stage index
     assert result.history["stage"][0] == 0
     assert result.iterations == len(result.history["objective"])
 
@@ -404,7 +404,7 @@ def test_resume_rejects_unknown_schema(tmp_path: Path) -> None:
 def test_iterate_yields_across_stages() -> None:
     # E10: the generator spans every executed stage with a global iteration counter
     states = list(Study(_problem_proj(), schedule=Schedule.default(max_iter=8, tol=1e-3)).iterate())
-    assert {s.stage for s in states} == set(range(8))  # all 8 stages yielded
+    assert {s.stage for s in states} == set(range(7))  # all 7 stages yielded
     assert [s.iteration for s in states] == list(range(1, len(states) + 1))  # global, contiguous
 
 

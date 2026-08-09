@@ -226,7 +226,15 @@ class MMA:
     asydecr: float = 0.7
     asyincr: float = 1.2
     asybound: float = 10.0
-    move: float = 0.5
+    # Svanberg's general-NLP default is 0.5; topology optimization with
+    # Heaviside projection needs less. At high beta the projection saturates
+    # most elements, their gradients vanish, and the linear model then treats
+    # deleting load-bearing material as free volume slack: a 0.5 step crosses
+    # the projection threshold and severs members (measured: objective spikes
+    # of 1e8+ on the default schedule). 0.2 keeps steps short of the cliff so
+    # gradients wake up before it, and converged faster in every measured
+    # case. Raise it for smooth problems; reduce further for beta above ~16.
+    move: float = 0.2
     raa0: float = 1e-5
 
     def __post_init__(self) -> None:

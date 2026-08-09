@@ -239,8 +239,15 @@ class Schedule:
 
     @classmethod
     def default(cls, *, max_iter: int = 200, tol: float = 0.01) -> Schedule:
-        """Return the doc-04 ramp: p 1->3, then beta doubling 1->32."""
-        pairs = [(1, 1), (2, 1), (3, 1), (3, 2), (3, 4), (3, 8), (3, 16), (3, 32)]
+        """Return the default ramp: p 1->3, then beta doubling 1->16.
+
+        The beta ramp stops at 16, amending the originally planned 32:
+        measured across meshes, the beta=32 stage destabilized converged
+        designs (near-total projection saturation kills the gradients MMA
+        and OC steer by) while sharpening the design only marginally. Pass
+        an explicit :class:`Schedule` to ramp further.
+        """
+        pairs = [(1, 1), (2, 1), (3, 1), (3, 2), (3, 4), (3, 8), (3, 16)]
         return cls(tuple(Stage(float(p), float(b), max_iter, tol) for p, b in pairs))
 
     @classmethod
