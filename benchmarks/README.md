@@ -61,11 +61,12 @@ a published 3D compliance number.
 
 ## Scaling study
 
-`bench` (nightly only, never cached) runs a scaling study — 3D cantilever at
+`bench` (local and manual, never cached) runs a scaling study — 3D cantilever at
 `20^3 / 40^3` plus the 2D `150x50` full run — recording per-iteration wall time,
 peak RSS, solver, and AMG CG iterations to `bench/latest.json` (gitignored;
 written by every run). `bench-check` runs the same study and gates the numbers
-against the committed `bench/baseline.json`; see below.
+against the committed `bench/baseline.json`; that is the target the nightly runs,
+and the only one it runs — see below.
 
 `60^3` (~6.6 GB peak) is a **heavy** case: it is skipped by default so the study
 fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
@@ -76,17 +77,30 @@ fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
 `bench/baseline.json` holds the committed reference numbers. The nightly workflow
 (`.github/workflows/nightly.yml`) runs `bench-check` on a daily cron against
 `main` and uploads the resulting `bench/latest.json` as the `bench-latest`
-artifact. A regression fails the job: peak RSS more than 10% above the baseline,
-AMG iterations above the +10%/+2 band, or per-iteration wall time more than 30%
-above. Wall time gets the loose gate because the CI runner is a shared 2-vCPU box
-whose timings vary by about 20% between runs; the tight gates ride the
-near-deterministic metrics.
+artifact. It runs in a step of its own, after the test tiers rather than beside
+them, because its timings *are* the measurement and a 2-vCPU runner shared with
+`pytest -n auto` charges every case a large size-independent cost. A regression
+fails the job: peak RSS more than 10% above the baseline, AMG iterations above the
++10%/+2 band, or per-iteration wall time more than 30% above. Wall time gets the
+loose gate because the runner is a shared box whose timings vary by about 20%
+between runs; the tight gates ride the near-deterministic metrics. A case whose
+`elements`, `dof` or `solver` no longer matches the baseline fails too — the old
+numbers describe a different problem, so comparing them proves nothing.
 
 Numbers are only comparable within one platform, so the check refuses to compare a
-baseline generated elsewhere. To regenerate after an intended performance change:
-trigger the nightly workflow, download its `bench-latest` artifact from a run whose
-other steps are green, commit it as `bench/baseline.json`, and say in the PR what
-changed and why the numbers moved.
+baseline generated elsewhere. Regenerate after an intended performance change —
+and after any **pyamg version change**: AMG iteration counts are version
+sensitive, so the check drops the AMG gate whenever the baseline's pyamg differs
+from the run's, and it stays off, noted in a green log, until the baseline is
+regenerated on the new version.
+
+To regenerate: trigger the nightly workflow, download its `bench-latest` artifact
+from a run whose *test* steps are green, check no case in it carries an `error`
+field, commit it as `bench/baseline.json`, and say in the PR what changed and why
+the numbers moved. When the change legitimately moves the numbers the perf-gate
+step itself is red on that run — it compared the new numbers against the old
+baseline — and that is expected; a red *test* step is not, and its artifact must
+not be committed.
 
 A baseline holds exactly the cases of the run that produced it, and its `meta`
 describes that one platform and that one run. The nightly never sets

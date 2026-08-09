@@ -34,6 +34,7 @@ import scipy
 from topokit.optimizers import OC
 from topokit.problem import Schedule, Study
 
+from topokit_bench.baseline import load_baseline
 from topokit_bench.problems import cantilever_3d, mbb
 from topokit_bench.regressions import check_regressions
 
@@ -122,43 +123,6 @@ def _worker(label: str) -> None:
     sys.stdout.write(json.dumps(rec))
 
 
-def _bad_baseline(reason: str) -> SystemExit:
-    return SystemExit(f"{BASELINE}: {reason}; regenerate it (see benchmarks/README.md)")
-
-
-def _load_baseline() -> dict[str, Any]:
-    """Read the committed baseline, rejecting a shape the comparator cannot gate.
-
-    The baseline is committed, so it can be hand-edited or truncated in a merge.
-    Without this the comparator raises a bare ``TypeError`` or ``AttributeError``
-    on a ``null`` case, a scalar ``meta`` or a string metric, which reads as a
-    harness bug rather than a bad file.
-    """
-    try:
-        data: Any = json.loads(BASELINE.read_text())
-    except json.JSONDecodeError as exc:
-        raise _bad_baseline(f"not valid JSON ({exc})") from exc
-    if not isinstance(data, dict):
-        raise _bad_baseline(f"top level is {type(data).__name__}, expected an object")
-    meta = data.get("meta")
-    if meta is not None and not isinstance(meta, dict):
-        # The comparator reads meta first, so a scalar here fails before any case.
-        raise _bad_baseline(f"'meta' is {type(meta).__name__}, expected an object")
-    cases = data.get("cases", [])
-    if not isinstance(cases, list) or any(not isinstance(case, dict) for case in cases):
-        raise _bad_baseline("'cases' is not a list of objects")
-    for case in cases:
-        label = case.get("label")
-        if label is not None and not isinstance(label, str):
-            # Labels key the comparator's index, so a list or dict is unhashable there.
-            raise _bad_baseline(f"case label {label!r} is not a string")
-        for field in ("wall_per_iter_s", "peak_rss_kb", "amg_iterations"):
-            value = case.get(field)
-            if value is not None and not isinstance(value, int | float):
-                raise _bad_baseline(f"case {label!r} has non-numeric {field} {value!r}")
-    return data
-
-
 def _labels(report: dict[str, Any]) -> set[str]:
     """Return the case labels of ``report``; an unlabelled record cannot be gated."""
     return {case["label"] for case in report.get("cases", []) if "label" in case}
@@ -168,7 +132,7 @@ def _compare(report: dict[str, Any]) -> None:
     """Compare ``report`` against the committed baseline; exit nonzero on regression."""
     if not BASELINE.exists():
         raise SystemExit(f"no committed baseline at {BASELINE}; run without --check first")
-    baseline = _load_baseline()
+    baseline = load_baseline(BASELINE)
     failures, notes = check_regressions(baseline, report)
     for note in notes:
         print(f"note: {note}")

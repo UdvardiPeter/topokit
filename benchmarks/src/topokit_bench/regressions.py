@@ -8,9 +8,10 @@ reproducible each metric is on the shared CI runner: peak RSS and AMG iteration
 counts are near-deterministic and carry tight gates, wall time varies with CPU
 contention and catches only gross regressions.
 
-The gate is built so that it cannot pass by comparing nothing: an unusable
-baseline, an unlabelled or duplicated case, a metric the run dropped, and a run
-that gated no metric at all are all failures rather than silence.
+The gate is built so that it cannot pass by comparing nothing, nor by comparing
+the wrong thing: an unusable baseline, an unlabelled or duplicated case, a case
+whose size or solver no longer matches the baseline's, a metric the run dropped,
+and a run that gated no metric at all are all failures rather than silence.
 """
 
 from __future__ import annotations
@@ -48,6 +49,28 @@ def _structural_failures(baseline: dict[str, Any], latest: dict[str, Any]) -> li
             f"{label}: appears {n} times in the {side}; labels must be unique"
             for label, n in sorted(counts.items())
             if n > 1
+        )
+    return failures
+
+
+def _identity_failures(label: str, base: dict[str, Any], new: dict[str, Any]) -> list[str]:
+    """Return failures for a case whose definition moved out from under the baseline.
+
+    The metrics only mean something if both sides measured the same problem with
+    the same solver. Shrink a case in ``bench.py``'s ``CASES`` and every metric
+    "improves" against numbers for a bigger problem, with the nightly green; a
+    solver silently falling back to Direct (pyamg missing) reads the same way.
+    A field absent from both sides is not a mismatch; absent from one side is,
+    since then one report describes work the other cannot vouch for.
+    """
+    failures = []
+    for field in ("elements", "dof", "solver"):
+        old, now = base.get(field), new.get(field)
+        if old == now:
+            continue
+        failures.append(
+            f"{label}: {field} {old!r} in the baseline but {now!r} in this run; "
+            "the case definition changed, so the baseline must be regenerated"
         )
     return failures
 
@@ -133,6 +156,13 @@ def check_regressions(
         base = base_cases.get(label)
         if base is None or "error" in base:
             notes.append(f"{label}: no baseline entry, not gated")
+            continue
+        identity = _identity_failures(label, base, new)
+        if identity:
+            # Comparing metrics across two different problems is meaningless, so
+            # skip them; not incrementing ``gated`` keeps this off the coverage
+            # count, which is what makes a wholly redefined run fail twice over.
+            failures.extend(identity)
             continue
         for field, tol in (
             ("wall_per_iter_s", WALL_TOLERANCE),

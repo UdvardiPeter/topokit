@@ -14,8 +14,11 @@ def _report(cases: list[dict[str, Any]], **meta: Any) -> dict[str, Any]:
 
 
 def _case(**over: Any) -> dict[str, Any]:
-    case = {
+    case: dict[str, Any] = {
         "label": "cantilever_3d_20",
+        "elements": 8000,
+        "dof": 26460,
+        "solver": "AmgCG",
         "wall_per_iter_s": 1.0,
         "peak_rss_kb": 1000,
         "amg_iterations": 20,
@@ -64,6 +67,50 @@ def test_amg_absolute_slack_allows_small_counts() -> None:
     )
     assert len(failures) == 1
     assert "amg_iterations" in failures[0]
+
+
+def test_element_count_change_fails_the_case_and_skips_its_metrics() -> None:
+    # shrink a case in CASES and every metric "improves" against a bigger problem
+    failures, _ = check_regressions(
+        _report([_case(), _case(label="mbb_150x50_full")]),
+        _report([_case(elements=1000, wall_per_iter_s=99.0), _case(label="mbb_150x50_full")]),
+    )
+    assert len(failures) == 1
+    assert "elements 8000 in the baseline but 1000 in this run" in failures[0]
+    assert "the case definition changed, so the baseline must be regenerated" in failures[0]
+
+
+def test_dof_change_fails_the_case() -> None:
+    failures, _ = check_regressions(
+        _report([_case(), _case(label="mbb_150x50_full")]),
+        _report([_case(dof=999), _case(label="mbb_150x50_full")]),
+    )
+    assert len(failures) == 1
+    assert "dof 26460 in the baseline but 999 in this run" in failures[0]
+
+
+def test_solver_change_fails_the_case() -> None:
+    # pyamg missing, auto_solver falls back to Direct: same class of silent switch
+    failures, _ = check_regressions(
+        _report([_case(), _case(label="mbb_150x50_full")]),
+        _report([_case(solver="Direct"), _case(label="mbb_150x50_full")]),
+    )
+    assert len(failures) == 1
+    assert "solver 'AmgCG' in the baseline but 'Direct' in this run" in failures[0]
+
+
+def test_a_changed_case_does_not_count_toward_the_gated_total() -> None:
+    failures, _ = check_regressions(_report([_case()]), _report([_case(solver="Direct")]))
+    assert len(failures) == 2
+    assert any("solver" in f for f in failures)
+    assert any("no metric was compared" in f for f in failures)
+
+
+def test_identity_field_absent_from_both_sides_is_not_a_mismatch() -> None:
+    bare: dict[str, Any] = {"label": "cantilever_3d_20", "wall_per_iter_s": 1.0}
+    failures, notes = check_regressions(_report([dict(bare)]), _report([dict(bare)]))
+    assert failures == []
+    assert not any("case definition changed" in n for n in notes)
 
 
 def test_platform_mismatch_fails_and_stops() -> None:

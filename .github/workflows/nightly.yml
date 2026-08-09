@@ -27,9 +27,21 @@ jobs:
       # test-regression (2D smalls) is a per-PR tier; the nightly runs the heavy
       # tiers the per-PR gate skips. e2e is deferred (Phase 3/4).
       - name: Heavy tiers (run-many; main HEAD, no PR diff)
-        run: npx nx run-many -t test test-fd test-regression-full bench-check --skip-nx-cache
+        run: npx nx run-many -t test test-fd test-regression-full --skip-nx-cache
+      # The perf gate runs alone, after the test tiers, because its timings are
+      # the measurement: sharing the runner's 2 vCPUs with pytest -n auto added
+      # ~2.8 s/iteration of size-independent cost to every case. always() so a
+      # failing tier still yields perf numbers; `nx run` rather than run-many
+      # because run-many silently skips a target no project defines, so a rename
+      # of bench-check would leave the nightly green having gated nothing.
+      - name: Perf gate (alone; its timings are the measurement)
+        if: always()
+        run: npx nx run benchmarks:bench-check --skip-nx-cache
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: bench-latest
           path: benchmarks/bench/latest.json
+          # The baseline is regenerated from this artifact; a vanished output
+          # must not upload an empty artifact with a warning nobody reads.
+          if-no-files-found: error
