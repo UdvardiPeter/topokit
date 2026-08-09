@@ -80,7 +80,8 @@ Pre-alpha. The numerical core runs end to end (2D and 3D)
 | `topokit.viz` convergence curves, density views, slices, LiveView (`[viz]` extra) | done |
 | `topokit.jax` JAX backend + assembly kernels via `use_backend("jax")` (`[jax]` extra) | done |
 | AMG rigid-body near-nullspace, shared-forward chain evaluation | done |
-| perf budgets + nightly gates (WP-2.2c), manufacturing constraints | next |
+| perf budgets gated in the nightly against a committed Linux baseline | done |
+| manufacturing constraints | next |
 | CAD import/export | planned |
 | Local daemon, Fusion 360 add-in | planned |
 
