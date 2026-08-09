@@ -77,7 +77,7 @@ def test_element_count_change_fails_the_case_and_skips_its_metrics() -> None:
     )
     assert len(failures) == 1
     assert "elements 8000 in the baseline but 1000 in this run" in failures[0]
-    assert "the case definition changed, so the baseline must be regenerated" in failures[0]
+    assert "the baseline must be regenerated" in failures[0]
 
 
 def test_dof_change_fails_the_case() -> None:
@@ -110,7 +110,7 @@ def test_identity_field_absent_from_both_sides_is_not_a_mismatch() -> None:
     bare: dict[str, Any] = {"label": "cantilever_3d_20", "wall_per_iter_s": 1.0}
     failures, notes = check_regressions(_report([dict(bare)]), _report([dict(bare)]))
     assert failures == []
-    assert not any("case definition changed" in n for n in notes)
+    assert not any("regenerated" in n for n in notes)
 
 
 def test_platform_mismatch_fails_and_stops() -> None:

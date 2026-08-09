@@ -70,7 +70,8 @@ def _identity_failures(label: str, base: dict[str, Any], new: dict[str, Any]) ->
             continue
         failures.append(
             f"{label}: {field} {old!r} in the baseline but {now!r} in this run; "
-            "the case definition changed, so the baseline must be regenerated"
+            "the two reports describe different work, so the baseline must be "
+            "regenerated"
         )
     return failures
 
