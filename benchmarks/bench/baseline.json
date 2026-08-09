@@ -7,8 +7,8 @@
     "numpy": "2.4.6",
     "scipy": "1.17.1",
     "pyamg": "5.3.0",
-    "git_sha": "5cee093cf81de9b289b4e759a945f071e3575852",
-    "generated": "2026-08-08T23:47:12+00:00"
+    "git_sha": "e3c70fea84040b2ba6ce691b89210511f50e04ac",
+    "generated": "2026-08-09T01:36:01+00:00"
   },
   "cases": [
     {
@@ -17,10 +17,10 @@
       "dof": 26460,
       "solver": "AmgCG",
       "iterations": 8,
-      "wall_total_s": 30.8554,
-      "wall_per_iter_s": 3.8569,
+      "wall_total_s": 7.6295,
+      "wall_per_iter_s": 0.9537,
       "amg_iterations": 15,
-      "peak_rss_kb": 350024
+      "peak_rss_kb": 349864
     },
     {
       "label": "cantilever_3d_40",
@@ -28,10 +28,10 @@
       "dof": 201720,
       "solver": "AmgCG",
       "iterations": 8,
-      "wall_total_s": 85.2203,
-      "wall_per_iter_s": 10.6525,
+      "wall_total_s": 62.8115,
+      "wall_per_iter_s": 7.8514,
       "amg_iterations": 16,
-      "peak_rss_kb": 1552808
+      "peak_rss_kb": 1613616
     },
     {
       "label": "mbb_150x50_full",
@@ -39,10 +39,10 @@
       "dof": 15350,
       "solver": "Direct",
       "iterations": 100,
-      "wall_total_s": 15.1469,
-      "wall_per_iter_s": 0.1515,
+      "wall_total_s": 14.5141,
+      "wall_per_iter_s": 0.1451,
       "amg_iterations": null,
-      "peak_rss_kb": 215264
+      "peak_rss_kb": 207136
     }
   ]
 }
