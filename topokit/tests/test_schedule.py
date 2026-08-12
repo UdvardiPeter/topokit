@@ -10,7 +10,8 @@ from topokit.problem import ProblemError, Schedule, Stage
 def test_default_schedule_ramps_p_then_beta() -> None:
     s = Schedule.default()
     pairs = [(st.p, st.beta) for st in s.stages]
-    assert pairs == [(1, 1), (2, 1), (3, 1), (3, 2), (3, 4), (3, 8), (3, 16), (3, 32)]
+    # beta ramp capped at 16: the beta=32 stage destabilized converged designs
+    assert pairs == [(1, 1), (2, 1), (3, 1), (3, 2), (3, 4), (3, 8), (3, 16)]
     assert all(st.max_iter == 200 and st.tol == 0.01 for st in s.stages)
 
 

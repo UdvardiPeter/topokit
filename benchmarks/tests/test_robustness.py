@@ -50,3 +50,38 @@ def test_3d_converges_cleanly(nelx: int, nely: int, nelz: int) -> None:
     problem = cantilever_3d(nelx, nely, nelz, optimizer=make_optimizer("oc"))
     result = Study(problem, schedule=Schedule.single(p=3.0, max_iter=40, tol=1e-3)).run()
     _assert_clean(result, 0.3)
+
+
+@pytest.mark.regression_full
+def test_default_schedule_with_mma_and_projection_converges_cleanly() -> None:
+    # Audit item I: the out-of-the-box path (default schedule, MMA defaults,
+    # Heaviside projection) destabilized at high beta: the projection saturates
+    # most elements, their gradients vanish, and MMA's linear model then sees
+    # deleting load-bearing material as free volume slack. The objective spiked
+    # ~7 orders of magnitude and the final stage never converged. Guard the
+    # whole property: converges, no blowup, ends near the pre-spike optimum.
+    from topokit.fem import LinearElasticity, Material, PointLoad
+    from topokit.mesh import StructuredGrid
+    from topokit.optimizers import MMA
+    from topokit.parametrization import SIMP, DensityFilter, Heaviside
+    from topokit.problem import Problem
+    from topokit.responses import Compliance, Volume
+    from topokit.selection import NearPoint, PlaneSlab
+
+    grid = StructuredGrid.box(size=(60.0, 20.0), shape=(60, 20))
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    model = LinearElasticity(
+        grid,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(NearPoint((60.0, 10.0)), (0.0, -1.0))],
+    )
+    chain = DensityFilter(radius=1.5) | Heaviside() | SIMP()
+    problem = Problem(
+        model, chain, objective=Compliance(), constraints=[Volume() <= 0.4], optimizer=MMA()
+    )
+    result = Study(problem).run()  # default schedule, all defaults
+    obj = np.asarray(result.history["objective"], dtype=float)
+    assert result.converged, f"unconverged: {result.reason}"
+    assert obj.max() < 3.0 * obj[0], f"objective spiked to {obj.max():.3g}"
+    assert result.objective < 1.5 * result.best_objective
