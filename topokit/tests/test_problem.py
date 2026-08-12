@@ -100,10 +100,32 @@ def test_problem_validates_field_mismatch() -> None:
     class WrongTerminal(SIMP):
         pass
 
-    # a chain whose terminal field does not match the physics expectation
+    # a chain whose terminal field does not match the physics expectation; the
+    # rest of the protocol is stubbed no-op so this still exercises the field
+    # check rather than tripping the (now-first) PhysicsModel protocol check.
     class FakePhysics:
         expected_field = FieldSpec("conductivity_scale")  # not stiffness_scale
         mesh = model.mesh
+
+        @property
+        def n_dof(self) -> int:
+            return 0
+
+        @property
+        def n_cases(self) -> int:
+            return 1
+
+        def assemble(self, scale: object) -> None:
+            return None
+
+        def loads(self) -> None:
+            return None
+
+        def element_energies(self, u: object, scale: object) -> None:
+            return None
+
+        def element_stress(self, u: object, scale: object) -> None:
+            return None
 
     with pytest.raises(ProblemError, match="field"):
         Problem(FakePhysics(), DensityFilter(radius=1.5) | SIMP(), objective=Compliance())  # type: ignore[arg-type]
@@ -660,4 +682,67 @@ def test_resume_schedule_override_rejects_a_shorter_schedule(tmp_path: Path) -> 
             _problem(OC(move=0.2)),
             str(path),
             schedule=Schedule.single(p=3.0, max_iter=99, tol=0.0),
+        )
+
+
+def test_problem_rejects_non_protocol_components() -> None:
+    model = _cantilever()
+    chain = DensityFilter(radius=1.5) | SIMP(p=3.0)
+
+    with pytest.raises(ProblemError, match="PhysicsModel"):
+        Problem(object(), chain, objective=Compliance())  # type: ignore[arg-type]
+    with pytest.raises(ProblemError, match="Response"):
+        Problem(model, chain, objective=object())  # type: ignore[arg-type]
+    with pytest.raises(ProblemError, match="Optimizer"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=object(),  # type: ignore[arg-type]
+        )
+    with pytest.raises(ProblemError, match="LinearSolver"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=MMA(),
+            solver=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_problem_names_the_constraint_mistake() -> None:
+    # passing a bare Response where a Constraint belongs is the classic slip
+    with pytest.raises(ProblemError, match=r"Volume\(\) <= 0.4"):
+        Problem(
+            _cantilever(),
+            DensityFilter(radius=1.5) | SIMP(p=3.0),
+            objective=Compliance(),
+            constraints=[Volume()],  # type: ignore[list-item]
+            optimizer=MMA(),
+        )
+
+
+def test_problem_incomplete_optimizer_fails_at_construction() -> None:
+    # an attribute shadowing a protocol method must fail here, not mid-run
+    class Broken:
+        step = 0.1  # not callable
+
+        def setup(self, n_vars, lower, upper):  # type: ignore[no-untyped-def]
+            return None
+
+        def state(self):  # type: ignore[no-untyped-def]
+            return {}
+
+        def load_state(self, state):  # type: ignore[no-untyped-def]
+            return None
+
+    with pytest.raises(ProblemError, match="Optimizer"):
+        Problem(
+            _cantilever(),
+            DensityFilter(radius=1.5) | SIMP(p=3.0),
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=Broken(),  # type: ignore[arg-type]
         )
