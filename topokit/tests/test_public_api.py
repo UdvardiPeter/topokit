@@ -1,10 +1,10 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """The user-facing vocabulary is importable from the top-level package."""
 
 import topokit
 
-# Everything the canonical scripted example (doc 03) touches: mesh, physics,
+# Everything the canonical scripted example touches: mesh, physics,
 # materials, loads, selectors, chain links, responses, optimizers, orchestration.
 USER_FACING = [
     # mesh

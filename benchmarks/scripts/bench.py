@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Perf scaling study: per-iteration wall time, peak RSS, AMG CG iterations.
 
@@ -14,7 +14,7 @@ process-lifetime high-water mark. Heavy cases (``heavy: True``, e.g. 60^3 at
 ~6.6 GB peak) are skipped unless ``TOPOKIT_BENCH_HEAVY`` is set, so the default
 study fits a 7 GB CI runner. A baseline holds exactly the cases of the run that
 produced it, so one generated without that variable does not gate the heavy
-cases. The 1M-element gate (doc 08) is aspirational / dedicated-hardware.
+cases. The 1M-element target needs dedicated hardware and is not gated.
 """
 
 from __future__ import annotations

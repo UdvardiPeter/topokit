@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """The unified parametrization chain.
 
@@ -429,9 +429,8 @@ class DensityFilter(LinkSpec):
     Because the kernel is separable, its reach is ``sqrt(dim)`` larger along
     diagonals than along axes (measured 1.41x in 2D, 1.73x in 3D), so the
     minimum member size it enforces is orientation-dependent, tightest for
-    axis-aligned features. A radial kernel would be needed for isotropic
-    control; the radius-to-member-size calibration is set in the
-    manufacturing-constraint work.
+    axis-aligned features. Use :class:`RadialDensityFilter` when isotropic
+    reach or a literature-faithful radius-to-member-size relation matters.
     """
 
     radius: float = 1.5

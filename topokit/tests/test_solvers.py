@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for linear solvers."""
 
@@ -126,7 +126,7 @@ def test_simp_regime_amg_vs_direct() -> None:
     a = AmgCG(tol=1e-10, max_iter=2000)
     a.prepare(k)
     u = a.solve(f)
-    # accuracy is conditioning-limited in the SIMP regime (see WP-1.4 review)
+    # accuracy is conditioning-limited in the SIMP regime (contrast ~1/scale_min)
     err = np.linalg.norm(u - u_ref) / np.linalg.norm(u_ref)
     assert err < 1e-4
 

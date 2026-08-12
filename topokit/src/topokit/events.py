@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Typed, synchronous event bus for the optimization loop.
 
@@ -59,7 +59,7 @@ class StageFinished(Event):
 
 @dataclass(frozen=True, slots=True)
 class CheckResult(Event):
-    """Result of a manufacturability design check."""
+    """Result of a design check."""
 
     name: str
     passed: bool

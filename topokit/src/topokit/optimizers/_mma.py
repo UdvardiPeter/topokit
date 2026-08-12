@@ -1,12 +1,12 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Clean-room Method of Moving Asymptotes (Svanberg 2002, standard non-GC MMA).
 
-Implemented from the published equations (see the WP-1.8b plan), not from
-any reference code. ``solve_subproblem`` is a primal-dual interior-point
-solver for the convex separable MMA subproblem; ``MMA`` wraps it with the
-moving-asymptote update and the standard topology-optimization artificial-
-variable parameters (a0=1, a=0, c=1000, d=1).
+Implemented from the published equations, not from any reference code.
+``solve_subproblem`` is a primal-dual interior-point solver for the convex
+separable MMA subproblem; ``MMA`` wraps it with the moving-asymptote update
+and the standard topology-optimization artificial-variable parameters
+(a0=1, a=0, c=1000, d=1).
 
 Correctness is established by the test suite: the subproblem solver is
 checked against its KKT conditions and cross-checked against scipy SLSQP,

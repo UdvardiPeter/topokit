@@ -4,7 +4,7 @@ Open-source topology optimization for engineers
 
 [![Docs](https://app.readthedocs.org/projects/topokit/badge/?version=latest)](https://topokit.readthedocs.io/en/latest/)
 
-- Python ≥3.12 · LGPL-2.1-or-later · Nx + uv monorepo
+- Python ≥3.12 · MIT · Nx + uv monorepo
 - Docs: [topokit.readthedocs.io](https://topokit.readthedocs.io/)
 - Dev setup: see [CONTRIBUTING.md](CONTRIBUTING.md)
 - Architecture overview: see [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -81,7 +81,8 @@ Pre-alpha. The numerical core runs end to end (2D and 3D)
 | `topokit.jax` JAX backend + assembly kernels via `use_backend("jax")` (`[jax]` extra) | done |
 | AMG rigid-body near-nullspace, shared-forward chain evaluation | done |
 | perf budgets gated in the nightly against a committed Linux baseline | done |
-| manufacturing constraints | next |
+| library polish: docs site, tutorials, gallery, extension guide | next |
+| unstructured meshes | planned |
 | CAD import/export | planned |
 | Local daemon, Fusion 360 add-in | planned |
 
