@@ -16,19 +16,22 @@ from topokit.fem import (
     PointLoad,
     SurfaceTraction,
 )
-from topokit.mesh import StructuredGrid
-from topokit.optimizers import MMA, OC
+from topokit.fields import FieldSpec
+from topokit.mesh import Mesh, StructuredGrid
+from topokit.optimizers import MMA, OC, StepResult
 from topokit.parametrization import (
     SIMP,
+    BoundLink,
     DensityFilter,
     Heaviside,
+    LinkSpec,
     RadialDensityFilter,
     SensitivityFilter,
     SymmetryMap,
 )
 from topokit.problem import IterationState, Problem, Result, Schedule, Stage, Study
 from topokit.registry import registry
-from topokit.responses import Compliance, Constraint, Volume, von_mises
+from topokit.responses import Compliance, Constraint, ResponseBase, Solution, Volume, von_mises
 from topokit.selection import (
     Box,
     Cylinder,
@@ -54,6 +57,7 @@ __all__ = [
     "STEEL",
     "AmgCG",
     "BodyForce",
+    "BoundLink",
     "Box",
     "Compliance",
     "Constraint",
@@ -62,10 +66,13 @@ __all__ = [
     "Direct",
     "EventBus",
     "FaceSetSelector",
+    "FieldSpec",
     "Heaviside",
     "IterationState",
     "LinearElasticity",
+    "LinkSpec",
     "Material",
+    "Mesh",
     "NearPoint",
     "OnBoundary",
     "PlaneSlab",
@@ -73,11 +80,14 @@ __all__ = [
     "Predicate",
     "Problem",
     "RadialDensityFilter",
+    "ResponseBase",
     "Result",
     "Schedule",
     "SensitivityFilter",
+    "Solution",
     "Sphere",
     "Stage",
+    "StepResult",
     "StructuredGrid",
     "Study",
     "SurfaceTraction",
