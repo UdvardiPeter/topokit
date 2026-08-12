@@ -451,3 +451,57 @@ def test_evaluate_arrays_are_frozen() -> None:
     # a caller's failed mutation attempt must not have corrupted the cached
     # linearization point used by pullback
     np.testing.assert_array_equal(ev.pullback(g), bound.pullback(x, g))
+
+
+def test_custom_link_authors_against_public_names() -> None:
+    from dataclasses import dataclass
+
+    from topokit.parametrization import BoundLink, LinkSpec
+
+    @dataclass(frozen=True)
+    class Half(LinkSpec):
+        def build(self, mesh: StructuredGrid) -> BoundLink:
+            return _BoundHalf()
+
+        @classmethod
+        def fd_example(cls, mesh: StructuredGrid) -> "Half":
+            return cls()
+
+    class _BoundHalf(BoundLink):
+        def apply(self, x: np.ndarray) -> np.ndarray:
+            return 0.5 * x
+
+        def pullback(self, x: np.ndarray, grad_out: np.ndarray) -> np.ndarray:
+            return 0.5 * grad_out
+
+    bound = (Half() | SIMP()).bind(G42)
+    x = np.full(bound.n_vars, 0.5)
+    np.testing.assert_allclose(bound.physical_density(x)[G42.design], 0.25)
+
+
+def test_terminal_link_without_out_field_fails_at_bind() -> None:
+    from dataclasses import dataclass
+    from typing import ClassVar
+
+    from topokit.parametrization import BoundLink, LinkSpec
+
+    @dataclass(frozen=True)
+    class BadTerminal(LinkSpec):
+        is_terminal: ClassVar[bool] = True
+
+        def build(self, mesh: StructuredGrid) -> BoundLink:
+            return _BoundBad()
+
+        @classmethod
+        def fd_example(cls, mesh: StructuredGrid) -> "BadTerminal":
+            return cls()
+
+    class _BoundBad(BoundLink):  # forgets to set out_field
+        def apply(self, x: np.ndarray) -> np.ndarray:
+            return x
+
+        def pullback(self, x: np.ndarray, grad_out: np.ndarray) -> np.ndarray:
+            return grad_out
+
+    with pytest.raises(ParametrizationError, match="out_field"):
+        Chain((BadTerminal(),)).bind(G42)
