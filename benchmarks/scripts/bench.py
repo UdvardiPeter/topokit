@@ -2,16 +2,19 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Perf scaling study: per-iteration wall time, peak RSS, AMG CG iterations.
 
-MAINTAINER / nightly tool. Writes ``bench/baseline.json``. No assertions, no
-gating (WP-2.1 soft baseline; WP-2.2 reads these numbers and adds gates). Run on
-the CI platform (Linux) for comparable numbers; needs pyamg (topokit dev group)
-for the larger 3D sizes.
+Every run writes ``bench/latest.json`` (gitignored). With ``--check`` the fresh
+numbers are compared against the committed ``bench/baseline.json`` and a
+regression exits nonzero; the nightly runs that mode. A run never overwrites the
+baseline: it moves only by explicit maintainer action (see benchmarks/README.md).
+Numbers are only comparable within one platform, so the check refuses to compare
+across them. Needs pyamg (topokit dev group) for the larger 3D sizes.
 
 Each case runs in its own subprocess so peak RSS is per-case, not a monotonic
 process-lifetime high-water mark. Heavy cases (``heavy: True``, e.g. 60^3 at
 ~6.6 GB peak) are skipped unless ``TOPOKIT_BENCH_HEAVY`` is set, so the default
-study fits a 7 GB CI runner; the committed baseline carries the heavy cases from
-dedicated hardware. The 1M-element gate (doc 08) is aspirational / dedicated-hardware.
+study fits a 7 GB CI runner. A baseline holds exactly the cases of the run that
+produced it, so one generated without that variable does not gate the heavy
+cases. The 1M-element gate (doc 08) is aspirational / dedicated-hardware.
 """
 
 from __future__ import annotations
@@ -31,10 +34,13 @@ import scipy
 from topokit.optimizers import OC
 from topokit.problem import Schedule, Study
 
+from topokit_bench.baseline import load_baseline
 from topokit_bench.problems import cantilever_3d, mbb
+from topokit_bench.regressions import check_regressions
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "bench" / "baseline.json"
+BASELINE = ROOT / "bench" / "baseline.json"
+LATEST = ROOT / "bench" / "latest.json"
 BENCH_ITERS = 8
 
 # 3D cantilevers timed over a fixed BENCH_ITERS (timing, not convergence); the 2D
@@ -117,12 +123,40 @@ def _worker(label: str) -> None:
     sys.stdout.write(json.dumps(rec))
 
 
-def main() -> None:
-    """Run each case in a subprocess; aggregate into the committed baseline.
+def _labels(report: dict[str, Any]) -> set[str]:
+    """Return the case labels of ``report``; an unlabelled record cannot be gated."""
+    return {case["label"] for case in report.get("cases", []) if "label" in case}
 
-    Heavy cases are skipped unless ``TOPOKIT_BENCH_HEAVY`` is set (CI runners cap
-    at ~7 GB; 60^3 peaks at ~6.6 GB). The committed baseline carries the heavy
-    cases from a dedicated-hardware run.
+
+def _compare(report: dict[str, Any]) -> None:
+    """Compare ``report`` against the committed baseline; exit nonzero on regression."""
+    if not BASELINE.exists():
+        raise SystemExit(f"no committed baseline at {BASELINE}; run without --check first")
+    baseline = load_baseline(BASELINE)
+    failures, notes = check_regressions(baseline, report)
+    for note in notes:
+        print(f"note: {note}")
+    if failures:
+        for failure in failures:
+            print(f"REGRESSION: {failure}")
+        raise SystemExit(1)
+    # Report the coverage too: a baseline gone partially stale shrinks the gate
+    # without failing it, and that should be visible in the nightly log.
+    known = _labels(baseline)
+    print(
+        "no regressions against the committed baseline "
+        f"({len(known & _labels(report))} of {len(known)} baseline cases present in this run)"
+    )
+
+
+def main(check: bool = False) -> None:
+    """Run each case in a subprocess; write ``bench/latest.json``.
+
+    With ``check``, the fresh numbers are gated against the committed baseline
+    and a regression exits nonzero. Heavy cases are skipped unless
+    ``TOPOKIT_BENCH_HEAVY`` is set (CI runners cap at ~7 GB; 60^3 peaks at
+    ~6.6 GB). A baseline generated without that variable does not carry the heavy
+    cases and so cannot gate them.
     """
     include_heavy = os.environ.get("TOPOKIT_BENCH_HEAVY", "") not in ("", "0")
     cases = [c for c in CASES if include_heavy or not c.get("heavy")]
@@ -150,8 +184,10 @@ def main() -> None:
             f"{rec['wall_per_iter_s']:.3f}s/it rss={rec['peak_rss_kb'] / 1e3:.0f}MB "
             f"amg={rec['amg_iterations']}"
         )
-    baseline = {
+    report = {
         "meta": {
+            "system": platform.system(),
+            "machine": platform.machine(),
             "platform": platform.platform(),
             "python": platform.python_version(),
             "numpy": np.__version__,
@@ -162,13 +198,20 @@ def main() -> None:
         },
         "cases": records,
     }
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(baseline, indent=2) + "\n")
-    print(f"wrote {OUT.relative_to(ROOT)}")
+    LATEST.parent.mkdir(parents=True, exist_ok=True)
+    LATEST.write_text(json.dumps(report, indent=2) + "\n")
+    print(f"wrote {LATEST.relative_to(ROOT)}")
+    if check:
+        _compare(report)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--worker":
-        _worker(sys.argv[2])
+    argv = sys.argv[1:]
+    if len(argv) == 2 and argv[0] == "--worker":
+        _worker(argv[1])
+    elif argv in ([], ["--check"]):
+        main(check=argv == ["--check"])
     else:
-        main()
+        # Not ignored: the nightly reads only the exit code, so a typo in the
+        # command would otherwise run the study, gate nothing and exit 0.
+        raise SystemExit(f"usage: {Path(__file__).name} [--check]")

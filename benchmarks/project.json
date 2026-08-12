@@ -40,6 +40,11 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": { "cwd": "benchmarks", "command": "uv run python scripts/bench.py" }
+    },
+    "bench-check": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": { "cwd": "benchmarks", "command": "uv run python scripts/bench.py --check" }
     }
   },
   "tags": []
