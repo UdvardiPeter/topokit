@@ -25,5 +25,9 @@ nav:
       - Multiple load cases: tutorials/multi-load.md
       - Symmetry, checkpoints, resume: tutorials/symmetry-checkpoint.md
       - Visualization: tutorials/visualization.md
+  - Extend:
+      - extend/index.md
+      - Custom response: extend/custom-response.md
+      - Custom optimizer: extend/custom-optimizer.md
   - Contributing: contributing.md
   - API reference: reference/api.md
