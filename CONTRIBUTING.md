@@ -36,7 +36,7 @@ Requires Node >= 20.19 and uv. Python 3.12 is installed by uv automatically.
 
 Every commit needs a `Signed-off-by` line (`git commit -s`), certifying the
 [Developer Certificate of Origin](https://developercertificate.org/).
-There is no CLA. Contributions are LGPL-2.1-or-later, permanently.
+There is no CLA. Contributions are MIT, permanently.
 
 ## Common commands
 

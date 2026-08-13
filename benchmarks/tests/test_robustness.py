@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tier-3 full robustness sweep (pytest -m regression_full).
 
@@ -54,7 +54,7 @@ def test_3d_converges_cleanly(nelx: int, nely: int, nelz: int) -> None:
 
 @pytest.mark.regression_full
 def test_default_schedule_with_mma_and_projection_converges_cleanly() -> None:
-    # Audit item I: the out-of-the-box path (default schedule, MMA defaults,
+    # The out-of-the-box path (default schedule, MMA defaults,
     # Heaviside projection) destabilized at high beta: the projection saturates
     # most elements, their gradients vanish, and MMA's linear model then sees
     # deleting load-bearing material as free volume slack. The objective spiked

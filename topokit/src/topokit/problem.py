@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Problem assembly and the optimization loop (orchestration layer).
 
@@ -254,7 +254,7 @@ class Schedule:
     def single(
         cls, *, p: float = 3.0, beta: float = 1.0, max_iter: int = 200, tol: float = 0.01
     ) -> Schedule:
-        """One stage = no continuation (the 1.9a behavior)."""
+        """One stage = no continuation."""
         return cls((Stage(p, beta, max_iter, tol),))
 
 

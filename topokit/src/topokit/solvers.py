@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Linear solvers for the assembled free-DOF systems.
 
@@ -7,8 +7,9 @@ assembled stiffness matrices are.
 
 ``Direct`` factorizes once and solves any number of right-hand sides;
 ``AmgCG`` runs conjugate gradients with a pyamg smoothed-aggregation
-preconditioner (the path to large 3D systems). ``auto_solver`` picks per
-the doc-04 rule: direct below 150k DOF, AMG-preconditioned CG above.
+preconditioner (the path to large 3D systems). ``auto_solver`` picks by
+problem size: direct below the measured crossover, AMG-preconditioned CG
+above.
 
 Solver accuracy bounds sensitivity accuracy: in the SIMP regime the system
 condition number is roughly the stiffness contrast (1e9 with the default

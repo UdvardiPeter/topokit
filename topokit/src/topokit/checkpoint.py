@@ -1,10 +1,10 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """``.topo`` checkpoint serialization: a zip of ``manifest.json`` + ``arrays.npz``.
 
 Pure functions over plain dicts and arrays; the orchestration layer builds the
 manifest and reads it back. State-only (no Problem reconstruction -- that is
-WP-4.1's ``problem.json``); a config fingerprint guards against resuming the
+a future declarative problem format); a config fingerprint guards against resuming the
 wrong problem.
 """
 

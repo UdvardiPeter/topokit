@@ -4,8 +4,8 @@ Open-source topology optimization for engineers.
 
 **Status: pre-alpha.** The full numerical core runs end to end: a `Problem`
 assembles mesh, physics, parametrization, objective, constraints, and an
-optimizer, and a `Study` drives the loop to convergence. CAD I/O and
-manufacturing constraints land next.
+optimizer, and a `Study` drives the loop to convergence. Documentation,
+tutorials, and unstructured meshes land next; CAD I/O after that.
 
 ## Quickstart
 
@@ -49,10 +49,11 @@ With the `[viz]` extra, `result.view()` renders the density field and
 
 ## Goals
 
-- Import CAD geometry, export manufacturable geometry
-- Manufacturing constraints, including SLS and SLA checks
-- Every layer replaceable through plugins
+- A general topology-optimization library: any physics, objective, constraint,
+  or optimizer can be swapped or extended through plugins
+- Import CAD geometry, export result geometry
 - Every gradient finite-difference verified in CI
+- Published, reproducible benchmarks gated in CI
 
 ## Layout
 

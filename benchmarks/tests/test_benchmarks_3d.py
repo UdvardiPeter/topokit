@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1-or-later
+# SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tier-3 full 3D + Michell reference regression (pytest -m regression_full)."""
 
