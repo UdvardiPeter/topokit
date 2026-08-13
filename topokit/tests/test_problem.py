@@ -782,6 +782,8 @@ def test_problem_rejects_component_classes() -> None:
             optimizer=MMA(),
             solver=Direct,  # type: ignore[arg-type]
         )
+    with pytest.raises(ProblemError, match=r"did you mean"):
+        Problem(LinearElasticity, chain, objective=Compliance())  # type: ignore[arg-type]
 
 
 def test_conforms_method_lists_track_the_protocols() -> None:

@@ -17,7 +17,8 @@ a ``BoundLink``. The bound link implements ``apply`` and ``pullback``, and
 a terminal link's bound form must set ``out_field`` to the field the
 physics consumes. Mark a terminal link class with ``is_terminal = True``,
 and a reduced-input link (one that consumes a smaller design space, e.g.
-symmetry) with ``is_reduced_input = True``.
+symmetry) with ``is_reduced_input = True``, and its bound form must set
+``n_reduced``.
 
 Design variables live on design elements (reduced further by symmetry).
 The bound chain embeds them into the full grid with solid pinned to 1 and
