@@ -18,5 +18,8 @@ plugins:
             docstring_style: numpy
 nav:
   - Home: index.md
+  - Tutorials:
+      - tutorials/index.md
+      - Your first 2D part: tutorials/first-2d.md
   - Contributing: contributing.md
   - API reference: reference/api.md
