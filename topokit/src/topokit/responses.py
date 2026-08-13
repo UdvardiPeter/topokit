@@ -89,6 +89,10 @@ class Compliance(ResponseBase):
     single case is unchanged). The value is the sum of element strain energies
     ``u^T K u`` (equal to ``f^T u`` at convergence), the standard topology-
     optimization compliance form and the quantity the gradient differentiates.
+    The value is the work functional ``u^T K u`` computed from
+    ``model.element_energies``, so it serves any ``PhysicsModel`` with an
+    energy interpretation (for a conduction model it is the thermal compliance);
+    nothing here is elasticity-specific.
     """
 
     weights: tuple[float, ...] | None = None

@@ -39,7 +39,12 @@ class StepResult:
 
 @runtime_checkable
 class Optimizer(Protocol):
-    """A stepper over bounded design variables."""
+    """A stepper over bounded design variables.
+
+    The orchestration layer hands ``f0``/``df0`` normalized by the magnitude
+    of the stage's initial objective, so a well-scaled optimizer sees values
+    of order one; constraint values arrive unscaled in ``g <= 0`` form.
+    """
 
     def setup(self, n_vars: int, lower: _F64, upper: _F64) -> None:
         """Set the variable count and box bounds (once, before stepping)."""
