@@ -36,7 +36,7 @@ from __future__ import annotations
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -139,11 +139,12 @@ class BoundLink:
     product; finite-difference verified for registry-registered links).
     A terminal link's bound form must set ``out_field`` to the
     :class:`~topokit.fields.FieldSpec` the physics consumes. A
-    reduced-input link's bound form must expose ``n_reduced`` (int), the
+    reduced-input link's bound form must set ``n_reduced``, the
     size of its input space.
     """
 
     out_field: FieldSpec | None = None
+    n_reduced: int | None = None
 
     def apply(self, x: _F64) -> _F64:
         """Map the link input to its output."""
@@ -214,11 +215,16 @@ class BoundChain:
         self._middle = middle
         self._terminal = terminal
         self.out_field = out_field
-        self.n_vars = (
-            reduced.n_reduced  # type: ignore[attr-defined]
-            if reduced is not None
-            else int(mesh.design.sum())
-        )
+        if reduced is not None:
+            if reduced.n_reduced is None:
+                raise ParametrizationError(
+                    f"reduced-input link {type(spec.links[0]).__name__} produced a bound "
+                    "link without n_reduced; a reduced-input link must declare the size "
+                    "of its input space"
+                )
+            self.n_vars = reduced.n_reduced
+        else:
+            self.n_vars = int(mesh.design.sum())
         if self.n_vars == 0:
             raise ParametrizationError(
                 "the design region is empty (all elements are solid or void); "
@@ -439,7 +445,7 @@ class _BoundSymmetry(BoundLink):
         return x[self._orbit]
 
     def pullback(self, x: _F64, grad_out: _F64) -> _F64:
-        out = np.zeros(self.n_reduced)
+        out = np.zeros(cast(int, self.n_reduced))
         np.add.at(out, self._orbit, grad_out)
         return out
 
