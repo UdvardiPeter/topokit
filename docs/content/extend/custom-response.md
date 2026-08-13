@@ -49,8 +49,13 @@ class XCentroid(ResponseBase):
         total = max(float(w.sum()), 1e-300)
         cx = float((w * mesh.element_centroids[:, 0]).sum() / total)
         return v * (mesh.element_centroids[:, 0] - cx) / total / 60.0
+```
 
+`field_basis="density"` tells the orchestration layer which chain output to differentiate against: `grad_field` returns a gradient with respect to the physical density, and the layer routes it back to the design variables through the chain's density pullback. A response that instead reads FE state (like `Compliance`) uses `field_basis="interpolated"`, reads `solution.displacements`, and its gradient is routed through the chain's ordinary pullback.
 
+`XCentroid` is added as a constraint alongside `Volume`, so `MMA` (which handles more than one constraint) replaces the single-constraint `OC` from the tutorials.
+
+```python
 mesh = StructuredGrid.box(size=(60.0, 20.0), shape=(60, 20))
 model = LinearElasticity(
     mesh,
@@ -69,7 +74,13 @@ problem = Problem(
 )
 result = Study(problem, schedule=Schedule.single(p=3.0, max_iter=60, tol=1e-3)).run()
 print(f"x_centroid {result.history['x_centroid'][-1]:.3f}")
+```
 
+Once added to `constraints` or passed as `objective`, the response appears in `result.history` under its own `name` (`"x_centroid"` here), the same place `"objective"` and every other constraint's series live.
+
+`XCentroid` never touches `solution.displacements`, so its gradient can be checked without a physics solve: bind the chain directly, evaluate it at a design `x`, and build a `Solution` with `model=None` and placeholder displacements.
+
+```python
 from topokit.testing import assert_gradient_matches
 
 bound = chain.bind(mesh)
@@ -94,11 +105,7 @@ assert_gradient_matches(f, grad, x)
 print("gradient verified")
 ```
 
-`field_basis="density"` tells the orchestration layer which chain output to differentiate against: `grad_field` returns a gradient with respect to the physical density, and the layer routes it back to the design variables through the chain's density pullback. A response that instead reads FE state (like `Compliance`) uses `field_basis="interpolated"`, reads `solution.displacements`, and its gradient is routed through the chain's ordinary pullback.
-
-Once added to `constraints` or passed as `objective`, the response appears in `result.history` under its own `name` (`"x_centroid"` here), the same place `"objective"` and every other constraint's series live.
-
-`XCentroid` never touches `solution.displacements`, so its gradient can be checked without a physics solve: bind the chain directly, evaluate it at a design `x`, and build a `Solution` with `model=None` and placeholder displacements, as the FD check above does. An FE-state response needs a real solve for the same check, since its `value`/`grad_field` read `solution.displacements`.
+An FE-state response needs a real solve for the same check, since its `value`/`grad_field` read `solution.displacements`.
 
 ## Next
 
