@@ -29,5 +29,8 @@ nav:
       - extend/index.md
       - Custom response: extend/custom-response.md
       - Custom optimizer: extend/custom-optimizer.md
+      - Custom chain link: extend/custom-link.md
+      - Custom physics: extend/custom-physics.md
+      - Backends and kernels: extend/backends.md
   - Contributing: contributing.md
   - API reference: reference/api.md
