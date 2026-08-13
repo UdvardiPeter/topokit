@@ -759,3 +759,26 @@ def test_problem_incomplete_optimizer_fails_at_construction() -> None:
             constraints=[Volume() <= 0.4],
             optimizer=Broken(),  # type: ignore[arg-type]
         )
+
+
+def test_problem_rejects_component_classes() -> None:
+    model = _cantilever()
+    chain = DensityFilter(radius=1.5) | SIMP(p=3.0)
+
+    with pytest.raises(ProblemError, match=r"did you mean MMA\(\)"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=MMA,  # type: ignore[arg-type]
+        )
+    with pytest.raises(ProblemError, match=r"did you mean Direct\(\)"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=MMA(),
+            solver=Direct,  # type: ignore[arg-type]
+        )
