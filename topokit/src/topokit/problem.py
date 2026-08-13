@@ -255,7 +255,7 @@ class Stage:
     """One continuation stage.
 
     Holds the SIMP ``p`` and Heaviside ``beta`` for the stage plus the
-    per-stage convergence cap/tol (E6 ``200/stage``).
+    per-stage convergence cap/tol (``200/stage``).
     """
 
     p: float
@@ -276,7 +276,7 @@ class Stage:
 
 @dataclass(frozen=True)
 class Schedule:
-    """An ordered tuple of continuation stages (E7, introspectable/replaceable)."""
+    """An ordered tuple of continuation stages (introspectable/replaceable)."""
 
     stages: tuple[Stage, ...]
 
@@ -396,7 +396,7 @@ class Study:
             if parent and not os.path.isdir(parent):
                 raise ProblemError(f"checkpoint directory does not exist: {parent!r}")
         if self.schedule is None:
-            # continuation ON by default (E7); max_iter/tol feed the per-stage caps
+            # continuation is on by default; max_iter/tol feed the per-stage caps
             self.schedule = Schedule.default(max_iter=self.max_iter, tol=self.tol)
         if self.x0 is not None:
             x0 = np.asarray(self.x0, dtype=np.float64)

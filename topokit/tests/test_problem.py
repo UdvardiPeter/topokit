@@ -21,7 +21,7 @@ from topokit.mesh import StructuredGrid
 from topokit.optimizers import MMA, OC, Optimizer
 from topokit.parametrization import SIMP, DensityFilter, Heaviside, SymmetryMap
 from topokit.problem import Problem, ProblemError, Schedule, Stage, Study
-from topokit.responses import Compliance, Volume
+from topokit.responses import Compliance, Constraint, Volume
 from topokit.selection import Box, PlaneSlab
 from topokit.solvers import AmgCG, Direct, LinearSolver
 
@@ -77,7 +77,7 @@ def test_continuation_runs_stages_and_emits_stage_events() -> None:
 
 
 def test_default_study_runs_continuation() -> None:
-    # schedule=None -> Schedule.default -> continuation ON (E7)
+    # schedule=None -> Schedule.default -> continuation is on by default
     study = Study(_problem_proj(), max_iter=12, tol=1e-3)  # no schedule arg
     result = study.run()
     assert result.history["stage"][-1] >= 1  # more than one stage ran
@@ -424,7 +424,7 @@ def test_resume_rejects_unknown_schema(tmp_path: Path) -> None:
 
 
 def test_iterate_yields_across_stages() -> None:
-    # E10: the generator spans every executed stage with a global iteration counter
+    # the generator spans every executed stage with a global iteration counter
     states = list(Study(_problem_proj(), schedule=Schedule.default(max_iter=8, tol=1e-3)).iterate())
     assert {s.stage for s in states} == set(range(7))  # all 7 stages yielded
     assert [s.iteration for s in states] == list(range(1, len(states) + 1))  # global, contiguous
@@ -709,6 +709,19 @@ def test_problem_rejects_non_protocol_components() -> None:
             constraints=[Volume() <= 0.4],
             optimizer=MMA(),
             solver=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_constraint_response_rejects_non_protocol_response() -> None:
+    # a Constraint built directly around a non-Response payload must be caught
+    # here, not when the orchestration loop first calls .value()/.grad_field()
+    with pytest.raises(ProblemError, match=r"constraints\[0\]\.response"):
+        Problem(
+            _cantilever(),
+            DensityFilter(radius=1.5) | SIMP(p=3.0),
+            objective=Compliance(),
+            constraints=[Constraint(object(), 0.4, "<=")],  # type: ignore[arg-type]
+            optimizer=MMA(),
         )
 
 

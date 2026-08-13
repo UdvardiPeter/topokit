@@ -29,7 +29,7 @@ class StepResult:
     """One optimizer step.
 
     Carries the next point, the max design change, and the first-order
-    KKT/optimality residual (reported, not gating; E6).
+    KKT/optimality residual (reported, not gating).
     """
 
     x_next: _F64
