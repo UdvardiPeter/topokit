@@ -32,5 +32,12 @@ nav:
       - Custom chain link: extend/custom-link.md
       - Custom physics: extend/custom-physics.md
       - Backends and kernels: extend/backends.md
+  - Gallery:
+      - gallery/index.md
+      - MBB beam: gallery/mbb.md
+      - Cantilever: gallery/cantilever.md
+      - Michell cantilever: gallery/michell.md
+      - 3D cantilever: gallery/cantilever-3d.md
+      - Thermal conduction: gallery/thermal.md
   - Contributing: contributing.md
   - API reference: reference/api.md

@@ -2,14 +2,9 @@
 
 Open-source topology optimization for engineers.
 
-**Status: pre-alpha.** The full numerical core runs end to end: a `Problem`
-assembles mesh, physics, parametrization, objective, constraints, and an
-optimizer, and a `Study` drives the loop to convergence. Documentation,
-tutorials, and unstructured meshes land next; CAD I/O after that.
+Install with `pip install --pre topokit` (pre-alpha, published as a dev release).
 
-## Quickstart
-
-A 60×20 cantilever, left edge fixed, downward tip load (~15 s):
+A 60x20 cantilever, left edge fixed, downward tip load, runs in about 15 s:
 
 ```python
 from topokit import (
@@ -42,39 +37,17 @@ problem = Problem(
 result = Study(problem).run()  # SIMP continuation on by default
 
 result.design.save("cantilever.npz")
+print(f"compliance {result.objective:.1f} after {result.iterations} iterations")
 ```
 
-With the `[viz]` extra, `result.view()` renders the density field and
-`result.plot_convergence()` the convergence curves.
+The nightly suite executes this snippet; if it drifts from the code, CI fails.
 
-## Goals
+![Optimized cantilever](assets/home-cantilever.png)
 
-- A general topology-optimization library: any physics, objective, constraint,
-  or optimizer can be swapped or extended through plugins
-- Import CAD geometry, export result geometry
-- Every gradient finite-difference verified in CI
-- Published, reproducible benchmarks gated in CI
+- [Your first 2D part](tutorials/first-2d.md)
+- [Gallery](gallery/index.md)
+- [Extend](extend/index.md)
 
-## Layout
+## What it is
 
-| Package | Contents |
-|---|---|
-| `topokit.backend` | array backend protocol, NumPy implementation, kernel registry |
-| `topokit.mesh` | structured quad/hex grids, element masks, boundary faces |
-| `topokit.selection` | geometric selectors for loads, supports, regions |
-| `topokit.fem` | linear elasticity, loads, materials, element library |
-| `topokit.solvers` | direct and AMG-preconditioned iterative solvers |
-| `topokit.parametrization` | the unified chain: symmetry, filters, projection, SIMP |
-| `topokit.responses` | compliance, volume, von Mises, constraint objects |
-| `topokit.optimizers` | OC and clean-room MMA optimizers |
-| `topokit.problem` | Problem, the Study loop, SIMP/Heaviside continuation |
-| `topokit.checkpoint` | single-file `.topo` checkpoint save and resume |
-| `topokit.viz` | convergence curves, density views, slices, LiveView (`[viz]` extra) |
-| `topokit.jax` | JAX backend + hot kernels, selected via `use_backend("jax")` (`[jax]` extra) |
-| `topokit.registry` | plugin resolution by group and name |
-| `topokit.events` | typed event bus for the optimization loop |
-| `topokit.fields` | validated field containers (design, element, nodal) |
-| `topokit.testing` | finite-difference gradient verification |
-
-See [ARCHITECTURE.md](https://github.com/UdvardiPeter/topokit/blob/main/ARCHITECTURE.md)
-for the layer model.
+TopoKit is a density-based topology optimization library: it drives a design variable per element toward 0 or 1 to minimize an objective (compliance, most commonly) under a volume constraint, subject to the physics of a `PhysicsModel` (linear elasticity is built in). Optimization runs through OC or MMA on structured 2D or 3D grids. Every gradient in the built-in responses, chain links, and physics is finite-difference verified in CI. TopoKit is MIT licensed.
