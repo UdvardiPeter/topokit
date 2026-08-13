@@ -76,6 +76,12 @@ def _component_label(obj: object) -> str:
     return repr(type(obj).__name__)
 
 
+_PHYSICS_METHODS = ("assemble", "loads", "element_energies", "element_stress")
+_RESPONSE_METHODS = ("value", "grad_field")
+_OPTIMIZER_METHODS = ("setup", "step", "state", "load_state")
+_SOLVER_METHODS = ("prepare", "solve")
+
+
 def _bind_chain(chain: Chain | BoundChain, model: PhysicsModel) -> BoundChain:
     if isinstance(chain, BoundChain):
         return chain
@@ -164,9 +170,7 @@ class Problem:
         optimizer: Optimizer | None = None,
         solver: LinearSolver | str = "auto",
     ) -> None:
-        if not _conforms(
-            model, PhysicsModel, "assemble", "loads", "element_energies", "element_stress"
-        ):
+        if not _conforms(model, PhysicsModel, *_PHYSICS_METHODS):
             raise ProblemError(
                 f"model {_component_label(model)} does not satisfy the PhysicsModel protocol"
             )
@@ -178,7 +182,7 @@ class Problem:
                 f"expected field {model.expected_field}"
             )
         self.objective = objective
-        if not _conforms(objective, Response, "value", "grad_field"):
+        if not _conforms(objective, Response, *_RESPONSE_METHODS):
             raise ProblemError(
                 f"objective {_component_label(objective)} does not satisfy the Response protocol"
             )
@@ -199,7 +203,7 @@ class Problem:
                 raise ProblemError(
                     f"constraints[{i}] is {type(c).__name__!r}, not a Constraint{hint}"
                 )
-            if not _conforms(c.response, Response, "value", "grad_field"):
+            if not _conforms(c.response, Response, *_RESPONSE_METHODS):
                 raise ProblemError(
                     f"constraints[{i}].response {_component_label(c.response)} does not "
                     "satisfy the Response protocol"
@@ -213,7 +217,7 @@ class Problem:
                 )
             seen.add(key)
         self.optimizer = optimizer if optimizer is not None else OC()
-        if not _conforms(self.optimizer, Optimizer, "setup", "step", "state", "load_state"):
+        if not _conforms(self.optimizer, Optimizer, *_OPTIMIZER_METHODS):
             raise ProblemError(
                 f"optimizer {_component_label(self.optimizer)} does not satisfy the Optimizer "
                 "protocol (setup/step/state/load_state)"
@@ -241,7 +245,7 @@ class Problem:
             self.solver: LinearSolver = auto_solver(model.n_dof, model.mesh.dim)
         else:
             self.solver = solver
-        if not _conforms(self.solver, LinearSolver, "prepare", "solve"):
+        if not _conforms(self.solver, LinearSolver, *_SOLVER_METHODS):
             raise ProblemError(
                 f"solver {_component_label(self.solver)} does not satisfy the LinearSolver "
                 "protocol (prepare/solve)"
