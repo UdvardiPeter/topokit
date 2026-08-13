@@ -1723,6 +1723,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "matplotlib" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-xdist" },
@@ -1737,6 +1738,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "matplotlib", specifier = ">=3.8" },
     { name = "mypy", specifier = ">=1.14,<2" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-xdist", specifier = ">=3.6" },

@@ -23,5 +23,7 @@ nav:
       - Your first 2D part: tutorials/first-2d.md
       - Your first 3D part: tutorials/first-3d.md
       - Multiple load cases: tutorials/multi-load.md
+      - Symmetry, checkpoints, resume: tutorials/symmetry-checkpoint.md
+      - Visualization: tutorials/visualization.md
   - Contributing: contributing.md
   - API reference: reference/api.md
