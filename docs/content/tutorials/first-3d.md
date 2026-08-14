@@ -1,6 +1,6 @@
 # Your first 3D part
 
-A 16x8x8 block, fixed on one face, loaded at the opposite corner. Same six objects as the 2D tutorial; what changes is the coordinate dimension and, under the hood, the solver.
+A 16×8×8 block, fixed on one face, loaded at the opposite corner. Same six objects as the 2D tutorial; what changes is the coordinate dimension and, under the hood, the solver.
 
 ## Mesh
 
@@ -64,7 +64,7 @@ result = Study(problem, schedule=Schedule.single(p=3.0, max_iter=40, tol=1e-3)).
 print(f"compliance {result.objective:.1f}, volume {result.history['volume'][-1]:.3f}")
 ```
 
-16x8x8 elements is sized to run in a tutorial, not to produce a part worth printing; production runs use finer meshes at correspondingly higher cost. For a full-size result, see the Gallery's [3D cantilever](../gallery/cantilever-3d.md).
+16×8×8 elements is sized to run in a tutorial, not to produce a part worth printing; production runs use finer meshes at correspondingly higher cost. For a full-size result, see the Gallery's [3D cantilever](../gallery/cantilever-3d.md).
 
 ## Inspecting a 3D design
 

@@ -1,6 +1,6 @@
 # Symmetry, checkpoints, resume
 
-A 60x20 bridge, pinned at both bottom corners, loaded straight down at the
+A 60×20 bridge, pinned at both bottom corners, loaded straight down at the
 midpoint of the top edge. The geometry, load, and supports are all
 mirror-symmetric about the vertical centerline, so the optimal design is
 too. This tutorial enforces that symmetry, checkpoints a run partway

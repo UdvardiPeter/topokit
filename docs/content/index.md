@@ -4,7 +4,7 @@ Open-source topology optimization for engineers.
 
 Install with `pip install --pre topokit` (pre-alpha, published as a dev release).
 
-A 60x20 cantilever, left edge fixed, downward tip load, runs in about 15 s:
+A 60×20 cantilever, left edge fixed, downward tip load, runs in about 15 s:
 
 ```python
 from topokit import (

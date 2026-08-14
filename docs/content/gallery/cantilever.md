@@ -1,6 +1,6 @@
 # Cantilever
 
-A 120x40 cantilever: the left edge is fully fixed, a downward point load at the mid-height of the right edge. Volume fraction 0.4.
+A 120×40 cantilever: the left edge is fully fixed, a downward point load at the mid-height of the right edge. Volume fraction 0.4.
 
 ![Cantilever](img/cantilever.png)
 

@@ -4,7 +4,7 @@ A single-case design optimizes for exactly the load it was shown, and can collap
 
 ## Mesh and physics
 
-`loads` normally takes a flat list of `Load` objects, one case. Give it a list of lists instead and each inner list is a separate case: a 40x20 plate here, loaded down at one corner in the first case and up at the other in the second.
+`loads` normally takes a flat list of `Load` objects, one case. Give it a list of lists instead and each inner list is a separate case: a 40×20 plate here, loaded down at one corner in the first case and up at the other in the second.
 
 ```python
 from topokit import (
@@ -66,4 +66,4 @@ The weighted sum trades the cases off against each other: a design that is very 
 
 ## Next
 
-Symmetry, checkpoints, resume (`symmetry-checkpoint.md`) covers longer-running studies: resuming a study from a checkpoint and cutting search space with symmetry.
+[Symmetry, checkpoints, resume](symmetry-checkpoint.md) covers longer-running studies: resuming a study from a checkpoint and cutting search space with symmetry.

@@ -1,6 +1,6 @@
 # 3D cantilever
 
-A 3D cantilever, 24x12x12 elements: the left face is fully fixed, a downward point load at the center of the right face. Volume fraction 0.3.
+A 3D cantilever, 24×12×12 elements: the left face is fully fixed, a downward point load at the center of the right face. Volume fraction 0.3.
 
 ![3D cantilever](img/cantilever-3d.png)
 

@@ -18,6 +18,7 @@ plugins:
             docstring_style: numpy
 nav:
   - Home: index.md
+  - Install: install.md
   - Tutorials:
       - tutorials/index.md
       - Your first 2D part: tutorials/first-2d.md
@@ -25,6 +26,13 @@ nav:
       - Multiple load cases: tutorials/multi-load.md
       - Symmetry, checkpoints, resume: tutorials/symmetry-checkpoint.md
       - Visualization: tutorials/visualization.md
+  - Concepts:
+      - concepts/index.md
+      - Objectives and constraints: concepts/objectives.md
+      - Filtering, projection, continuation: concepts/regularization.md
+      - Units: concepts/units.md
+      - Resolution and cost: concepts/resolution.md
+      - Trusting results: concepts/verification.md
   - Extend:
       - extend/index.md
       - Custom response: extend/custom-response.md
@@ -39,5 +47,6 @@ nav:
       - Michell cantilever: gallery/michell.md
       - 3D cantilever: gallery/cantilever-3d.md
       - Thermal conduction: gallery/thermal.md
-  - Contributing: contributing.md
   - API reference: reference/api.md
+  - Benchmarks: benchmarks.md
+  - Contributing: contributing.md

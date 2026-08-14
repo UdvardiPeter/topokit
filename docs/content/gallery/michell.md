@@ -1,6 +1,6 @@
 # Michell cantilever
 
-A 90x30 domain with a fixed band along the left edge centered on mid-height, rather than a single point (which would leave a rigid-body rotation unconstrained), and a downward point load at the mid-height of the right edge. Volume fraction 0.5. Support and load are both on the horizontal centerline, so the optimum is mirror-symmetric about it, in the style of Michell's analytical least-weight frames.
+A 90×30 domain with a fixed band along the left edge centered on mid-height, rather than a single point (which would leave a rigid-body rotation unconstrained), and a downward point load at the mid-height of the right edge. Volume fraction 0.5. Support and load are both on the horizontal centerline, so the optimum is mirror-symmetric about it, in the style of Michell's analytical least-weight frames.
 
 ![Michell cantilever](img/michell.png)
 

@@ -1,6 +1,6 @@
 # Your first 2D part
 
-A 60x20 cantilever, fixed along the left edge, loaded downward at the tip. Six objects assemble into one optimization: mesh, physics, chain, problem, study, result.
+A 60×20 cantilever, fixed along the left edge, loaded downward at the tip. Six objects assemble into one optimization: mesh, physics, chain, problem, study, result.
 
 ## Mesh
 
@@ -81,4 +81,4 @@ result.design.save("first-part.npz")
 
 ## Next
 
-The 3D tutorial covers what changes when a model gains a third coordinate axis. Concepts covers objectives, regularization, and verification in more depth.
+The [3D tutorial](first-3d.md) covers what changes when a model gains a third coordinate axis. [Concepts](../concepts/index.md) covers objectives, regularization, and verification in more depth.

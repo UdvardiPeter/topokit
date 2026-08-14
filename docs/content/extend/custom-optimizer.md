@@ -95,4 +95,4 @@ ProblemError: optimizer 'BadOptimizer' does not satisfy the Optimizer protocol (
 
 ## Next
 
-Custom link (`custom-link.md`) covers extending the parametrization chain, and custom physics (`custom-physics.md`) covers a different `PhysicsModel`.
+[Custom link](custom-link.md) covers extending the parametrization chain, and [custom physics](custom-physics.md) covers a different `PhysicsModel`.

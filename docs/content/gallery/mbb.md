@@ -1,6 +1,6 @@
 # MBB beam
 
-Half of an MBB beam, exploiting the symmetry of the full beam: a 150x50 domain, x-rollers along the left edge, a vertical support at the bottom-right corner, a downward point load at the top-left corner. Volume fraction 0.5.
+Half of an MBB beam, exploiting the symmetry of the full beam: a 150×50 domain, x-rollers along the left edge, a vertical support at the bottom-right corner, a downward point load at the top-left corner. Volume fraction 0.5.
 
 ![MBB beam](img/mbb.png)
 

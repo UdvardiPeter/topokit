@@ -1,6 +1,6 @@
 # Thermal conduction
 
-Heat conduction on a 40x40 grid: temperature fixed along the left edge, a unit heat sink at mid-right, one degree of freedom per node. `Compliance` doubles as thermal compliance here; the objective is minimized at volume fraction 0.3. The `HeatConduction` physics model and the `RampConductivity` chain link are developed step by step in [Custom physics](../extend/custom-physics.md); this page reuses them verbatim at full size.
+Heat conduction on a 40×40 grid: temperature fixed along the left edge, a unit heat sink at mid-right, one degree of freedom per node. `Compliance` doubles as thermal compliance here; the objective is minimized at volume fraction 0.3. The `HeatConduction` physics model and the `RampConductivity` chain link are developed step by step in [Custom physics](../extend/custom-physics.md); this page reuses them verbatim at full size.
 
 ![Thermal conduction](img/thermal.png)
 
