@@ -1,0 +1,7 @@
+# Resolution and cost
+
+Element count drives both wall time and memory: assembling the stiffness matrix and solving it dominate every iteration, and both scale with the number of degrees of freedom, not the number of elements directly (three per node in 3D elasticity, one per node for conduction). A 40×40×40 grid is about 64,000 elements but roughly 200,000 degrees of freedom, and runs in single-digit seconds per iteration with the AMG-preconditioned solver on a laptop; a much finer grid costs proportionally more in both time and peak memory, and direct factorization (the default for smaller or 2D problems) grows worse than proportionally as the system gets large, which is why the `fast` extra's AMG solver takes over automatically for large 3D problems.
+
+The density filter's radius should stay at least about 1.5 elements. Below that, the filter barely blurs neighboring elements and stops preventing checkerboards; well above it, the enforced minimum feature size can wash out any layout the resolution should otherwise be able to represent.
+
+A resolution study is cheaper run coarse first: run at low element count to find a design's overall layout (how the material routes between supports and loads), then refine once that layout has stabilized across iterations. Refining before the layout settles just means re-discovering the same broad shape at higher cost; refining after gets a resolution's worth of detail on a layout that is already worth resolving.

@@ -1723,10 +1723,15 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "matplotlib" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+]
+gallery = [
+    { name = "matplotlib" },
+    { name = "pyvista" },
 ]
 
 [package.metadata]
@@ -1737,10 +1742,15 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "matplotlib", specifier = ">=3.8" },
     { name = "mypy", specifier = ">=1.14,<2" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-xdist", specifier = ">=3.6" },
     { name = "ruff", specifier = ">=0.9" },
+]
+gallery = [
+    { name = "matplotlib", specifier = ">=3.8" },
+    { name = "pyvista", specifier = ">=0.44" },
 ]
 
 [[package]]

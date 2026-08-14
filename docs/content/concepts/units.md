@@ -1,0 +1,7 @@
+# Units
+
+TopoKit is unit-agnostic: nothing in the mesh, physics, or optimizer assumes a particular unit system. Any consistent set of units works, as long as `Material.E`, load magnitudes, and mesh coordinates all agree (millimeter-newton-MPa, meter-newton-pascal, inch-pound-psi, whatever the source geometry and material data already use). Mixing systems, such as an `E` in MPa with a mesh in meters, produces a solvable but physically meaningless problem: nothing checks unit consistency, because there is no single system to check it against.
+
+Compliance values scale with whatever units were used to compute them, so a compliance number is not comparable across studies run in different units, or even across studies in the same units but a different mesh size or load magnitude. Only relative comparisons within one study, one mesh, one set of loads, are meaningful: whether one design's compliance is lower than another's, not what the number itself means in isolation.
+
+The built-in material presets (`STEEL`, `ALUMINUM_6061`, `ABS`, `PA12`, `RESIN_SLA`) are representative handbook values in a millimeter-newton-MPa-tonne system, a common convention in mechanical CAD and FEA tooling: `E` in MPa, density in tonne/mm^3. They are a convenience for that unit system specifically, not a claim that TopoKit itself is SI; using them means adopting mm-N-MPa-tonne for the rest of the problem too, and verifying the values against supplier data before relying on them for a real part.
