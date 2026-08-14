@@ -505,3 +505,31 @@ def test_terminal_link_without_out_field_fails_at_bind() -> None:
 
     with pytest.raises(ParametrizationError, match="out_field"):
         Chain((BadTerminal(),)).bind(G42)
+
+
+def test_bind_rejects_reduced_link_without_n_reduced() -> None:
+    from dataclasses import dataclass
+    from typing import ClassVar
+
+    from topokit.parametrization import BoundLink, LinkSpec
+
+    @dataclass(frozen=True)
+    class BadReduced(LinkSpec):
+        is_reduced_input: ClassVar[bool] = True
+
+        def build(self, mesh: StructuredGrid) -> BoundLink:
+            return _BoundBadReduced()
+
+        @classmethod
+        def fd_example(cls, mesh: StructuredGrid) -> "BadReduced":
+            return cls()
+
+    class _BoundBadReduced(BoundLink):  # forgets to set n_reduced
+        def apply(self, x: np.ndarray) -> np.ndarray:
+            return x
+
+        def pullback(self, x: np.ndarray, grad_out: np.ndarray) -> np.ndarray:
+            return grad_out
+
+    with pytest.raises(ParametrizationError, match="n_reduced"):
+        (BadReduced() | SIMP()).bind(G42)

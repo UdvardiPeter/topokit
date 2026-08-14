@@ -83,16 +83,14 @@ class ResponseBase:
 
 @dataclass(frozen=True)
 class Compliance(ResponseBase):
-    """Structural compliance ``u^T K u`` (lower is stiffer); the usual objective.
+    """Compliance ``u^T K u`` (lower is stiffer); the usual objective.
 
     Multi-load: a weighted sum over load cases (default weight 1.0 each, so a
-    single case is unchanged). The value is the sum of element strain energies
-    ``u^T K u`` (equal to ``f^T u`` at convergence), the standard topology-
-    optimization compliance form and the quantity the gradient differentiates.
-    The value is the work functional ``u^T K u`` computed from
+    single case is unchanged). The value is the sum of element energies
+    (equal to ``f^T u`` at convergence), computed from
     ``model.element_energies``, so it serves any ``PhysicsModel`` with an
-    energy interpretation (for a conduction model it is the thermal compliance);
-    nothing here is elasticity-specific.
+    energy interpretation (for a conduction model it is the thermal
+    compliance); nothing here is elasticity-specific.
     """
 
     weights: tuple[float, ...] | None = None

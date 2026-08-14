@@ -759,3 +759,51 @@ def test_problem_incomplete_optimizer_fails_at_construction() -> None:
             constraints=[Volume() <= 0.4],
             optimizer=Broken(),  # type: ignore[arg-type]
         )
+
+
+def test_problem_rejects_component_classes() -> None:
+    model = _cantilever()
+    chain = DensityFilter(radius=1.5) | SIMP(p=3.0)
+
+    with pytest.raises(ProblemError, match=r"did you mean MMA\(\)"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=MMA,  # type: ignore[arg-type]
+        )
+    with pytest.raises(ProblemError, match=r"did you mean Direct\(\)"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=MMA(),
+            solver=Direct,  # type: ignore[arg-type]
+        )
+    with pytest.raises(ProblemError, match=r"did you mean"):
+        Problem(LinearElasticity, chain, objective=Compliance())  # type: ignore[arg-type]
+
+
+def test_conforms_method_lists_track_the_protocols() -> None:
+    import typing
+
+    from topokit.fem import PhysicsModel
+    from topokit.problem import (
+        _OPTIMIZER_METHODS,
+        _PHYSICS_METHODS,
+        _RESPONSE_METHODS,
+        _SOLVER_METHODS,
+    )
+    from topokit.responses import Response
+
+    def methods_of(protocol: type) -> set[str]:
+        get = getattr(typing, "get_protocol_members", None)
+        attrs = set(get(protocol)) if get is not None else set(protocol.__protocol_attrs__)  # type: ignore[attr-defined]
+        return {a for a in attrs if callable(getattr(protocol, a, None))}
+
+    assert set(_PHYSICS_METHODS) == methods_of(PhysicsModel)
+    assert set(_RESPONSE_METHODS) == methods_of(Response)
+    assert set(_OPTIMIZER_METHODS) == methods_of(Optimizer)
+    assert set(_SOLVER_METHODS) == methods_of(LinearSolver)

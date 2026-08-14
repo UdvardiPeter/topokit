@@ -61,8 +61,25 @@ def _conforms(obj: object, protocol: type[object], *methods: str) -> bool:
     actually callable; a non-callable attribute of the same name (e.g. a
     hyperparameter that happens to be called ``step``) would otherwise shadow
     the real method and pass undetected until the orchestration loop calls it.
+    A class object is rejected outright: its methods are present and callable,
+    but the caller almost certainly forgot to instantiate it.
     """
+    if isinstance(obj, type):
+        return False
     return isinstance(obj, protocol) and all(callable(getattr(obj, m, None)) for m in methods)
+
+
+def _component_label(obj: object) -> str:
+    """Name a component for an error message, catching the class-for-instance slip."""
+    if isinstance(obj, type):
+        return f"{obj.__name__!r} (the class itself; did you mean {obj.__name__}()?)"
+    return repr(type(obj).__name__)
+
+
+_PHYSICS_METHODS = ("assemble", "loads", "element_energies", "element_stress")
+_RESPONSE_METHODS = ("value", "grad_field")
+_OPTIMIZER_METHODS = ("setup", "step", "state", "load_state")
+_SOLVER_METHODS = ("prepare", "solve")
 
 
 def _bind_chain(chain: Chain | BoundChain, model: PhysicsModel) -> BoundChain:
@@ -153,11 +170,9 @@ class Problem:
         optimizer: Optimizer | None = None,
         solver: LinearSolver | str = "auto",
     ) -> None:
-        if not _conforms(
-            model, PhysicsModel, "assemble", "loads", "element_energies", "element_stress"
-        ):
+        if not _conforms(model, PhysicsModel, *_PHYSICS_METHODS):
             raise ProblemError(
-                f"model {type(model).__name__!r} does not satisfy the PhysicsModel protocol"
+                f"model {_component_label(model)} does not satisfy the PhysicsModel protocol"
             )
         self.model = model
         self.chain = _bind_chain(chain, model)
@@ -167,9 +182,9 @@ class Problem:
                 f"expected field {model.expected_field}"
             )
         self.objective = objective
-        if not _conforms(objective, Response, "value", "grad_field"):
+        if not _conforms(objective, Response, *_RESPONSE_METHODS):
             raise ProblemError(
-                f"objective {type(objective).__name__!r} does not satisfy the Response protocol"
+                f"objective {_component_label(objective)} does not satisfy the Response protocol"
             )
         self.constraints = tuple(constraints)
         # Events and history key responses by name; collisions would silently
@@ -188,9 +203,9 @@ class Problem:
                 raise ProblemError(
                     f"constraints[{i}] is {type(c).__name__!r}, not a Constraint{hint}"
                 )
-            if not _conforms(c.response, Response, "value", "grad_field"):
+            if not _conforms(c.response, Response, *_RESPONSE_METHODS):
                 raise ProblemError(
-                    f"constraints[{i}].response {type(c.response).__name__!r} does not "
+                    f"constraints[{i}].response {_component_label(c.response)} does not "
                     "satisfy the Response protocol"
                 )
             key = c.report_key
@@ -202,9 +217,9 @@ class Problem:
                 )
             seen.add(key)
         self.optimizer = optimizer if optimizer is not None else OC()
-        if not _conforms(self.optimizer, Optimizer, "setup", "step", "state", "load_state"):
+        if not _conforms(self.optimizer, Optimizer, *_OPTIMIZER_METHODS):
             raise ProblemError(
-                f"optimizer {type(self.optimizer).__name__!r} does not satisfy the Optimizer "
+                f"optimizer {_component_label(self.optimizer)} does not satisfy the Optimizer "
                 "protocol (setup/step/state/load_state)"
             )
         # Fail-loud at construction, not after the first (possibly expensive)
@@ -230,9 +245,9 @@ class Problem:
             self.solver: LinearSolver = auto_solver(model.n_dof, model.mesh.dim)
         else:
             self.solver = solver
-        if not _conforms(self.solver, LinearSolver, "prepare", "solve"):
+        if not _conforms(self.solver, LinearSolver, *_SOLVER_METHODS):
             raise ProblemError(
-                f"solver {type(self.solver).__name__!r} does not satisfy the LinearSolver "
+                f"solver {_component_label(self.solver)} does not satisfy the LinearSolver "
                 "protocol (prepare/solve)"
             )
         # AMG solvers benefit from the model's rigid-body modes; wired by
