@@ -52,6 +52,14 @@ USER_FACING = [
     "Schedule",
     "Result",
     "EventBus",
+    # authoring surface
+    "BoundLink",
+    "FieldSpec",
+    "LinkSpec",
+    "Mesh",
+    "ResponseBase",
+    "Solution",
+    "StepResult",
 ]
 
 

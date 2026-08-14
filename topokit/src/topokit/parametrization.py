@@ -12,6 +12,13 @@ consumes is a chain of links, each a frozen spec with ``apply`` and
     scale = bound.apply(x)
     grad_x = bound.pullback(x, grad_scale)
 
+To add a new link, subclass ``LinkSpec`` and implement ``build``, returning
+a ``BoundLink``. The bound link implements ``apply`` and ``pullback``, and
+a terminal link's bound form must set ``out_field`` to the field the
+physics consumes. Mark a terminal link class with ``is_terminal = True``,
+and a reduced-input link (one that consumes a smaller design space, e.g.
+symmetry) with ``is_reduced_input = True``.
+
 Design variables live on design elements (reduced further by symmetry).
 The bound chain embeds them into the full grid with solid pinned to 1 and
 void to 0, runs the density links, re-pins, and applies the terminal
@@ -115,8 +122,8 @@ class LinkSpec:
         """Bind a single-link chain; equivalent to ``Chain((self,)).bind(mesh)``."""
         return Chain((self,)).bind(mesh)
 
-    def _build(self, mesh: StructuredGrid) -> _BoundLink:
-        """Construct the bound link; implemented by each link."""
+    def build(self, mesh: StructuredGrid) -> BoundLink:
+        """Construct the bound link for ``mesh``; implemented by each link."""
         raise NotImplementedError
 
     @classmethod
@@ -125,11 +132,25 @@ class LinkSpec:
         raise NotImplementedError
 
 
-class _BoundLink:
+class BoundLink:
+    """A link bound to a mesh: the pair of maps a chain composes.
+
+    Implement ``apply`` (forward) and ``pullback`` (the vector-Jacobian
+    product; finite-difference verified for registry-registered links).
+    A terminal link's bound form must set ``out_field`` to the
+    :class:`~topokit.fields.FieldSpec` the physics consumes. A
+    reduced-input link's bound form must expose ``n_reduced`` (int), the
+    size of its input space.
+    """
+
+    out_field: FieldSpec | None = None
+
     def apply(self, x: _F64) -> _F64:
+        """Map the link input to its output."""
         raise NotImplementedError
 
     def pullback(self, x: _F64, grad_out: _F64) -> _F64:
+        """Chain-rule a gradient at the output back to the input."""
         raise NotImplementedError
 
 
@@ -162,11 +183,17 @@ class Chain:
                 "with a gradient heuristic; use one of them",
                 stacklevel=2,
             )
-        reduced = links[0]._build(mesh) if links[0].is_reduced_input else None
+        reduced = links[0].build(mesh) if links[0].is_reduced_input else None
         middle_specs = links[1:-1] if reduced is not None else links[:-1]
-        middle = [link._build(mesh) for link in middle_specs]
-        terminal = links[-1]._build(mesh)
-        return BoundChain(mesh, reduced, middle, terminal, self)
+        middle = [link.build(mesh) for link in middle_specs]
+        terminal = links[-1].build(mesh)
+        if terminal.out_field is None:
+            raise ParametrizationError(
+                f"terminal link {type(links[-1]).__name__} produced a bound link without "
+                "out_field; a terminal link must declare the field the physics consumes"
+            )
+        out_field = terminal.out_field
+        return BoundChain(mesh, reduced, middle, terminal, out_field, self)
 
 
 class BoundChain:
@@ -175,9 +202,10 @@ class BoundChain:
     def __init__(
         self,
         mesh: StructuredGrid,
-        reduced: _BoundLink | None,
-        middle: list[_BoundLink],
-        terminal: _BoundLink,
+        reduced: BoundLink | None,
+        middle: list[BoundLink],
+        terminal: BoundLink,
+        out_field: FieldSpec,
         spec: Chain,
     ) -> None:
         self.mesh = mesh
@@ -185,7 +213,7 @@ class BoundChain:
         self._reduced = reduced
         self._middle = middle
         self._terminal = terminal
-        self.out_field: FieldSpec = terminal.out_field  # type: ignore[attr-defined]
+        self.out_field = out_field
         self.n_vars = (
             reduced.n_reduced  # type: ignore[attr-defined]
             if reduced is not None
@@ -361,7 +389,7 @@ class SymmetryMap(LinkSpec):
         if not self.planes or any(p not in valid for p in self.planes):
             raise ParametrizationError(f"plane names must be from {sorted(valid)}")
 
-    def _build(self, mesh: StructuredGrid) -> _BoundSymmetry:
+    def build(self, mesh: StructuredGrid) -> _BoundSymmetry:
         """Build orbit maps and validate mask symmetry."""
         axes = []
         names = "xyz"[: mesh.dim]
@@ -377,7 +405,7 @@ class SymmetryMap(LinkSpec):
         return cls(planes=("x",))
 
 
-class _BoundSymmetry(_BoundLink):
+class _BoundSymmetry(BoundLink):
     def __init__(self, mesh: StructuredGrid, axes: tuple[int, ...]) -> None:
         ids = np.arange(mesh.n_elements, dtype=np.int64)
         grids = [
@@ -439,7 +467,7 @@ class DensityFilter(LinkSpec):
         if self.radius <= 0.0:
             raise ParametrizationError(f"radius must be > 0, got {self.radius}")
 
-    def _build(self, mesh: StructuredGrid) -> _BoundDensityFilter:
+    def build(self, mesh: StructuredGrid) -> _BoundDensityFilter:
         """Precompute kernels and the mask normalization."""
         return _BoundDensityFilter(mesh, self.radius)
 
@@ -449,7 +477,7 @@ class DensityFilter(LinkSpec):
         return cls(radius=1.6 * max(mesh.spacing))
 
 
-class _BoundDensityFilter(_BoundLink):
+class _BoundDensityFilter(BoundLink):
     def __init__(self, mesh: StructuredGrid, radius: float) -> None:
         self.mesh = mesh
         self._weights: list[_F64] = []
@@ -507,7 +535,7 @@ class RadialDensityFilter(LinkSpec):
         if self.radius <= 0.0:
             raise ParametrizationError(f"radius must be > 0, got {self.radius}")
 
-    def _build(self, mesh: StructuredGrid) -> _BoundRadialDensityFilter:
+    def build(self, mesh: StructuredGrid) -> _BoundRadialDensityFilter:
         """Precompute the radial kernel and the mask normalization."""
         return _BoundRadialDensityFilter(mesh, self.radius)
 
@@ -517,7 +545,7 @@ class RadialDensityFilter(LinkSpec):
         return cls(radius=1.6 * max(mesh.spacing))
 
 
-class _BoundRadialDensityFilter(_BoundLink):
+class _BoundRadialDensityFilter(BoundLink):
     def __init__(self, mesh: StructuredGrid, radius: float) -> None:
         self.mesh = mesh
         axes = []
@@ -568,7 +596,7 @@ class Heaviside(LinkSpec):
         if not 0.0 < self.eta < 1.0:
             raise ParametrizationError(f"eta must be in (0, 1), got {self.eta}")
 
-    def _build(self, mesh: StructuredGrid) -> _BoundHeaviside:
+    def build(self, mesh: StructuredGrid) -> _BoundHeaviside:
         """Bind; the projection is elementwise and mesh-independent."""
         return _BoundHeaviside(self.beta, self.eta)
 
@@ -578,7 +606,7 @@ class Heaviside(LinkSpec):
         return cls(beta=3.0)
 
 
-class _BoundHeaviside(_BoundLink):
+class _BoundHeaviside(BoundLink):
     def __init__(self, beta: float, eta: float) -> None:
         self.beta = beta
         self.eta = eta
@@ -609,7 +637,7 @@ class SIMP(LinkSpec):
         if not 0.0 <= self.scale_min < 1.0:
             raise ParametrizationError(f"scale_min must be in [0, 1), got {self.scale_min}")
 
-    def _build(self, mesh: StructuredGrid) -> _BoundSIMP:
+    def build(self, mesh: StructuredGrid) -> _BoundSIMP:
         """Bind; the interpolation is elementwise."""
         return _BoundSIMP(self.p, self.scale_min)
 
@@ -619,7 +647,7 @@ class SIMP(LinkSpec):
         return cls(p=3.0)
 
 
-class _BoundSIMP(_BoundLink):
+class _BoundSIMP(BoundLink):
     out_field = STIFFNESS_SCALE
 
     def __init__(self, p: float, scale_min: float) -> None:
@@ -652,7 +680,7 @@ class SensitivityFilter(LinkSpec):
         if self.radius <= 0.0:
             raise ParametrizationError(f"radius must be > 0, got {self.radius}")
 
-    def _build(self, mesh: StructuredGrid) -> _BoundSensitivityFilter:
+    def build(self, mesh: StructuredGrid) -> _BoundSensitivityFilter:
         """Bind, reusing the density-filter kernels."""
         return _BoundSensitivityFilter(mesh, self.radius)
 
@@ -662,7 +690,7 @@ class SensitivityFilter(LinkSpec):
         return cls()
 
 
-class _BoundSensitivityFilter(_BoundLink):
+class _BoundSensitivityFilter(BoundLink):
     def __init__(self, mesh: StructuredGrid, radius: float) -> None:
         self._inner = _BoundDensityFilter(mesh, radius)
         self.mesh = mesh

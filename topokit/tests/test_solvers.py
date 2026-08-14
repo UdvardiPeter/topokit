@@ -257,7 +257,7 @@ def test_amg_cg_is_deterministic() -> None:
     a2 = AmgCG(tol=1e-10)
     a2.prepare(k)
     u2 = a2.solve(f)
-    assert np.array_equal(u1, u2)  # bitwise, decision E11
+    assert np.array_equal(u1, u2)  # bitwise equality: AmgCG must be deterministic, not just close
 
 
 def test_amg_cg_does_not_disturb_global_rng() -> None:

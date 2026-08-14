@@ -21,7 +21,7 @@ from topokit.mesh import StructuredGrid
 from topokit.optimizers import MMA, OC, Optimizer
 from topokit.parametrization import SIMP, DensityFilter, Heaviside, SymmetryMap
 from topokit.problem import Problem, ProblemError, Schedule, Stage, Study
-from topokit.responses import Compliance, Volume
+from topokit.responses import Compliance, Constraint, Volume
 from topokit.selection import Box, PlaneSlab
 from topokit.solvers import AmgCG, Direct, LinearSolver
 
@@ -77,7 +77,7 @@ def test_continuation_runs_stages_and_emits_stage_events() -> None:
 
 
 def test_default_study_runs_continuation() -> None:
-    # schedule=None -> Schedule.default -> continuation ON (E7)
+    # schedule=None -> Schedule.default -> continuation is on by default
     study = Study(_problem_proj(), max_iter=12, tol=1e-3)  # no schedule arg
     result = study.run()
     assert result.history["stage"][-1] >= 1  # more than one stage ran
@@ -100,10 +100,32 @@ def test_problem_validates_field_mismatch() -> None:
     class WrongTerminal(SIMP):
         pass
 
-    # a chain whose terminal field does not match the physics expectation
+    # a chain whose terminal field does not match the physics expectation; the
+    # rest of the protocol is stubbed no-op so this still exercises the field
+    # check rather than tripping the (now-first) PhysicsModel protocol check.
     class FakePhysics:
         expected_field = FieldSpec("conductivity_scale")  # not stiffness_scale
         mesh = model.mesh
+
+        @property
+        def n_dof(self) -> int:
+            return 0
+
+        @property
+        def n_cases(self) -> int:
+            return 1
+
+        def assemble(self, scale: object) -> None:
+            return None
+
+        def loads(self) -> None:
+            return None
+
+        def element_energies(self, u: object, scale: object) -> None:
+            return None
+
+        def element_stress(self, u: object, scale: object) -> None:
+            return None
 
     with pytest.raises(ProblemError, match="field"):
         Problem(FakePhysics(), DensityFilter(radius=1.5) | SIMP(), objective=Compliance())  # type: ignore[arg-type]
@@ -402,7 +424,7 @@ def test_resume_rejects_unknown_schema(tmp_path: Path) -> None:
 
 
 def test_iterate_yields_across_stages() -> None:
-    # E10: the generator spans every executed stage with a global iteration counter
+    # the generator spans every executed stage with a global iteration counter
     states = list(Study(_problem_proj(), schedule=Schedule.default(max_iter=8, tol=1e-3)).iterate())
     assert {s.stage for s in states} == set(range(7))  # all 7 stages yielded
     assert [s.iteration for s in states] == list(range(1, len(states) + 1))  # global, contiguous
@@ -660,4 +682,80 @@ def test_resume_schedule_override_rejects_a_shorter_schedule(tmp_path: Path) -> 
             _problem(OC(move=0.2)),
             str(path),
             schedule=Schedule.single(p=3.0, max_iter=99, tol=0.0),
+        )
+
+
+def test_problem_rejects_non_protocol_components() -> None:
+    model = _cantilever()
+    chain = DensityFilter(radius=1.5) | SIMP(p=3.0)
+
+    with pytest.raises(ProblemError, match="PhysicsModel"):
+        Problem(object(), chain, objective=Compliance())  # type: ignore[arg-type]
+    with pytest.raises(ProblemError, match="Response"):
+        Problem(model, chain, objective=object())  # type: ignore[arg-type]
+    with pytest.raises(ProblemError, match="Optimizer"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=object(),  # type: ignore[arg-type]
+        )
+    with pytest.raises(ProblemError, match="LinearSolver"):
+        Problem(
+            model,
+            chain,
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=MMA(),
+            solver=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_constraint_response_rejects_non_protocol_response() -> None:
+    # a Constraint built directly around a non-Response payload must be caught
+    # here, not when the orchestration loop first calls .value()/.grad_field()
+    with pytest.raises(ProblemError, match=r"constraints\[0\]\.response"):
+        Problem(
+            _cantilever(),
+            DensityFilter(radius=1.5) | SIMP(p=3.0),
+            objective=Compliance(),
+            constraints=[Constraint(object(), 0.4, "<=")],  # type: ignore[arg-type]
+            optimizer=MMA(),
+        )
+
+
+def test_problem_names_the_constraint_mistake() -> None:
+    # passing a bare Response where a Constraint belongs is the classic slip
+    with pytest.raises(ProblemError, match=r"Volume\(\) <= 0.4"):
+        Problem(
+            _cantilever(),
+            DensityFilter(radius=1.5) | SIMP(p=3.0),
+            objective=Compliance(),
+            constraints=[Volume()],  # type: ignore[list-item]
+            optimizer=MMA(),
+        )
+
+
+def test_problem_incomplete_optimizer_fails_at_construction() -> None:
+    # an attribute shadowing a protocol method must fail here, not mid-run
+    class Broken:
+        step = 0.1  # not callable
+
+        def setup(self, n_vars, lower, upper):  # type: ignore[no-untyped-def]
+            return None
+
+        def state(self):  # type: ignore[no-untyped-def]
+            return {}
+
+        def load_state(self, state):  # type: ignore[no-untyped-def]
+            return None
+
+    with pytest.raises(ProblemError, match="Optimizer"):
+        Problem(
+            _cantilever(),
+            DensityFilter(radius=1.5) | SIMP(p=3.0),
+            objective=Compliance(),
+            constraints=[Volume() <= 0.4],
+            optimizer=Broken(),  # type: ignore[arg-type]
         )

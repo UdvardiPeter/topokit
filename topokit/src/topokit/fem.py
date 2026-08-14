@@ -136,7 +136,12 @@ Load = PointLoad | SurfaceTraction | BodyForce
 
 @runtime_checkable
 class PhysicsModel(Protocol):
-    """The physics contract the orchestration layer is written against."""
+    """The physics contract the orchestration layer is written against.
+
+    Responses read the solved state through :class:`~topokit.responses.Solution`;
+    self-adjoint energy responses rely on ``element_energies(u, ones)`` returning
+    the per-element quadratic form.
+    """
 
     expected_field: ClassVar[FieldSpec]
 
