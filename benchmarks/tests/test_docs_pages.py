@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 
 DOCS = Path(__file__).resolve().parents[2] / "docs" / "content"
-PAGES = (
-    [DOCS / "index.md"]  # noqa: RUF005 (extend/ is empty until a later task; keep the append shape)
-    + sorted((DOCS / "tutorials").glob("*.md"))
-    + sorted((DOCS / "extend").glob("*.md"))
-)
+PAGES = [
+    DOCS / "index.md",
+    *sorted((DOCS / "tutorials").glob("*.md")),
+    *sorted((DOCS / "extend").glob("*.md")),
+]
 
 _FENCE = re.compile(r"(<!--\s*no-run\s*-->\s*\n)?```python\n(.*?)```", re.DOTALL)
 

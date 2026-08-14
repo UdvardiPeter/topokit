@@ -4,7 +4,7 @@ Heat conduction on a 40×40 grid: temperature fixed along the left edge, a unit 
 
 ![Thermal conduction](img/thermal.png)
 
-Needs the `[viz]` extra (`pip install --pre 'topokit[viz]'`) for `result.view()`. This script runs several minutes at full size; it is not part of the nightly docs harness, but the same physics is exercised there through the benchmark suite.
+Needs the `[viz]` extra (`pip install --pre 'topokit[viz]'`) for `result.view()`. This script runs several minutes at full size; it is not part of the nightly docs harness, but the same model and link run nightly through the [Custom physics](../extend/custom-physics.md) script.
 
 <!-- no-run -->
 ```python

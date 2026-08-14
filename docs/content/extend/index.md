@@ -12,4 +12,4 @@ Every pluggable seam in TopoKit is a `Protocol`: a response, an optimizer, a cha
 | selector         | `Selector`                               | `topokit.selection`        |
 | array backend    | `ArrayBackend`                           | `topokit.backend`          |
 
-The helper vocabulary these protocols traffic in (`Solution`, `ResponseBase`, `FieldSpec`, `StepResult`, `BoundLink`, `LinkSpec`, `Mesh`) is importable from the top level too. Get a protocol wrong and it fails at `Problem(...)` construction, not partway through a solve: the error names the object and the missing method.
+The helper vocabulary these protocols traffic in (`Solution`, `ResponseBase`, `FieldSpec`, `StepResult`, `BoundLink`, `LinkSpec`, `Mesh`) is importable from the top level too. Get a protocol wrong and it fails at `Problem(...)` construction, not partway through a solve: the error names the object and the protocol it fails to satisfy.
