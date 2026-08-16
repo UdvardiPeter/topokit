@@ -2,11 +2,13 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for the unified parametrization chain."""
 
+from dataclasses import dataclass
+
 import numpy as np
 import pytest
 
 from topokit.fields import FieldSpec
-from topokit.mesh import StructuredGrid
+from topokit.mesh import BoundaryFaces, Mesh, StructuredGrid
 from topokit.parametrization import (
     SIMP,
     Chain,
@@ -460,11 +462,11 @@ def test_custom_link_authors_against_public_names() -> None:
 
     @dataclass(frozen=True)
     class Half(LinkSpec):
-        def build(self, mesh: StructuredGrid) -> BoundLink:
+        def build(self, mesh: Mesh) -> BoundLink:
             return _BoundHalf()
 
         @classmethod
-        def fd_example(cls, mesh: StructuredGrid) -> "Half":
+        def fd_example(cls, mesh: Mesh) -> "Half":
             return cls()
 
     class _BoundHalf(BoundLink):
@@ -489,11 +491,11 @@ def test_terminal_link_without_out_field_fails_at_bind() -> None:
     class BadTerminal(LinkSpec):
         is_terminal: ClassVar[bool] = True
 
-        def build(self, mesh: StructuredGrid) -> BoundLink:
+        def build(self, mesh: Mesh) -> BoundLink:
             return _BoundBad()
 
         @classmethod
-        def fd_example(cls, mesh: StructuredGrid) -> "BadTerminal":
+        def fd_example(cls, mesh: Mesh) -> "BadTerminal":
             return cls()
 
     class _BoundBad(BoundLink):  # forgets to set out_field
@@ -517,11 +519,11 @@ def test_bind_rejects_reduced_link_without_n_reduced() -> None:
     class BadReduced(LinkSpec):
         is_reduced_input: ClassVar[bool] = True
 
-        def build(self, mesh: StructuredGrid) -> BoundLink:
+        def build(self, mesh: Mesh) -> BoundLink:
             return _BoundBadReduced()
 
         @classmethod
-        def fd_example(cls, mesh: StructuredGrid) -> "BadReduced":
+        def fd_example(cls, mesh: Mesh) -> "BadReduced":
             return cls()
 
     class _BoundBadReduced(BoundLink):  # forgets to set n_reduced
@@ -533,3 +535,159 @@ def test_bind_rejects_reduced_link_without_n_reduced() -> None:
 
     with pytest.raises(ParametrizationError, match="n_reduced"):
         (BadReduced() | SIMP()).bind(G42)
+
+
+@dataclass
+class _StubMesh:
+    """Minimal Mesh-protocol stand-in for matrix-filter tests."""
+
+    nodes: np.ndarray
+    element_nodes: np.ndarray
+    element_centroids: np.ndarray
+    element_volumes: np.ndarray
+    design: np.ndarray
+    solid: np.ndarray
+    void: np.ndarray
+    dim: int
+    element_kind: str = "tri3"
+
+    @property
+    def n_elements(self) -> int:
+        return int(self.element_centroids.shape[0])
+
+    @property
+    def n_nodes(self) -> int:
+        return int(self.nodes.shape[0])
+
+    @property
+    def active_elements(self) -> np.ndarray:
+        return ~self.void
+
+    @property
+    def active_nodes(self) -> np.ndarray:
+        return np.ones(self.n_nodes, dtype=bool)
+
+    @property
+    def node_index_map(self) -> np.ndarray:
+        return np.arange(self.n_nodes, dtype=np.int64)
+
+    def boundary_faces(self) -> BoundaryFaces:
+        raise NotImplementedError
+
+
+def _stub_from_grid(g: StructuredGrid) -> "_StubMesh":
+    return _StubMesh(
+        nodes=np.asarray(g.nodes),
+        element_nodes=np.asarray(g.element_nodes),
+        element_centroids=np.asarray(g.element_centroids),
+        element_volumes=np.asarray(g.element_volumes),
+        design=np.asarray(g.design),
+        solid=np.asarray(g.solid),
+        void=np.asarray(g.void),
+        dim=g.dim,
+    )
+
+
+def test_matrix_filter_partition_of_unity() -> None:
+    from topokit.parametrization import _BoundMatrixFilter
+
+    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
+    f = _BoundMatrixFilter(_stub_from_grid(g), radius=1.5)
+    ones = np.ones(g.n_elements)
+    out = f.apply(ones)
+    np.testing.assert_allclose(out, ones, rtol=0, atol=1e-12)
+
+
+def test_matrix_filter_pullback_is_exact_transpose() -> None:
+    from topokit.parametrization import _BoundMatrixFilter
+
+    g = StructuredGrid(shape=(5, 3), spacing=(1.0, 1.0))
+    f = _BoundMatrixFilter(_stub_from_grid(g), radius=1.7)
+    rng = np.random.default_rng(11)
+    x = rng.uniform(0.2, 0.8, g.n_elements)
+    y = rng.standard_normal(g.n_elements)
+    z = rng.standard_normal(g.n_elements)
+    # <F z, y> == <z, F^T y> for the linear map F = apply
+    assert np.isclose(float(f.apply(z) @ y), float(z @ f.pullback(x, y)), rtol=1e-12)
+
+
+def test_matrix_filter_transpose_holds_with_nonuniform_volumes() -> None:
+    from topokit.parametrization import _BoundMatrixFilter
+
+    g = StructuredGrid(shape=(5, 3), spacing=(1.0, 1.0))
+    stub = _stub_from_grid(g)
+    rng = np.random.default_rng(23)
+    # non-uniform volumes make W asymmetric: this distinguishes W.T from W
+    # in the pullback and pins the normalization ordering
+    stub.element_volumes = stub.element_volumes * rng.uniform(0.5, 2.0, g.n_elements)
+    f = _BoundMatrixFilter(stub, radius=1.7)
+    x = rng.uniform(0.2, 0.8, g.n_elements)
+    y = rng.standard_normal(g.n_elements)
+    z = rng.standard_normal(g.n_elements)
+    assert np.isclose(float(f.apply(z) @ y), float(z @ f.pullback(x, y)), rtol=1e-12)
+
+
+def test_matrix_filter_matches_radial_filter_on_a_grid() -> None:
+    from topokit.parametrization import _BoundMatrixFilter, _BoundRadialDensityFilter
+
+    void = np.zeros(24, dtype=bool)
+    void[5] = True
+    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0), void=void)
+    radial = _BoundRadialDensityFilter(g, radius=1.9)
+    matrix = _BoundMatrixFilter(_stub_from_grid(g), radius=1.9)
+    rng = np.random.default_rng(3)
+    x = rng.uniform(0.0, 1.0, g.n_elements)
+    np.testing.assert_allclose(matrix.apply(x), radial.apply(x), rtol=1e-12, atol=1e-14)
+    grad = rng.standard_normal(g.n_elements)
+    np.testing.assert_allclose(
+        matrix.pullback(x, grad), radial.pullback(x, grad), rtol=1e-12, atol=1e-14
+    )
+
+
+def test_matrix_sensitivity_filter_matches_grid_version() -> None:
+    from topokit.parametrization import _BoundMatrixSensitivityFilter, _BoundSensitivityFilter
+
+    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
+    # SensitivityFilter's grid version wraps the SEPARABLE filter, whose kernel
+    # differs from the radial matrix kernel, so compare structure, not values:
+    # identity forward, masked and finite pullback.
+    m = _BoundMatrixSensitivityFilter(_stub_from_grid(g), radius=1.5)
+    rng = np.random.default_rng(7)
+    x = rng.uniform(0.1, 0.9, g.n_elements)
+    grad = rng.standard_normal(g.n_elements)
+    np.testing.assert_array_equal(m.apply(x), x)
+    out = m.pullback(x, grad)
+    assert out.shape == (g.n_elements,)
+    assert np.isfinite(out).all()
+    g2 = _BoundSensitivityFilter(g, 1.5).pullback(x, grad)
+    assert np.isfinite(g2).all()  # both paths defined on the same inputs
+
+
+def test_filters_dispatch_to_matrix_on_non_grid_meshes() -> None:
+    from topokit.parametrization import _BoundMatrixFilter, _BoundMatrixSensitivityFilter
+
+    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
+    stub = _stub_from_grid(g)
+    assert isinstance(DensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
+    assert isinstance(RadialDensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
+    assert isinstance(SensitivityFilter(radius=1.5).build(stub), _BoundMatrixSensitivityFilter)
+
+
+def test_symmetry_map_rejects_non_grid_meshes() -> None:
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
+    with pytest.raises(ParametrizationError, match="structured grid"):
+        SymmetryMap(planes=("x",)).build(_stub_from_grid(g))
+
+
+def test_chain_binds_on_a_non_grid_mesh_and_fd_verifies() -> None:
+    from topokit.testing import assert_gradient_matches
+
+    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
+    bound = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(_stub_from_grid(g))
+    rng = np.random.default_rng(19)
+    x = rng.uniform(0.2, 0.8, bound.n_vars)
+    w = rng.standard_normal(g.n_elements)
+
+    assert_gradient_matches(
+        lambda xx: float(bound.apply(xx) @ w), lambda xx: bound.pullback(xx, w), x
+    )

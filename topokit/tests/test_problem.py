@@ -333,6 +333,20 @@ def test_study_writes_checkpoint(tmp_path: Path) -> None:
     assert "x" in a and "fingerprint" in m and "c0" in m
 
 
+def test_config_parts_keeps_grid_descriptor_flat() -> None:
+    # _config_parts() is repr()-hashed into the checkpoint fingerprint; a grid
+    # problem must place shape/spacing as flat elements 0 and 1 of the outer
+    # tuple (not nested under a wrapper), or every .topo file written for an
+    # unmodified structured-grid problem before a refactor starts failing
+    # resume with "checkpoint was written for a different problem".
+    study = Study(_problem())
+    parts = study._config_parts()
+    mesh = study.problem.model.mesh
+    assert isinstance(mesh, StructuredGrid)
+    assert parts[0] == tuple(mesh.shape)
+    assert parts[1] == tuple(float(s) for s in mesh.spacing)
+
+
 def test_result_fields_and_history() -> None:
     result = Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=10, tol=0.0)).run()
     assert result.design.values.shape == (_cantilever().mesh.n_elements,)

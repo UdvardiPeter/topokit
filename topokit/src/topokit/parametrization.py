@@ -21,7 +21,7 @@ symmetry) with ``is_reduced_input = True``, and its bound form must set
 ``n_reduced``.
 
 Design variables live on design elements (reduced further by symmetry).
-The bound chain embeds them into the full grid with solid pinned to 1 and
+The bound chain embeds them into the full mesh with solid pinned to 1 and
 void to 0, runs the density links, re-pins, and applies the terminal
 material-interpolation link, which produces the ``FieldSpec`` the physics
 model declares. Pinning has zero pullback at pinned positions, so the
@@ -44,7 +44,7 @@ import numpy.typing as npt
 
 from topokit.backend import get_kernel, register_kernel
 from topokit.fields import FieldSpec
-from topokit.mesh import StructuredGrid
+from topokit.mesh import Mesh, StructuredGrid
 
 _F64 = npt.NDArray[np.float64]
 _I64 = npt.NDArray[np.int64]
@@ -119,16 +119,16 @@ class LinkSpec:
             return Chain((self, *other.links))
         return Chain((self, other))
 
-    def bind(self, mesh: StructuredGrid) -> BoundChain:
+    def bind(self, mesh: Mesh) -> BoundChain:
         """Bind a single-link chain; equivalent to ``Chain((self,)).bind(mesh)``."""
         return Chain((self,)).bind(mesh)
 
-    def build(self, mesh: StructuredGrid) -> BoundLink:
+    def build(self, mesh: Mesh) -> BoundLink:
         """Construct the bound link for ``mesh``; implemented by each link."""
         raise NotImplementedError
 
     @classmethod
-    def fd_example(cls, mesh: StructuredGrid) -> LinkSpec:
+    def fd_example(cls, mesh: Mesh) -> LinkSpec:
         """Return an instance for the registry-wide FD meta-test."""
         raise NotImplementedError
 
@@ -167,7 +167,7 @@ class Chain:
             return Chain((*self.links, *other.links))
         return Chain((*self.links, other))
 
-    def bind(self, mesh: StructuredGrid) -> BoundChain:
+    def bind(self, mesh: Mesh) -> BoundChain:
         """Validate the composition and bind every link to ``mesh``."""
         links = self.links
         if not links or not links[-1].is_terminal:
@@ -203,7 +203,7 @@ class BoundChain:
 
     def __init__(
         self,
-        mesh: StructuredGrid,
+        mesh: Mesh,
         reduced: BoundLink | None,
         middle: list[BoundLink],
         terminal: BoundLink,
@@ -396,8 +396,13 @@ class SymmetryMap(LinkSpec):
         if not self.planes or any(p not in valid for p in self.planes):
             raise ParametrizationError(f"plane names must be from {sorted(valid)}")
 
-    def build(self, mesh: StructuredGrid) -> _BoundSymmetry:
+    def build(self, mesh: Mesh) -> _BoundSymmetry:
         """Build orbit maps and validate mask symmetry."""
+        if not isinstance(mesh, StructuredGrid):
+            raise ParametrizationError(
+                "SymmetryMap requires a structured grid; symmetry orbits on "
+                "unstructured meshes are not supported"
+            )
         axes = []
         names = "xyz"[: mesh.dim]
         for p in self.planes:
@@ -407,7 +412,7 @@ class SymmetryMap(LinkSpec):
         return _BoundSymmetry(mesh, tuple(sorted(set(axes))))
 
     @classmethod
-    def fd_example(cls, mesh: StructuredGrid) -> SymmetryMap:
+    def fd_example(cls, mesh: Mesh) -> SymmetryMap:
         """FD meta-test instance."""
         return cls(planes=("x",))
 
@@ -466,6 +471,11 @@ class DensityFilter(LinkSpec):
     minimum member size it enforces is orientation-dependent, tightest for
     axis-aligned features. Use :class:`RadialDensityFilter` when isotropic
     reach or a literature-faithful radius-to-member-size relation matters.
+
+    On a non-grid mesh the filter falls back to an explicit sparse-matrix
+    implementation with the radial kernel, so ``DensityFilter`` and
+    ``RadialDensityFilter`` coincide there; ``radius`` is a physical length
+    on every mesh type.
     """
 
     radius: float = 1.5
@@ -474,14 +484,16 @@ class DensityFilter(LinkSpec):
         if self.radius <= 0.0:
             raise ParametrizationError(f"radius must be > 0, got {self.radius}")
 
-    def build(self, mesh: StructuredGrid) -> _BoundDensityFilter:
+    def build(self, mesh: Mesh) -> BoundLink:
         """Precompute kernels and the mask normalization."""
-        return _BoundDensityFilter(mesh, self.radius)
+        if isinstance(mesh, StructuredGrid):
+            return _BoundDensityFilter(mesh, self.radius)
+        return _BoundMatrixFilter(mesh, self.radius)
 
     @classmethod
-    def fd_example(cls, mesh: StructuredGrid) -> DensityFilter:
+    def fd_example(cls, mesh: Mesh) -> DensityFilter:
         """FD meta-test instance."""
-        return cls(radius=1.6 * max(mesh.spacing))
+        return cls(radius=1.6 * float(np.max(mesh.element_volumes) ** (1.0 / mesh.dim)))
 
 
 class _BoundDensityFilter(BoundLink):
@@ -534,6 +546,10 @@ class RadialDensityFilter(LinkSpec):
     is isotropic, reproducing the 88-line density filter (``ft = 2``); use it
     when matching published references. Cost is O(n*r^dim) vs the separable
     O(n*r), traded for a literature-faithful, orientation-independent kernel.
+
+    On a non-grid mesh this filter and :class:`DensityFilter` both dispatch
+    to the same sparse-matrix radial kernel, so they coincide there;
+    ``radius`` is a physical length on every mesh type.
     """
 
     radius: float = 1.5
@@ -542,14 +558,16 @@ class RadialDensityFilter(LinkSpec):
         if self.radius <= 0.0:
             raise ParametrizationError(f"radius must be > 0, got {self.radius}")
 
-    def build(self, mesh: StructuredGrid) -> _BoundRadialDensityFilter:
+    def build(self, mesh: Mesh) -> BoundLink:
         """Precompute the radial kernel and the mask normalization."""
-        return _BoundRadialDensityFilter(mesh, self.radius)
+        if isinstance(mesh, StructuredGrid):
+            return _BoundRadialDensityFilter(mesh, self.radius)
+        return _BoundMatrixFilter(mesh, self.radius)
 
     @classmethod
-    def fd_example(cls, mesh: StructuredGrid) -> RadialDensityFilter:
+    def fd_example(cls, mesh: Mesh) -> RadialDensityFilter:
         """FD meta-test instance."""
-        return cls(radius=1.6 * max(mesh.spacing))
+        return cls(radius=1.6 * float(np.max(mesh.element_volumes) ** (1.0 / mesh.dim)))
 
 
 class _BoundRadialDensityFilter(BoundLink):
@@ -590,6 +608,72 @@ class _BoundRadialDensityFilter(BoundLink):
         return mesh.to_flat(back) * self._active
 
 
+class _BoundMatrixFilter(BoundLink):
+    """Radial hat-kernel filter as an explicit sparse matrix; serves any mesh.
+
+    Weights ``max(0, radius - dist)`` over Euclidean element-centroid
+    distance, scaled by neighbor element volume (constant volumes cancel in
+    the normalization, so on a uniform mesh this reproduces the radial grid
+    filter exactly). Mask semantics match the grid filters: void is excluded,
+    normalization runs over active neighbors only.
+    """
+
+    def __init__(self, mesh: Mesh, radius: float) -> None:
+        from scipy import sparse
+        from scipy.spatial import cKDTree
+
+        self.mesh = mesh
+        active = np.asarray(mesh.active_elements)
+        self._active_mask = active
+        self._active = active.astype(np.float64)
+        centroids = np.asarray(mesh.element_centroids)
+        volumes = np.asarray(mesh.element_volumes)
+        idx = np.flatnonzero(active)
+        tree = cKDTree(centroids[idx])
+        neighbors = tree.query_ball_point(centroids[idx], r=radius)
+        counts = np.fromiter((len(nb) for nb in neighbors), dtype=np.int64, count=idx.size)  # type: ignore[arg-type]
+        rows = np.repeat(idx, counts)
+        # active is never empty (an all-void mesh fails at construction) and
+        # every point neighbors itself, so the concatenation is never empty
+        cols = idx[np.concatenate(neighbors).astype(np.int64)]
+        dist = np.linalg.norm(centroids[rows] - centroids[cols], axis=1)
+        weights = np.maximum(0.0, radius - dist) * volumes[cols]
+        n = mesh.n_elements
+        self._w = sparse.csr_matrix((weights, (rows, cols)), shape=(n, n))
+        # query_ball_point is inclusive at r=radius, so exact-radius neighbors
+        # (weight = radius - dist = 0) get stored as explicit zeros; drop them.
+        self._w.eliminate_zeros()
+        denom = np.asarray(self._w @ self._active).ravel()
+        # every active row has at least its self-weight radius * volume > 0
+        self._denom = np.maximum(denom, 1e-300)
+
+    def apply(self, x: _F64) -> _F64:
+        num = np.asarray(self._w @ (x * self._active)).ravel()
+        return np.where(self._active_mask, num / self._denom, 0.0)
+
+    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
+        # forward is A D^-1 W A (mask, normalize, weight, mask); the exact
+        # transpose is A W^T D^-1 A. W is asymmetric under volume weighting,
+        # so the transpose is real, not cosmetic.
+        scaled = np.where(self._active_mask, grad_out / self._denom, 0.0)
+        return np.asarray(self._w.T @ scaled).ravel() * self._active
+
+
+class _BoundMatrixSensitivityFilter(BoundLink):
+    def __init__(self, mesh: Mesh, radius: float) -> None:
+        self._inner = _BoundMatrixFilter(mesh, radius)
+        self.mesh = mesh
+
+    def apply(self, x: _F64) -> _F64:
+        return x
+
+    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
+        inner = self._inner
+        num = np.asarray(inner._w @ (x * grad_out * inner._active)).ravel()
+        weighted = num / (inner._denom * np.maximum(x, 1e-3))
+        return np.where(inner._active_mask, weighted, 0.0)
+
+
 @dataclass(frozen=True)
 class Heaviside(LinkSpec):
     """Smooth tanh projection sharpening intermediate densities."""
@@ -603,12 +687,12 @@ class Heaviside(LinkSpec):
         if not 0.0 < self.eta < 1.0:
             raise ParametrizationError(f"eta must be in (0, 1), got {self.eta}")
 
-    def build(self, mesh: StructuredGrid) -> _BoundHeaviside:
+    def build(self, mesh: Mesh) -> _BoundHeaviside:
         """Bind; the projection is elementwise and mesh-independent."""
         return _BoundHeaviside(self.beta, self.eta)
 
     @classmethod
-    def fd_example(cls, mesh: StructuredGrid) -> Heaviside:
+    def fd_example(cls, mesh: Mesh) -> Heaviside:
         """FD meta-test instance."""
         return cls(beta=3.0)
 
@@ -644,12 +728,12 @@ class SIMP(LinkSpec):
         if not 0.0 <= self.scale_min < 1.0:
             raise ParametrizationError(f"scale_min must be in [0, 1), got {self.scale_min}")
 
-    def build(self, mesh: StructuredGrid) -> _BoundSIMP:
+    def build(self, mesh: Mesh) -> _BoundSIMP:
         """Bind; the interpolation is elementwise."""
         return _BoundSIMP(self.p, self.scale_min)
 
     @classmethod
-    def fd_example(cls, mesh: StructuredGrid) -> SIMP:
+    def fd_example(cls, mesh: Mesh) -> SIMP:
         """FD meta-test instance."""
         return cls(p=3.0)
 
@@ -676,6 +760,10 @@ class SensitivityFilter(LinkSpec):
     density weighting. It is a gradient heuristic, deliberately not the
     VJP of any map, hence ``fd_exempt``. Density filtering plus projection
     is the recommended modern alternative.
+
+    On a non-grid mesh the smoothing kernel is the same sparse-matrix radial
+    weighting the density filters fall back to; ``radius`` is a physical
+    length on every mesh type.
     """
 
     radius: float = 1.5
@@ -687,12 +775,14 @@ class SensitivityFilter(LinkSpec):
         if self.radius <= 0.0:
             raise ParametrizationError(f"radius must be > 0, got {self.radius}")
 
-    def build(self, mesh: StructuredGrid) -> _BoundSensitivityFilter:
+    def build(self, mesh: Mesh) -> BoundLink:
         """Bind, reusing the density-filter kernels."""
-        return _BoundSensitivityFilter(mesh, self.radius)
+        if isinstance(mesh, StructuredGrid):
+            return _BoundSensitivityFilter(mesh, self.radius)
+        return _BoundMatrixSensitivityFilter(mesh, self.radius)
 
     @classmethod
-    def fd_example(cls, mesh: StructuredGrid) -> SensitivityFilter:
+    def fd_example(cls, mesh: Mesh) -> SensitivityFilter:
         """Unused; the link is fd_exempt."""
         return cls()
 
