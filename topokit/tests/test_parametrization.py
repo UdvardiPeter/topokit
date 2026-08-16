@@ -611,6 +611,22 @@ def test_matrix_filter_pullback_is_exact_transpose() -> None:
     assert np.isclose(float(f.apply(z) @ y), float(z @ f.pullback(x, y)), rtol=1e-12)
 
 
+def test_matrix_filter_transpose_holds_with_nonuniform_volumes() -> None:
+    from topokit.parametrization import _BoundMatrixFilter
+
+    g = StructuredGrid(shape=(5, 3), spacing=(1.0, 1.0))
+    stub = _stub_from_grid(g)
+    rng = np.random.default_rng(23)
+    # non-uniform volumes make W asymmetric: this distinguishes W.T from W
+    # in the pullback and pins the normalization ordering
+    stub.element_volumes = stub.element_volumes * rng.uniform(0.5, 2.0, g.n_elements)
+    f = _BoundMatrixFilter(stub, radius=1.7)
+    x = rng.uniform(0.2, 0.8, g.n_elements)
+    y = rng.standard_normal(g.n_elements)
+    z = rng.standard_normal(g.n_elements)
+    assert np.isclose(float(f.apply(z) @ y), float(z @ f.pullback(x, y)), rtol=1e-12)
+
+
 def test_matrix_filter_matches_radial_filter_on_a_grid() -> None:
     from topokit.parametrization import _BoundMatrixFilter, _BoundRadialDensityFilter
 

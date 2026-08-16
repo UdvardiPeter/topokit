@@ -21,7 +21,7 @@ symmetry) with ``is_reduced_input = True``, and its bound form must set
 ``n_reduced``.
 
 Design variables live on design elements (reduced further by symmetry).
-The bound chain embeds them into the full grid with solid pinned to 1 and
+The bound chain embeds them into the full mesh with solid pinned to 1 and
 void to 0, runs the density links, re-pins, and applies the terminal
 material-interpolation link, which produces the ``FieldSpec`` the physics
 model declares. Pinning has zero pullback at pinned positions, so the
@@ -640,6 +640,9 @@ class _BoundMatrixFilter(BoundLink):
         weights = np.maximum(0.0, radius - dist) * volumes[cols]
         n = mesh.n_elements
         self._w = sparse.csr_matrix((weights, (rows, cols)), shape=(n, n))
+        # query_ball_point is inclusive at r=radius, so exact-radius neighbors
+        # (weight = radius - dist = 0) get stored as explicit zeros; drop them.
+        self._w.eliminate_zeros()
         denom = np.asarray(self._w @ self._active).ravel()
         # every active row has at least its self-weight radius * volume > 0
         self._denom = np.maximum(denom, 1e-300)
