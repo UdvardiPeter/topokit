@@ -44,7 +44,7 @@ import numpy.typing as npt
 
 from topokit.backend import get_kernel, register_kernel
 from topokit.fields import FieldSpec
-from topokit.mesh import StructuredGrid
+from topokit.mesh import Mesh, StructuredGrid
 
 _F64 = npt.NDArray[np.float64]
 _I64 = npt.NDArray[np.int64]
@@ -588,6 +588,69 @@ class _BoundRadialDensityFilter(BoundLink):
         scaled = np.where(mesh.active_elements, grad_out / self._denom, 0.0)
         back = self._kern()(mesh.to_grid(scaled), self._kernel)
         return mesh.to_flat(back) * self._active
+
+
+class _BoundMatrixFilter(BoundLink):
+    """Radial hat-kernel filter as an explicit sparse matrix; serves any mesh.
+
+    Weights ``max(0, radius - dist)`` over Euclidean element-centroid
+    distance, scaled by neighbor element volume (constant volumes cancel in
+    the normalization, so on a uniform mesh this reproduces the radial grid
+    filter exactly). Mask semantics match the grid filters: void is excluded,
+    normalization runs over active neighbors only.
+    """
+
+    def __init__(self, mesh: Mesh, radius: float) -> None:
+        from scipy import sparse
+        from scipy.spatial import cKDTree
+
+        self.mesh = mesh
+        active = np.asarray(mesh.active_elements)
+        self._active_mask = active
+        self._active = active.astype(np.float64)
+        centroids = np.asarray(mesh.element_centroids)
+        volumes = np.asarray(mesh.element_volumes)
+        idx = np.flatnonzero(active)
+        tree = cKDTree(centroids[idx])
+        neighbors = tree.query_ball_point(centroids[idx], r=radius)
+        counts = np.fromiter((len(nb) for nb in neighbors), dtype=np.int64, count=idx.size)  # type: ignore[arg-type]
+        rows = np.repeat(idx, counts)
+        # active is never empty (an all-void mesh fails at construction) and
+        # every point neighbors itself, so the concatenation is never empty
+        cols = idx[np.concatenate(neighbors).astype(np.int64)]
+        dist = np.linalg.norm(centroids[rows] - centroids[cols], axis=1)
+        weights = np.maximum(0.0, radius - dist) * volumes[cols]
+        n = mesh.n_elements
+        self._w = sparse.csr_matrix((weights, (rows, cols)), shape=(n, n))
+        denom = np.asarray(self._w @ self._active).ravel()
+        # every active row has at least its self-weight radius * volume > 0
+        self._denom = np.maximum(denom, 1e-300)
+
+    def apply(self, x: _F64) -> _F64:
+        num = np.asarray(self._w @ (x * self._active)).ravel()
+        return np.where(self._active_mask, num / self._denom, 0.0)
+
+    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
+        # forward is A D^-1 W A (mask, normalize, weight, mask); the exact
+        # transpose is A W^T D^-1 A. W is asymmetric under volume weighting,
+        # so the transpose is real, not cosmetic.
+        scaled = np.where(self._active_mask, grad_out / self._denom, 0.0)
+        return np.asarray(self._w.T @ scaled).ravel() * self._active
+
+
+class _BoundMatrixSensitivityFilter(BoundLink):
+    def __init__(self, mesh: Mesh, radius: float) -> None:
+        self._inner = _BoundMatrixFilter(mesh, radius)
+        self.mesh = mesh
+
+    def apply(self, x: _F64) -> _F64:
+        return x
+
+    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
+        inner = self._inner
+        num = np.asarray(inner._w @ (x * grad_out * inner._active)).ravel()
+        weighted = num / (inner._denom * np.maximum(x, 1e-3))
+        return np.where(inner._active_mask, weighted, 0.0)
 
 
 @dataclass(frozen=True)
