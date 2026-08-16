@@ -525,15 +525,20 @@ class Study:
         p = self.problem
         assert self.schedule is not None
         mesh = p.model.mesh
-        # Grid geometry identifies a structured mesh precisely; a generic mesh
-        # has no such compact descriptor, so element/node counts stand in.
+        # This tuple is repr()-hashed into the checkpoint fingerprint, so the
+        # grid case unpacks shape/spacing flat (matching the pre-Mesh-protocol
+        # layout byte-for-byte); regrouping them would change the hash and
+        # break resume against every checkpoint written for an unmodified
+        # structured-grid problem before this code existed. The non-grid
+        # branch is new territory with no prior checkpoints and is free to
+        # pick its own shape.
         mesh_parts: tuple[object, ...] = (
             (tuple(mesh.shape), tuple(float(s) for s in mesh.spacing))
             if isinstance(mesh, StructuredGrid)
-            else (mesh.dim, mesh.n_elements, mesh.n_nodes)
+            else ((mesh.dim, mesh.n_elements, mesh.n_nodes),)
         )
         return (
-            mesh_parts,
+            *mesh_parts,
             int(p.model.n_dof),
             repr(p.chain.spec),
             p.objective.name,
