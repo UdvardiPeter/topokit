@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
-"""Structured grids for the regular-mesh fast path.
+"""Mesh discretizations: `StructuredGrid` and `UnstructuredMesh`.
 
-Ordering conventions (binding for the whole codebase):
+`StructuredGrid` ordering conventions (binding for the whole codebase):
 
 - Element id: ``i + nx*j (+ nx*ny*k)``, x-fastest.
 - Node id: ``i + (nx+1)*j (+ (nx+1)*(ny+1)*k)``.
@@ -11,7 +11,13 @@ Ordering conventions (binding for the whole codebase):
 - hex8 connectivity (VTK_HEXAHEDRON): bottom face CCW, then the same four
   nodes at ``k+1``.
 
-Element masks partition the grid into ``design`` (optimized), ``solid``
+`UnstructuredMesh` connectivity follows VTK simplex ordering: tri3 nodes
+CCW with positive signed area; tet4 nodes with positive signed volume
+(``det(J) = det([x2-x1; x3-x1; x4-x1]) > 0``); tet10 is
+VTK_QUADRATIC_TETRA (4 vertices, then midsides on edges
+(0,1),(1,2),(2,0),(0,3),(1,3),(2,3)).
+
+Element masks partition each mesh into ``design`` (optimized), ``solid``
 (fixed material) and ``void`` (removed from the system). Mesh topology is
 host-side numpy; per-iteration arrays cross the array-backend boundary in
 the physics modules, not here.
@@ -34,6 +40,22 @@ _Bool = npt.NDArray[np.bool_]
 
 class MeshError(ValueError):
     """Invalid mesh construction or mask."""
+
+
+def _validate_mask(mask: npt.ArrayLike | None, n: int, name: str) -> _Bool:
+    """Validate an element mask against element count ``n``, write-protected.
+
+    Shared by `StructuredGrid` and `UnstructuredMesh` so both masks follow
+    the same shape and dtype discipline.
+    """
+    if mask is None:
+        out = np.zeros(n, dtype=bool)
+    else:
+        out = np.array(mask, dtype=bool, copy=True)
+        if out.shape != (n,):
+            raise MeshError(f"{name} mask shape {out.shape} != ({n},)")
+    out.flags.writeable = False
+    return out
 
 
 @dataclass(frozen=True)
@@ -269,14 +291,7 @@ class StructuredGrid:
         return cls(shape=shape, spacing=spacing, origin=origin)
 
     def _validated_mask(self, mask: npt.ArrayLike | None, name: str) -> _Bool:
-        if mask is None:
-            out = np.zeros(self.n_elements, dtype=bool)
-        else:
-            out = np.array(mask, dtype=bool, copy=True)
-            if out.shape != (self.n_elements,):
-                raise MeshError(f"{name} mask shape {out.shape} != ({self.n_elements},)")
-        out.flags.writeable = False
-        return out
+        return _validate_mask(mask, self.n_elements, name)
 
     @property
     def n_elements(self) -> int:
@@ -481,3 +496,341 @@ class StructuredGrid:
         return BoundaryFaces(
             owner=owner, normal=normal, area=area, centroid=centroid, nodes=face_nodes_all
         )
+
+
+# element_kind -> connectivity column count
+_ELEMENT_KIND_COLUMNS: dict[str, int] = {"tri3": 3, "tet4": 4, "tet10": 10}
+# element_kind -> required node dimension
+_ELEMENT_KIND_DIM: dict[str, int] = {"tri3": 2, "tet4": 3, "tet10": 3}
+# element_kind -> corner (vertex) count; tet10's remaining columns are midsides
+_ELEMENT_KIND_CORNERS: dict[str, int] = {"tri3": 3, "tet4": 4, "tet10": 4}
+
+# element_kind -> corner-local-index patterns of its boundary facets (edges
+# in 2D, triangular faces in 3D). Initial winding is arbitrary; boundary_faces
+# reorients each retained facet outward, so a fixed enumeration order suffices.
+_FACE_CORNER_PATTERNS: dict[str, tuple[tuple[int, ...], ...]] = {
+    "tri3": ((0, 1), (1, 2), (2, 0)),
+    "tet4": ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)),
+    "tet10": ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)),
+}
+
+# VTK_QUADRATIC_TETRA midside column, keyed by the unordered pair of
+# corner-local indices whose edge midpoint it sits on.
+_TET10_MIDSIDE_COLUMN: dict[frozenset[int], int] = {
+    frozenset((0, 1)): 4,
+    frozenset((1, 2)): 5,
+    frozenset((2, 0)): 6,
+    frozenset((0, 3)): 7,
+    frozenset((1, 3)): 8,
+    frozenset((2, 3)): 9,
+}
+
+
+def _signed_measure(nodes: _F64, elements: _I64, kind: str, dim: int) -> _F64:
+    """Signed area (2D) or signed volume (3D) of each element's corners.
+
+    ``tet10`` uses the corner tetrahedron; exact for straight edges.
+    """
+    n_corners = _ELEMENT_KIND_CORNERS[kind]
+    p = nodes[elements[:, :n_corners]]
+    e1 = p[:, 1] - p[:, 0]
+    e2 = p[:, 2] - p[:, 0]
+    if dim == 2:
+        out = 0.5 * (e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0])
+    else:
+        e3 = p[:, 3] - p[:, 0]
+        out = (
+            e1[:, 0] * (e2[:, 1] * e3[:, 2] - e2[:, 2] * e3[:, 1])
+            - e1[:, 1] * (e2[:, 0] * e3[:, 2] - e2[:, 2] * e3[:, 0])
+            + e1[:, 2] * (e2[:, 0] * e3[:, 1] - e2[:, 1] * e3[:, 0])
+        ) / 6.0
+    return np.asarray(out, dtype=np.float64)
+
+
+class UnstructuredMesh:
+    """Simplex mesh (tri3, tet4, or tet10) with element masks.
+
+    Instances are immutable after construction: geometry and masks are
+    exposed as read-only properties, derived arrays are cached and
+    write-protected, mirroring `StructuredGrid`. Connectivity follows VTK
+    node ordering; ``tet10`` is VTK_QUADRATIC_TETRA (4 vertices, then
+    midsides on edges (0,1),(1,2),(2,0),(0,3),(1,3),(2,3)). Elements must
+    have positive signed area/volume; construction raises rather than
+    silently reorienting.
+    """
+
+    def __init__(
+        self,
+        nodes: npt.ArrayLike,
+        elements: npt.ArrayLike,
+        element_kind: str,
+        *,
+        solid: npt.ArrayLike | None = None,
+        void: npt.ArrayLike | None = None,
+        groups: dict[str, npt.ArrayLike] | None = None,
+    ) -> None:
+        if element_kind not in _ELEMENT_KIND_COLUMNS:
+            raise MeshError(
+                f"unknown element kind {element_kind!r}; supported: {sorted(_ELEMENT_KIND_COLUMNS)}"
+            )
+        self._kind = element_kind
+
+        nodes_arr = np.array(nodes, dtype=np.float64, copy=True)
+        if nodes_arr.ndim != 2:
+            raise MeshError(f"nodes must have shape (n_nodes, dim), got {nodes_arr.shape}")
+        dim = int(nodes_arr.shape[1])
+        expected_dim = _ELEMENT_KIND_DIM[element_kind]
+        if dim != expected_dim:
+            raise MeshError(
+                f"element kind {element_kind!r} requires {expected_dim}D nodes, got dim {dim}"
+            )
+        self._dim = dim
+
+        elements_arr = np.array(elements, dtype=np.int64, copy=True)
+        expected_cols = _ELEMENT_KIND_COLUMNS[element_kind]
+        if elements_arr.ndim != 2 or elements_arr.shape[1] != expected_cols:
+            raise MeshError(
+                f"{element_kind!r} connectivity must have shape "
+                f"(n_elements, {expected_cols}), got {elements_arr.shape}"
+            )
+        n_nodes = nodes_arr.shape[0]
+        if elements_arr.size and (
+            int(elements_arr.min()) < 0 or int(elements_arr.max()) >= n_nodes
+        ):
+            raise MeshError(
+                f"connectivity references node ids outside [0, {n_nodes}); "
+                f"got range [{int(elements_arr.min())}, {int(elements_arr.max())}]"
+            )
+
+        signed = _signed_measure(nodes_arr, elements_arr, element_kind, dim)
+        bad = np.nonzero(signed <= 0.0)[0]
+        if bad.size:
+            measure = "area" if dim == 2 else "volume"
+            raise MeshError(f"non-positive signed {measure} for element ids {bad.tolist()}")
+
+        nodes_arr.flags.writeable = False
+        elements_arr.flags.writeable = False
+        self._nodes = nodes_arr
+        self._elements = elements_arr
+
+        self._solid = _validate_mask(solid, self.n_elements, "solid")
+        self._void = _validate_mask(void, self.n_elements, "void")
+        if bool((self._solid & self._void).any()):
+            raise MeshError("solid and void masks must be disjoint")
+        if bool(self._void.all()):
+            raise MeshError("all elements are void")
+
+        self._groups = self._validated_groups(groups)
+        self._boundary_faces: BoundaryFaces | None = None
+
+    def __repr__(self) -> str:
+        roles = []
+        if self._solid.any():
+            roles.append(f"{int(self._solid.sum())} solid")
+        if self._void.any():
+            roles.append(f"{int(self._void.sum())} void")
+        suffix = f", {', '.join(roles)}" if roles else ""
+        return (
+            f"UnstructuredMesh(kind={self._kind!r}, {self.n_elements} elements, "
+            f"{self.n_nodes} nodes{suffix})"
+        )
+
+    def _validated_groups(self, groups: dict[str, npt.ArrayLike] | None) -> dict[str, _I64]:
+        if groups is None:
+            return {}
+        out: dict[str, _I64] = {}
+        for name, ids in groups.items():
+            arr = np.array(ids, dtype=np.int64, copy=True)
+            if arr.size and (int(arr.min()) < 0 or int(arr.max()) >= self.n_elements):
+                raise MeshError(
+                    f"group {name!r} references element ids outside [0, {self.n_elements})"
+                )
+            arr.flags.writeable = False
+            out[name] = arr
+        return out
+
+    @property
+    def n_nodes(self) -> int:
+        """Number of nodes."""
+        return int(self._nodes.shape[0])
+
+    @property
+    def n_elements(self) -> int:
+        """Number of elements."""
+        return int(self._elements.shape[0])
+
+    @property
+    def dim(self) -> int:
+        """Spatial dimension."""
+        return self._dim
+
+    @property
+    def element_kind(self) -> str:
+        """``"tri3"``, ``"tet4"``, or ``"tet10"``, as given to the constructor."""
+        return self._kind
+
+    @property
+    def nodes(self) -> _F64:
+        """Node coordinates, shape ``(n_nodes, dim)``."""
+        return self._nodes
+
+    @property
+    def element_nodes(self) -> _I64:
+        """Connectivity, shape ``(n_elements, nodes_per_element)``."""
+        return self._elements
+
+    @property
+    def solid(self) -> _Bool:
+        """Elements with fixed material."""
+        return self._solid
+
+    @property
+    def void(self) -> _Bool:
+        """Elements removed from the system."""
+        return self._void
+
+    @property
+    def groups(self) -> dict[str, _I64]:
+        """Named element-id sets, e.g. physical groups from an imported mesh."""
+        return dict(self._groups)
+
+    @cached_property
+    def design(self) -> _Bool:
+        """Elements whose density is optimized."""
+        out = ~(self._solid | self._void)
+        out.flags.writeable = False
+        return out
+
+    @cached_property
+    def active_elements(self) -> _Bool:
+        """Elements that are part of the system (non-void)."""
+        out = ~self._void
+        out.flags.writeable = False
+        return out
+
+    @cached_property
+    def element_volumes(self) -> _F64:
+        """Element volumes (areas in 2D), shape ``(n_elements,)``.
+
+        ``tet10`` volumes use the corner tetrahedron; exact for straight
+        edges.
+        """
+        out = _signed_measure(self._nodes, self._elements, self._kind, self._dim)
+        out.flags.writeable = False
+        return out
+
+    @cached_property
+    def element_centroids(self) -> _F64:
+        """Element centroids, shape ``(n_elements, dim)``.
+
+        ``tet10`` centroids use the corner tetrahedron; exact for straight
+        edges.
+        """
+        n_corners = _ELEMENT_KIND_CORNERS[self._kind]
+        out = np.asarray(self._nodes[self._elements[:, :n_corners]].mean(axis=1), dtype=np.float64)
+        out.flags.writeable = False
+        return out
+
+    @cached_property
+    def active_nodes(self) -> _Bool:
+        """Nodes referenced by at least one non-void element."""
+        active = np.zeros(self.n_nodes, dtype=bool)
+        active[self._elements[self.active_elements].ravel()] = True
+        active.flags.writeable = False
+        return active
+
+    @cached_property
+    def node_index_map(self) -> _I64:
+        """Old node id to condensed id; ``-1`` for inactive nodes."""
+        out = np.full(self.n_nodes, -1, dtype=np.int64)
+        out[self.active_nodes] = np.arange(int(self.active_nodes.sum()), dtype=np.int64)
+        out.flags.writeable = False
+        return out
+
+    def boundary_faces(self) -> BoundaryFaces:
+        """Faces of non-void elements not shared with another non-void element.
+
+        Computed once and cached; face ids (indices into the arrays) are
+        stable, ordered by each face's sorted corner-node-id tuple. Corner
+        nodes are ordered so the normal points away from the owner; tet10
+        faces additionally carry the 3 midside nodes of their corner edges,
+        appended after the 3 corners.
+        """
+        if self._boundary_faces is None:
+            self._boundary_faces = self._compute_boundary_faces()
+        return self._boundary_faces
+
+    def _compute_boundary_faces(self) -> BoundaryFaces:
+        patterns = _FACE_CORNER_PATTERNS[self._kind]
+        active_ids = np.nonzero(self.active_elements)[0]
+        occurrences: dict[tuple[int, ...], list[tuple[int, tuple[int, ...]]]] = {}
+        for e in active_ids.tolist():
+            conn = self._elements[e]
+            for pattern in patterns:
+                corners = tuple(int(conn[i]) for i in pattern)
+                key = tuple(sorted(corners))
+                occurrences.setdefault(key, []).append((e, pattern))
+
+        boundary = sorted(
+            ((key, occ[0][0], occ[0][1]) for key, occ in occurrences.items() if len(occ) == 1),
+            key=lambda item: item[0],
+        )
+
+        n_corner = len(patterns[0])
+        n_face_nodes = n_corner + (3 if self._kind == "tet10" else 0)
+        n_faces = len(boundary)
+        owner = np.empty(n_faces, dtype=np.int64)
+        normal = np.empty((n_faces, self._dim), dtype=np.float64)
+        area = np.empty(n_faces, dtype=np.float64)
+        centroid = np.empty((n_faces, self._dim), dtype=np.float64)
+        face_nodes = np.empty((n_faces, n_face_nodes), dtype=np.int64)
+
+        for row, (_key, e, pattern) in enumerate(boundary):
+            conn = self._elements[e]
+            local = list(pattern)
+            global_ids = [int(conn[i]) for i in local]
+            coords = self._nodes[global_ids]
+            face_centroid = coords.mean(axis=0)
+            unit, face_area = self._face_normal_area(coords)
+            if np.dot(unit, face_centroid - self.element_centroids[e]) < 0.0:
+                local.reverse()
+                global_ids.reverse()
+                coords = self._nodes[global_ids]
+                face_centroid = coords.mean(axis=0)
+                unit, face_area = self._face_normal_area(coords)
+
+            owner[row] = e
+            normal[row] = unit
+            area[row] = face_area
+            centroid[row] = face_centroid
+            if self._kind == "tet10":
+                pairs = zip(local, local[1:] + local[:1], strict=True)
+                midsides = [int(conn[_TET10_MIDSIDE_COLUMN[frozenset(p)]]) for p in pairs]
+                face_nodes[row] = global_ids + midsides
+            else:
+                face_nodes[row] = global_ids
+
+        for arr in (owner, normal, area, centroid, face_nodes):
+            arr.flags.writeable = False
+        return BoundaryFaces(
+            owner=owner, normal=normal, area=area, centroid=centroid, nodes=face_nodes
+        )
+
+    @staticmethod
+    def _face_normal_area(coords: _F64) -> tuple[_F64, float]:
+        """Unnormalized-then-unit normal and area of a straight facet.
+
+        2D: an edge (2 points); the raw normal is a 90-degree rotation of
+        the edge vector, so its length equals the edge length. 3D: a
+        triangle (3 points); the raw normal is the corner cross product,
+        with area half its length.
+        """
+        if coords.shape[0] == 2:
+            edge = coords[1] - coords[0]
+            raw = np.array([edge[1], -edge[0]], dtype=np.float64)
+            face_area = float(np.linalg.norm(edge))
+        else:
+            raw = np.cross(coords[1] - coords[0], coords[2] - coords[0])
+            face_area = 0.5 * float(np.linalg.norm(raw))
+        unit = raw / float(np.linalg.norm(raw))
+        return unit, face_area
