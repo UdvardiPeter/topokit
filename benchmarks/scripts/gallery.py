@@ -38,6 +38,7 @@ from topokit import (
     LinearElasticity,
     LinkSpec,
     Material,
+    Mesh,
     NearPoint,
     PlaneSlab,
     PointLoad,
@@ -198,7 +199,7 @@ class RampConductivity(LinkSpec):
     scale_min: float = 1e-3
     is_terminal: ClassVar[bool] = True
 
-    def build(self, mesh: StructuredGrid) -> _BoundRamp:
+    def build(self, mesh: Mesh) -> _BoundRamp:
         return _BoundRamp(self.q, self.scale_min)
 
 
