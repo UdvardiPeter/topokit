@@ -291,7 +291,14 @@ class StructuredGrid:
         return cls(shape=shape, spacing=spacing, origin=origin)
 
     def _validated_mask(self, mask: npt.ArrayLike | None, name: str) -> _Bool:
-        return _validate_mask(mask, self.n_elements, name)
+        if mask is None:
+            out = np.zeros(self.n_elements, dtype=bool)
+        else:
+            out = np.array(mask, dtype=bool, copy=True)
+            if out.shape != (self.n_elements,):
+                raise MeshError(f"{name} mask shape {out.shape} != ({self.n_elements},)")
+        out.flags.writeable = False
+        return out
 
     @property
     def n_elements(self) -> int:
@@ -634,6 +641,24 @@ class UnstructuredMesh:
             f"UnstructuredMesh(kind={self._kind!r}, {self.n_elements} elements, "
             f"{self.n_nodes} nodes{suffix})"
         )
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Pickle only the defining state; caches rebuild on demand."""
+        return {
+            "_kind": self._kind,
+            "_dim": self._dim,
+            "_nodes": self._nodes,
+            "_elements": self._elements,
+            "_solid": self._solid,
+            "_void": self._void,
+            "_groups": self._groups,
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        for arr in (self._nodes, self._elements, self._solid, self._void, *self._groups.values()):
+            arr.flags.writeable = False  # numpy does not preserve the flag
+        self._boundary_faces = None
 
     def _validated_groups(self, groups: dict[str, npt.ArrayLike] | None) -> dict[str, _I64]:
         if groups is None:
