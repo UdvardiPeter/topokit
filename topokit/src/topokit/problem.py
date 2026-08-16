@@ -40,7 +40,7 @@ from topokit.events import (
 )
 from topokit.fem import PhysicsModel
 from topokit.fields import DesignField
-from topokit.mesh import StructuredGrid
+from topokit.mesh import Mesh, StructuredGrid
 from topokit.optimizers import OC, Optimizer
 from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside
 from topokit.responses import Compliance, Constraint, Response, Solution
@@ -107,7 +107,7 @@ def _staged_spec(spec: Chain, *, p: float, beta: float) -> Chain:
     return Chain(links)
 
 
-def _staged_chain(spec: Chain, mesh: StructuredGrid, *, p: float, beta: float) -> BoundChain:
+def _staged_chain(spec: Chain, mesh: Mesh, *, p: float, beta: float) -> BoundChain:
     """Rebind ``spec`` with the stage's SIMP ``p``/Heaviside ``beta`` (Option A)."""
     return _staged_spec(spec, p=p, beta=beta).bind(mesh)
 
@@ -524,9 +524,16 @@ class Study:
         """Canonical view of the problem's structure for the checkpoint fingerprint."""
         p = self.problem
         assert self.schedule is not None
+        mesh = p.model.mesh
+        # Grid geometry identifies a structured mesh precisely; a generic mesh
+        # has no such compact descriptor, so element/node counts stand in.
+        mesh_parts: tuple[object, ...] = (
+            (tuple(mesh.shape), tuple(float(s) for s in mesh.spacing))
+            if isinstance(mesh, StructuredGrid)
+            else (mesh.dim, mesh.n_elements, mesh.n_nodes)
+        )
         return (
-            tuple(p.model.mesh.shape),
-            tuple(float(s) for s in p.model.mesh.spacing),
+            mesh_parts,
             int(p.model.n_dof),
             repr(p.chain.spec),
             p.objective.name,

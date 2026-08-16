@@ -38,7 +38,7 @@ import numpy.typing as npt
 
 from topokit.backend import SparseMatrix, active_backend, get_kernel, register_kernel
 from topokit.fields import FieldSpec, NodeField
-from topokit.mesh import StructuredGrid
+from topokit.mesh import Mesh, StructuredGrid
 from topokit.selection import Selector
 
 _F64 = npt.NDArray[np.float64]
@@ -146,7 +146,7 @@ class PhysicsModel(Protocol):
     expected_field: ClassVar[FieldSpec]
 
     @property
-    def mesh(self) -> StructuredGrid:
+    def mesh(self) -> Mesh:
         """The discretization the model is built on."""
         ...
 

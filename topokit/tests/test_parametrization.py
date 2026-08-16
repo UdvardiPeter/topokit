@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from topokit.fields import FieldSpec
-from topokit.mesh import BoundaryFaces, StructuredGrid
+from topokit.mesh import BoundaryFaces, Mesh, StructuredGrid
 from topokit.parametrization import (
     SIMP,
     Chain,
@@ -462,11 +462,11 @@ def test_custom_link_authors_against_public_names() -> None:
 
     @dataclass(frozen=True)
     class Half(LinkSpec):
-        def build(self, mesh: StructuredGrid) -> BoundLink:
+        def build(self, mesh: Mesh) -> BoundLink:
             return _BoundHalf()
 
         @classmethod
-        def fd_example(cls, mesh: StructuredGrid) -> "Half":
+        def fd_example(cls, mesh: Mesh) -> "Half":
             return cls()
 
     class _BoundHalf(BoundLink):
@@ -491,11 +491,11 @@ def test_terminal_link_without_out_field_fails_at_bind() -> None:
     class BadTerminal(LinkSpec):
         is_terminal: ClassVar[bool] = True
 
-        def build(self, mesh: StructuredGrid) -> BoundLink:
+        def build(self, mesh: Mesh) -> BoundLink:
             return _BoundBad()
 
         @classmethod
-        def fd_example(cls, mesh: StructuredGrid) -> "BadTerminal":
+        def fd_example(cls, mesh: Mesh) -> "BadTerminal":
             return cls()
 
     class _BoundBad(BoundLink):  # forgets to set out_field
@@ -519,11 +519,11 @@ def test_bind_rejects_reduced_link_without_n_reduced() -> None:
     class BadReduced(LinkSpec):
         is_reduced_input: ClassVar[bool] = True
 
-        def build(self, mesh: StructuredGrid) -> BoundLink:
+        def build(self, mesh: Mesh) -> BoundLink:
             return _BoundBadReduced()
 
         @classmethod
-        def fd_example(cls, mesh: StructuredGrid) -> "BadReduced":
+        def fd_example(cls, mesh: Mesh) -> "BadReduced":
             return cls()
 
     class _BoundBadReduced(BoundLink):  # forgets to set n_reduced
@@ -645,3 +645,33 @@ def test_matrix_sensitivity_filter_matches_grid_version() -> None:
     assert np.isfinite(out).all()
     g2 = _BoundSensitivityFilter(g, 1.5).pullback(x, grad)
     assert np.isfinite(g2).all()  # both paths defined on the same inputs
+
+
+def test_filters_dispatch_to_matrix_on_non_grid_meshes() -> None:
+    from topokit.parametrization import _BoundMatrixFilter, _BoundMatrixSensitivityFilter
+
+    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
+    stub = _stub_from_grid(g)
+    assert isinstance(DensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
+    assert isinstance(RadialDensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
+    assert isinstance(SensitivityFilter(radius=1.5).build(stub), _BoundMatrixSensitivityFilter)
+
+
+def test_symmetry_map_rejects_non_grid_meshes() -> None:
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
+    with pytest.raises(ParametrizationError, match="structured grid"):
+        SymmetryMap(planes=("x",)).build(_stub_from_grid(g))
+
+
+def test_chain_binds_on_a_non_grid_mesh_and_fd_verifies() -> None:
+    from topokit.testing import assert_gradient_matches
+
+    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
+    bound = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(_stub_from_grid(g))
+    rng = np.random.default_rng(19)
+    x = rng.uniform(0.2, 0.8, bound.n_vars)
+    w = rng.standard_normal(g.n_elements)
+
+    assert_gradient_matches(
+        lambda xx: float(bound.apply(xx) @ w), lambda xx: bound.pullback(xx, w), x
+    )
