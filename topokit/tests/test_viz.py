@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from topokit.fields import DesignField
-from topokit.mesh import StructuredGrid
+from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.viz import _backend
 
 
@@ -215,6 +215,111 @@ def test_require_matplotlib_missing_gives_actionable_hint(monkeypatch: pytest.Mo
     monkeypatch.setitem(sys.modules, "matplotlib", None)  # make `import matplotlib` raise
     with pytest.raises(ImportError, match=r"\[viz\]"):
         _backend.require_matplotlib()
+
+
+def _tri_square() -> UnstructuredMesh:
+    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+    elements = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+    return UnstructuredMesh(nodes, elements, "tri3")
+
+
+def _tet_pair() -> UnstructuredMesh:
+    nodes = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 1.0, 1.0]]
+    )
+    elements = np.array([[0, 1, 2, 3], [1, 2, 3, 4]], dtype=np.int64)
+    return UnstructuredMesh(nodes, elements, "tet4")
+
+
+def _single_tet10() -> UnstructuredMesh:
+    corners = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    midsides = np.array(
+        [
+            (corners[0] + corners[1]) / 2.0,
+            (corners[1] + corners[2]) / 2.0,
+            (corners[2] + corners[0]) / 2.0,
+            (corners[0] + corners[3]) / 2.0,
+            (corners[1] + corners[3]) / 2.0,
+            (corners[2] + corners[3]) / 2.0,
+        ]
+    )
+    nodes = np.vstack([corners, midsides])
+    elements = np.array([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]], dtype=np.int64)
+    return UnstructuredMesh(nodes, elements, "tet10")
+
+
+def test_view_renders_2d_unstructured_as_tripcolor_figure() -> None:
+    from topokit.viz import view
+
+    mesh = _tri_square()
+    field = DesignField(np.array([0.2, 0.9]), mesh, name="density")
+    fig = view(field)
+    assert type(fig).__name__ == "Figure"
+    assert fig.axes  # something was drawn
+
+
+def test_view_renders_3d_unstructured_as_thresholded_plotter() -> None:
+    import pyvista as pv
+
+    from topokit.viz import view
+
+    mesh = _tet_pair()
+    field = DesignField(np.array([0.1, 0.9]), mesh, name="density")
+    plotter = view(field, iso=0.5, off_screen=True)
+    assert isinstance(plotter, pv.Plotter)
+    assert plotter.mesh is not None or plotter.renderer.actors  # a mesh was added
+    plotter.close()
+
+
+def test_unstructured_grid_uses_vtk_cell_types() -> None:
+    from topokit.viz._density import _unstructured_grid
+
+    grid2 = _unstructured_grid(np.array([0.5, 0.5]), _tri_square())
+    assert set(grid2.celltypes) == {5}
+    grid3 = _unstructured_grid(np.array([0.5, 0.5]), _tet_pair())
+    assert set(grid3.celltypes) == {10}
+    assert np.allclose(grid3.cell_data["rho"], [0.5, 0.5])
+
+
+def test_unstructured_grid_uses_vtk_cell_types_tet10() -> None:
+    from topokit.viz._density import _unstructured_grid
+
+    grid = _unstructured_grid(np.array([0.5]), _single_tet10())
+    assert set(grid.celltypes) == {24}
+
+
+def test_view_slices_rejects_unstructured() -> None:
+    from topokit.viz import VizError, view_slices
+
+    field = DesignField(np.array([0.5, 0.5]), _tet_pair(), name="density")
+    with pytest.raises(VizError, match="structured grids only"):
+        view_slices(field)
+
+
+def test_liveview_attach_rejects_unstructured_study() -> None:
+    from topokit.fem import Material, PointLoad, UnstructuredElasticity
+    from topokit.parametrization import SIMP, DensityFilter
+    from topokit.problem import Problem, Study
+    from topokit.responses import Compliance, Volume
+    from topokit.selection import NearPoint, PlaneSlab
+    from topokit.viz import LiveView, VizError
+
+    mesh = _tri_square()
+    model = UnstructuredElasticity(
+        mesh,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0)), "all")],
+        loads=[PointLoad(NearPoint((1.0, 0.5)), force=(0.0, -1.0))],
+    )
+    problem = Problem(
+        model,
+        DensityFilter(radius=0.6) | SIMP(p=3.0),
+        objective=Compliance(),
+        constraints=[Volume() <= 0.5],
+    )
+    study = Study(problem)
+    with pytest.raises(VizError, match="structured grids only"):
+        LiveView.attach(study)
 
 
 def test_view_3d_offscreen_screenshot_renders() -> None:
