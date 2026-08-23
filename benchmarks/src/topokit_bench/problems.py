@@ -9,10 +9,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
-from topokit.fem import LinearElasticity, Material, PointLoad
+from topokit.fem import LinearElasticity, Material, PointLoad, UnstructuredElasticity
 from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, Optimizer
-from topokit.parametrization import SIMP, RadialDensityFilter
+from topokit.parametrization import SIMP, DensityFilter, RadialDensityFilter
 from topokit.problem import Problem
 from topokit.responses import Compliance, Volume
 from topokit.selection import Box, NearPoint, PlaneSlab
@@ -191,6 +191,83 @@ def cantilever_3d(
     )
 
 
+def cantilever_tri(
+    nelx: int,
+    nely: int,
+    *,
+    volfrac: float = 0.4,
+    penal: float = 3.0,
+    rmin: float = 2.4,
+    optimizer: Optimizer,
+) -> Problem:
+    """Cantilever on a tri3 mesh: same geometry/BCs as `cantilever`, split into triangles."""
+    mesh = _tri_mesh(nelx, nely, (float(nelx), float(nely)))
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    mid_right = NearPoint((float(nelx), nely / 2.0))
+    model = UnstructuredElasticity(
+        mesh,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(mid_right, (0.0, -1.0))],
+    )
+    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    return Problem(
+        model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
+    )
+
+
+def cantilever_tet4(
+    nelx: int,
+    nely: int,
+    nelz: int,
+    *,
+    volfrac: float = 0.3,
+    penal: float = 3.0,
+    rmin: float = 1.5,
+    optimizer: Optimizer,
+) -> Problem:
+    """3D cantilever on a tet4 mesh: same geometry/BCs as `cantilever_3d`, Kuhn-split."""
+    mesh = _tet_mesh(nelx, nely, nelz, (float(nelx), float(nely), float(nelz)))
+    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    tip = NearPoint((float(nelx), nely / 2.0, nelz / 2.0))
+    model = UnstructuredElasticity(
+        mesh,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(tip, (0.0, -1.0, 0.0))],
+    )
+    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    return Problem(
+        model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
+    )
+
+
+def cantilever_tet10(
+    nelx: int,
+    nely: int,
+    nelz: int,
+    *,
+    volfrac: float = 0.3,
+    penal: float = 3.0,
+    rmin: float = 1.5,
+    optimizer: Optimizer,
+) -> Problem:
+    """3D cantilever on a tet10 mesh: same geometry/BCs as `cantilever_3d`, Kuhn-split."""
+    mesh = _tet10_mesh(nelx, nely, nelz, (float(nelx), float(nely), float(nelz)))
+    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    tip = NearPoint((float(nelx), nely / 2.0, nelz / 2.0))
+    model = UnstructuredElasticity(
+        mesh,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "all")],
+        loads=[PointLoad(tip, (0.0, -1.0, 0.0))],
+    )
+    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    return Problem(
+        model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
+    )
+
+
 def michell(
     nelx: int,
     nely: int,
@@ -223,13 +300,17 @@ def michell(
 
 # The benchmark matrix, the single source of truth shared by the regression
 # suite and the reference-regeneration script.
-BUILDERS: dict[str, Builder] = {"mbb": mbb, "cantilever": cantilever}
+BUILDERS: dict[str, Builder] = {
+    "mbb": mbb,
+    "cantilever": cantilever,
+    "cantilever_tri": cantilever_tri,
+}
 CASES: list[tuple[str, int, int, str]] = [
     (name, nelx, nely, opt)
-    for name in BUILDERS
+    for name in ("mbb", "cantilever")
     for nelx, nely in ((60, 20), (150, 50))
     for opt in ("oc", "mma")
-]
+] + [("cantilever_tri", 60, 20, opt) for opt in ("oc", "mma")]
 
 
 def make_optimizer(name: str) -> Optimizer:
@@ -254,4 +335,12 @@ FULL_CASES: list[FullCase] = [
         "cantilever_3d_24x12x12", cantilever_3d, {"nelx": 24, "nely": 12, "nelz": 12}, ("oc",)
     ),
     FullCase("michell_90x30", michell, {"nelx": 90, "nely": 30}, ("oc", "mma")),
+    FullCase(
+        "cantilever_tet4_16x8x8", cantilever_tet4, {"nelx": 16, "nely": 8, "nelz": 8}, ("oc",)
+    ),
+    # 10x5x5, not 12x6x6: measured 12x6x6 at 2.27x the hex cantilever_3d_24x12x12
+    # case's wall time, over the ~2x nightly budget; 10x5x5 measured at 0.72x.
+    FullCase(
+        "cantilever_tet10_10x5x5", cantilever_tet10, {"nelx": 10, "nely": 5, "nelz": 5}, ("oc",)
+    ),
 ]
