@@ -7,8 +7,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import numpy as np
+import numpy.typing as npt
 from topokit.fem import LinearElasticity, Material, PointLoad
-from topokit.mesh import StructuredGrid
+from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, Optimizer
 from topokit.parametrization import SIMP, RadialDensityFilter
 from topokit.problem import Problem
@@ -20,6 +22,94 @@ Builder = Callable[..., Problem]
 
 def _grid(nelx: int, nely: int) -> StructuredGrid:
     return StructuredGrid.box(size=(float(nelx), float(nely)), shape=(nelx, nely))
+
+
+def _tri_mesh(nelx: int, nely: int, size: tuple[float, float]) -> UnstructuredMesh:
+    """Quad-split triangulation on an ``(nelx+1) x (nely+1)`` x-fastest lattice.
+
+    Each quad is split into two tri3s along the same diagonal (the tutorial's
+    ``[0,1,2],[0,2,3]`` pattern).
+    """
+    sx, sy = size
+    nx1 = nelx + 1
+    xx, yy = np.meshgrid(np.linspace(0.0, sx, nx1), np.linspace(0.0, sy, nely + 1), indexing="ij")
+    nodes = np.column_stack([xx.ravel(order="F"), yy.ravel(order="F")])
+
+    ii, jj = np.meshgrid(np.arange(nelx), np.arange(nely), indexing="ij")
+    corner = ii.ravel(order="F") + nx1 * jj.ravel(order="F")
+    quads = np.stack([corner, corner + 1, corner + 1 + nx1, corner + nx1], axis=1)
+    elements = np.concatenate([quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]], axis=0)
+    return UnstructuredMesh(nodes, elements.astype(np.int64), "tri3")
+
+
+# The six Kuhn (Freudenthal) tets a cube splits into: each is one monotone
+# corner-to-corner path from (0,0,0) to (1,1,1), given as (dx,dy,dz) corner
+# offsets, ordered so the signed volume is positive (derived once, verified
+# by `UnstructuredMesh`'s construction validation).
+_KUHN_TETS: tuple[tuple[tuple[int, int, int], ...], ...] = (
+    ((0, 0, 0), (1, 0, 0), (1, 1, 0), (1, 1, 1)),
+    ((0, 0, 0), (1, 0, 1), (1, 0, 0), (1, 1, 1)),
+    ((0, 0, 0), (1, 1, 0), (0, 1, 0), (1, 1, 1)),
+    ((0, 0, 0), (0, 1, 0), (0, 1, 1), (1, 1, 1)),
+    ((0, 0, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1)),
+    ((0, 0, 0), (0, 1, 1), (0, 0, 1), (1, 1, 1)),
+)
+
+# tet4 local edge order VTK_QUADRATIC_TETRA pins its midside columns to
+# (`topokit.mesh`'s module docstring): (0,1),(1,2),(2,0),(0,3),(1,3),(2,3).
+_TET_LOCAL_EDGES: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3))
+
+
+def _tet_mesh(
+    nelx: int, nely: int, nelz: int, size: tuple[float, float, float]
+) -> UnstructuredMesh:
+    """6-tet Kuhn split of an x-fastest lattice over the box.
+
+    Each of the ``nelx*nely*nelz`` cubes splits into 6 tet4s along the fixed
+    diagonal (0,0,0)-(1,1,1); every tet's vertex order is pinned so the
+    signed volume comes out positive.
+    """
+    sx, sy, sz = size
+    nx1, ny1 = nelx + 1, nely + 1
+    xx, yy, zz = np.meshgrid(
+        np.linspace(0.0, sx, nx1),
+        np.linspace(0.0, sy, ny1),
+        np.linspace(0.0, sz, nelz + 1),
+        indexing="ij",
+    )
+    nodes = np.column_stack([xx.ravel(order="F"), yy.ravel(order="F"), zz.ravel(order="F")])
+
+    ii, jj, kk = np.meshgrid(np.arange(nelx), np.arange(nely), np.arange(nelz), indexing="ij")
+    base = ii.ravel(order="F") + nx1 * jj.ravel(order="F") + nx1 * ny1 * kk.ravel(order="F")
+    tets = [
+        np.stack([base + dx + nx1 * dy + nx1 * ny1 * dz for dx, dy, dz in path], axis=1)
+        for path in _KUHN_TETS
+    ]
+    elements = np.concatenate(tets, axis=0)
+    return UnstructuredMesh(nodes, elements.astype(np.int64), "tet4")
+
+
+def _tet10_mesh(
+    nelx: int, nely: int, nelz: int, size: tuple[float, float, float]
+) -> UnstructuredMesh:
+    """`_tet_mesh` upgraded to tet10: one midpoint node per unique tet4 edge.
+
+    Connectivity is VTK_QUADRATIC_TETRA order: 4 corners then the midsides of
+    edges (0,1),(1,2),(2,0),(0,3),(1,3),(2,3).
+    """
+    tet4 = _tet_mesh(nelx, nely, nelz, size)
+    corners = tet4.nodes
+    elements = tet4.element_nodes
+
+    local_edges: npt.NDArray[np.int64] = np.array(_TET_LOCAL_EDGES, dtype=np.int64)
+    pairs = np.sort(elements[:, local_edges], axis=2)  # (n_elements, 6, 2), canonical per edge
+    unique_edges, inverse = np.unique(pairs.reshape(-1, 2), axis=0, return_inverse=True)
+    midsides = inverse.reshape(elements.shape[0], 6) + corners.shape[0]
+
+    midpoints = (corners[unique_edges[:, 0]] + corners[unique_edges[:, 1]]) / 2.0
+    nodes = np.concatenate([corners, midpoints], axis=0)
+    tet10_elements = np.concatenate([elements, midsides.astype(np.int64)], axis=1)
+    return UnstructuredMesh(nodes, tet10_elements, "tet10")
 
 
 def mbb(
