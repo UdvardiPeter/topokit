@@ -16,8 +16,14 @@ from topokit.events import (
     StudyFinished,
     StudyStarted,
 )
-from topokit.fem import LinearElasticity, Material, PointLoad, SurfaceTraction
-from topokit.fem._unstructured import UnstructuredElasticity
+from topokit.fem import (
+    BodyForce,
+    LinearElasticity,
+    Material,
+    PointLoad,
+    SurfaceTraction,
+    UnstructuredElasticity,
+)
 from topokit.fields import FieldSpec
 from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, Optimizer
@@ -373,16 +379,16 @@ def _unstructured_problem(mesh: UnstructuredMesh, optimizer: Optimizer | None = 
     )
 
 
-def test_config_parts_non_grid_carries_a_centroid_digest_and_resume_sees_moved_nodes(
+def test_config_parts_non_grid_carries_a_node_digest_and_resume_sees_moved_nodes(
     tmp_path: Path,
 ) -> None:
     # (dim, n_elements, n_nodes) alone is blind to a node moving in place (same
-    # counts, different geometry); the centroid digest closes that gap. This is
+    # counts, different geometry); the node digest closes that gap. This is
     # the non-grid branch's first exercise -- unreachable before UnstructuredMesh.
     mesh = _tri3_mesh((1.0, 1.0))
     study = Study(_unstructured_problem(mesh))
     parts = study._config_parts()
-    expected_digest = hashlib.sha256(mesh.element_centroids.tobytes()).hexdigest()
+    expected_digest = hashlib.sha256(mesh.nodes.tobytes()).hexdigest()
     assert parts[0] == (mesh.dim, mesh.n_elements, mesh.n_nodes, expected_digest)
 
     # round trip: resuming against the identical mesh continues the run
@@ -403,10 +409,74 @@ def test_config_parts_non_grid_carries_a_centroid_digest_and_resume_sees_moved_n
     np.testing.assert_array_equal(out.x, full.x)
 
     # a mesh with one node moved keeps the same dim/n_elements/n_nodes but must
-    # still be rejected: only the centroid digest can see the move
+    # still be rejected: only the node digest can see the move
     moved = _unstructured_problem(_tri3_mesh((1.0, 1.2)))
     with pytest.raises(ProblemError, match="different problem"):
         Study.resume(moved, str(path))
+
+
+def _tet10_single(mid_shift: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> UnstructuredMesh:
+    """Single right-angle tet10; ``mid_shift`` perturbs midside node 5 (mid(1,2)) only."""
+    nodes = np.array(
+        [
+            [0.0, 0.0, 0.0],  # 0
+            [1.0, 0.0, 0.0],  # 1
+            [0.0, 1.0, 0.0],  # 2
+            [0.0, 0.0, 1.0],  # 3
+            [0.5, 0.0, 0.0],  # 4 mid(0,1)
+            [0.5, 0.5, 0.0],  # 5 mid(1,2)
+            [0.0, 0.5, 0.0],  # 6 mid(2,0)
+            [0.0, 0.0, 0.5],  # 7 mid(0,3)
+            [0.5, 0.0, 0.5],  # 8 mid(1,3)
+            [0.0, 0.5, 0.5],  # 9 mid(2,3)
+        ]
+    )
+    nodes[5] = nodes[5] + np.array(mid_shift)
+    elements = np.array([list(range(10))])
+    return UnstructuredMesh(nodes, elements, "tet10")
+
+
+def _unstructured_tet10_problem(
+    mesh: UnstructuredMesh, optimizer: Optimizer | None = None
+) -> Problem:
+    # a 3-2-1 kinematic fixture on the 3 in-plane corners removes all 6 rigid
+    # modes of the single element without relying on a face selector.
+    model = UnstructuredElasticity(
+        mesh,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[
+            (NearPoint((0.0, 0.0, 0.0)), "all"),
+            (NearPoint((1.0, 0.0, 0.0)), ("y", "z")),
+            (NearPoint((0.0, 1.0, 0.0)), "z"),
+        ],
+        loads=[BodyForce((0.0, 0.0, -1.0))],
+    )
+    return Problem(
+        model,
+        DensityFilter(radius=1.5) | SIMP(p=3.0),
+        objective=Compliance(),
+        constraints=[Volume() <= 0.4],
+        optimizer=optimizer or OC(move=0.2),
+    )
+
+
+def test_config_parts_node_digest_catches_moved_tet10_midside_node(tmp_path: Path) -> None:
+    # element_centroids is corner-only (see UnstructuredMesh.element_centroids),
+    # so a moved MIDSIDE node is invisible to a centroid-based fingerprint;
+    # the node digest (hashing mesh.nodes directly) must still catch it.
+    baseline = _tet10_single()
+    moved_mid = _tet10_single(mid_shift=(0.01, 0.0, 0.0))
+    np.testing.assert_array_equal(baseline.element_centroids, moved_mid.element_centroids)
+
+    path = tmp_path / "run_tet10.topo"
+    Study(
+        _unstructured_tet10_problem(baseline),
+        schedule=Schedule.single(p=3.0, max_iter=4, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=4,
+    ).run()
+    with pytest.raises(ProblemError, match="different problem"):
+        Study.resume(_unstructured_tet10_problem(moved_mid), str(path))
 
 
 def test_result_fields_and_history() -> None:

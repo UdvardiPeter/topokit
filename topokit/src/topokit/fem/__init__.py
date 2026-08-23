@@ -367,20 +367,32 @@ def _rigid_body_modes(mesh: Mesh, free_index: _I64, dim: int) -> _F64:
 FaceWeightRow = Callable[[int], _F64]
 """``face_nodes_count -> weights``; per-node share of a face's traction*area."""
 
+BodyWeightRow = Callable[[int], _F64]
+"""``element_nodes_count -> weights``; per-node share of a body force's vector*volume."""
+
 
 def _equal_split_weight_row(n: int) -> _F64:
-    """Equal-split face weights: ``1/n`` per node (the grid model's behavior)."""
+    """Equal-split weights: ``1/n`` per node (the grid model's behavior)."""
     return np.full(n, 1.0) / n
 
 
 def _apply_load(
-    mesh: Mesh, f: _F64, load: Load, cn: _I64, dim: int, face_weight_row: FaceWeightRow
+    mesh: Mesh,
+    f: _F64,
+    load: Load,
+    cn: _I64,
+    dim: int,
+    face_weight_row: FaceWeightRow,
+    body_weight_row: BodyWeightRow,
 ) -> None:
     """Accumulate ``load``'s contribution into the full condensed-DOF vector ``f``.
 
     Mesh-generic; ``face_weight_row`` gives the per-node share of a face's
     ``traction * area`` for ``SurfaceTraction`` (equal split for the grid,
-    shape-function-consistent weights for simplex elements).
+    shape-function-consistent weights for simplex elements). ``body_weight_row``
+    is the analogous per-node share of a ``BodyForce``'s ``vector * volume``
+    (equal split for the grid and constant-strain simplices; tet10's
+    consistent weights are negative at vertices, positive at midsides).
     """
     if isinstance(load, PointLoad):
         if len(load.force) != dim:
@@ -419,12 +431,14 @@ def _apply_load(
         raise FemError(f"body force dim {len(load.vector)} != mesh dim {dim}")
     conn = mesh.element_nodes[mesh.active_elements]
     nen = conn.shape[1]
-    per_node = (
-        np.asarray(load.vector)[None, :] * mesh.element_volumes[mesh.active_elements][:, None] / nen
-    )
+    weights = body_weight_row(nen)  # (nen,), per-node fraction of vector*volume
+    vec_vol = (
+        np.asarray(load.vector)[None, :] * mesh.element_volumes[mesh.active_elements][:, None]
+    )  # (n_ae, dim)
+    per_node = weights[None, :, None] * vec_vol[:, None, :]  # (n_ae, nen, dim)
     cnids = cn[conn]
     for comp in range(dim):
-        np.add.at(f, (cnids * dim + comp).ravel(), np.repeat(per_node[:, comp], nen))
+        np.add.at(f, (cnids * dim + comp).ravel(), per_node[:, :, comp].ravel())
 
 
 def _build_loads(
@@ -435,6 +449,7 @@ def _build_loads(
     n_cdof: int,
     free: npt.NDArray[np.bool_],
     face_weight_row: FaceWeightRow,
+    body_weight_row: BodyWeightRow,
 ) -> _F64:
     """Free-DOF load matrix, shape ``(n_dof, n_cases)``; mesh-generic.
 
@@ -458,7 +473,7 @@ def _build_loads(
     out = np.zeros((n_cdof, len(cases)))
     for j, case in enumerate(cases):
         for load in case:
-            _apply_load(mesh, out[:, j], load, cn, dim, face_weight_row)
+            _apply_load(mesh, out[:, j], load, cn, dim, face_weight_row, body_weight_row)
     return out[free, :]
 
 
@@ -541,7 +556,9 @@ class LinearElasticity:
         if dim == 3 and mode != "plane_stress":
             raise FemError("mode is a 2D setting; remove it for 3D meshes")
         if mesh.element_kind not in ("quad4", "hex8"):
-            raise FemError(f"unsupported element kind {mesh.element_kind!r}")
+            raise FemError(
+                f"unsupported element kind {mesh.element_kind!r}; supported: ['hex8', 'quad4']"
+            )
 
         self._d = _d_matrix(material, dim, mode)
         self._ke = _element_stiffness(self._d, mesh.spacing)
@@ -571,7 +588,9 @@ class LinearElasticity:
         )
         self._nnz = int(self._indices.size)
 
-        self._loads = _build_loads(mesh, loads, cn, dim, n_cdof, free, _equal_split_weight_row)
+        self._loads = _build_loads(
+            mesh, loads, cn, dim, n_cdof, free, _equal_split_weight_row, _equal_split_weight_row
+        )
         self._loads.flags.writeable = False
 
     @property
@@ -679,3 +698,10 @@ class LinearElasticity:
             sel = fidx >= 0
             full[active[sel], comp] = arr[fidx[sel]]
         return NodeField(full, self.mesh, name=name)
+
+
+# Deferred to the end of the module: UnstructuredElasticity's own import of
+# topokit.fem needs everything above already defined on this module.
+from topokit.fem._unstructured import (  # noqa: E402
+    UnstructuredElasticity as UnstructuredElasticity,
+)

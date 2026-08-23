@@ -81,7 +81,9 @@ class UnstructuredElasticity:
             raise FemError("mode is a 2D setting; remove it for 3D meshes")
         kind = mesh.element_kind
         if kind not in _elements.NDOF:
-            raise FemError(f"unsupported element kind {kind!r}")
+            raise FemError(
+                f"unsupported element kind {kind!r}; supported: {sorted(_elements.NDOF)}"
+            )
 
         self._d = _d_matrix(material, dim, mode)
         conn = mesh.element_nodes[mesh.active_elements]
@@ -113,7 +115,10 @@ class UnstructuredElasticity:
         self._nnz = int(self._indices.size)
 
         face_w = _elements.face_weights(kind)
-        self._loads = _build_loads(mesh, loads, cn, dim, n_cdof, free, lambda _n: face_w)
+        body_w = _elements.body_weights(kind)
+        self._loads = _build_loads(
+            mesh, loads, cn, dim, n_cdof, free, lambda _n: face_w, lambda _n: body_w
+        )
         self._loads.flags.writeable = False
 
     @property

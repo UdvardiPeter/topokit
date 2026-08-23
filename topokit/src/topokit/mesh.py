@@ -674,7 +674,8 @@ class UnstructuredMesh:
     ) -> None:
         if element_kind not in _ELEMENT_KIND_COLUMNS:
             raise MeshError(
-                f"unknown element kind {element_kind!r}; supported: {sorted(_ELEMENT_KIND_COLUMNS)}"
+                f"unsupported element kind {element_kind!r}; "
+                f"supported: {sorted(_ELEMENT_KIND_COLUMNS)}"
             )
         self._kind = element_kind
 

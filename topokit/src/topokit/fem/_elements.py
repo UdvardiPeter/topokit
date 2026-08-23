@@ -45,6 +45,21 @@ _FACE_WEIGHTS: dict[str, tuple[float, ...]] = {
     "tet10": (0.0, 0.0, 0.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
 }
 
+# Consistent nodal weights for a uniform body force over an element (shape-
+# function volume-integral of N_i, as a fraction of V); multiply by
+# vector * volume. tri3/tet4 are constant-strain, so equal split (1/nen) is
+# exact. tet10's quadratic shape functions integrate, via the barycentric
+# moment formula int L1^a L2^b L3^c L4^d dV = 6V a!b!c!d!/(a+b+c+d+3)!:
+#   vertex N_i = L_i(2L_i-1): 2*int(L_i^2) - int(L_i) = 2*(V/10) - V/4 = -V/20
+#   midside N_ij = 4 L_i L_j: 4*int(L_i L_j) = 4*(V/20) = V/5
+# -- vertex weights are negative, the well-known quadratic-tet result; they
+# still sum to V (4*(-1/20) + 6*(1/5) = 1).
+_BODY_WEIGHTS: dict[str, tuple[float, ...]] = {
+    "tri3": (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
+    "tet4": (0.25, 0.25, 0.25, 0.25),
+    "tet10": (-1.0 / 20.0,) * 4 + (1.0 / 5.0,) * 6,
+}
+
 # Reference-tet4 shape-function gradients d N_i/d(r, s, t), node order
 # matching N1 = 1-r-s-t, N2 = r, N3 = s, N4 = t.
 _TET4_DN_REF = np.array([[-1.0, -1.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
@@ -78,7 +93,27 @@ def face_weights(kind: str) -> _F64:
     try:
         weights = _FACE_WEIGHTS[kind]
     except KeyError:
-        raise FemError(f"unknown element kind {kind!r}") from None
+        raise FemError(
+            f"unsupported element kind {kind!r}; supported: {sorted(_FACE_WEIGHTS)}"
+        ) from None
+    return np.array(weights, dtype=np.float64)
+
+
+def body_weights(kind: str) -> _F64:
+    """Consistent nodal weights for a uniform body force over an element.
+
+    Multiply by ``vector * volume`` to distribute a uniform body force to an
+    element's nodes exactly (consistent shape-function volume integration).
+    Sums to 1 for every kind; tet10's vertex weights are negative (-1/20 of
+    volume each, offset by 1/5 at each of the 6 midsides) -- see the module
+    comment above ``_BODY_WEIGHTS`` for the barycentric-moment derivation.
+    """
+    try:
+        weights = _BODY_WEIGHTS[kind]
+    except KeyError:
+        raise FemError(
+            f"unsupported element kind {kind!r}; supported: {sorted(_BODY_WEIGHTS)}"
+        ) from None
     return np.array(weights, dtype=np.float64)
 
 
@@ -204,10 +239,19 @@ def stiffness_stack(kind: str, d: _F64, nodes: _F64, elements: _I64) -> _F64:
         for r, s, t in _TET10_GAUSS_RST:
             dn_ref = _tet10_dn_ref(r, s, t)
             grad, det_j = _tet10_grad_and_detj(nodes, elements, dn_ref)
+            # A non-positive Jacobian at any Gauss point means the element is
+            # inverted or degenerate there; mirrors the mesh constructor's
+            # no-silent-reorientation philosophy (raise, don't np.abs() over
+            # the problem) so a bad tet10 fails loud, naming its element id.
+            bad = np.nonzero(det_j <= 0.0)[0]
+            if bad.size:
+                raise FemError(
+                    f"non-positive det(J) at a Gauss point for tet10 element ids {bad.tolist()}"
+                )
             b = _b_stack(grad, dim=3)
-            ke += _TET10_GAUSS_WEIGHT * np.abs(det_j)[:, None, None] * _apply_d(b, d)
+            ke += _TET10_GAUSS_WEIGHT * det_j[:, None, None] * _apply_d(b, d)
         return ke
-    raise FemError(f"unknown element kind {kind!r}")
+    raise FemError(f"unsupported element kind {kind!r}; supported: {sorted(NDOF)}")
 
 
 def centroid_b_stack(kind: str, nodes: _F64, elements: _I64) -> _F64:
@@ -227,4 +271,4 @@ def centroid_b_stack(kind: str, nodes: _F64, elements: _I64) -> _F64:
         dn_ref = _tet10_dn_ref(0.25, 0.25, 0.25)
         grad, _ = _tet10_grad_and_detj(nodes, elements, dn_ref)
         return _b_stack(grad, dim=3)
-    raise FemError(f"unknown element kind {kind!r}")
+    raise FemError(f"unsupported element kind {kind!r}; supported: {sorted(NDOF)}")

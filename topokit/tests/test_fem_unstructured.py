@@ -21,14 +21,15 @@ import numpy as np
 import pytest
 
 from topokit.fem import (
+    BodyForce,
     FemError,
     LinearElasticity,
     Material,
     PhysicsModel,
     PointLoad,
     SurfaceTraction,
+    UnstructuredElasticity,
 )
-from topokit.fem._unstructured import UnstructuredElasticity
 from topokit.fields import FieldSpec
 from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC
@@ -469,6 +470,61 @@ def test_tet10_constant_traction_zero_corner_and_area_third_midside() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Body-force consistency (tet10)
+# ---------------------------------------------------------------------------
+
+
+def test_tet10_body_force_consistent_weights_on_free_dofs() -> None:
+    """A uniform body force on a single tet10 matches the derived -V/20 / V/5 split.
+
+    Consistent (shape-function-integral) nodal weights for a uniform body
+    force are -V/20 per vertex (negative -- the well-known quadratic-tet
+    result) and V/5 per midside; see ``fem._elements.body_weights``'s module
+    comment for the barycentric-moment derivation. Only node 0 is pinned
+    (satisfying the "at least one support" requirement without touching any
+    other node), so every other node's load-vector entry is a free DOF and
+    is checked directly against the closed form -- no assembly/solve
+    involved, this is the load vector before any system reduction beyond
+    that one pin.
+    """
+    nodes = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.5, 0.0, 0.0],  # mid(0,1)
+            [0.5, 0.5, 0.0],  # mid(1,2)
+            [0.0, 0.5, 0.0],  # mid(2,0)
+            [0.0, 0.0, 0.5],  # mid(0,3)
+            [0.5, 0.0, 0.5],  # mid(1,3)
+            [0.0, 0.5, 0.5],  # mid(2,3)
+        ]
+    )
+    elements = np.array([list(range(10))])
+    mesh = UnstructuredMesh(nodes, elements, "tet10")
+    volume = 1.0 / 6.0
+    b = np.array([2.0, -3.0, 5.0])
+    m = UnstructuredElasticity(
+        mesh,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(NearPoint((0.0, 0.0, 0.0)), "all")],
+        loads=[BodyForce((float(b[0]), float(b[1]), float(b[2])))],
+    )
+    f = m.loads()[:, 0]
+    for vertex in (1, 2, 3):  # node 0 is pinned; the other 3 vertices are free
+        for comp in range(3):
+            i = m.dof_index(vertex, comp)
+            assert i >= 0
+            assert f[i] == pytest.approx(-volume / 20.0 * b[comp])
+    for midside in range(4, 10):
+        for comp in range(3):
+            i = m.dof_index(midside, comp)
+            assert i >= 0
+            assert f[i] == pytest.approx(volume / 5.0 * b[comp])
+
+
+# ---------------------------------------------------------------------------
 # Construction errors: same message family as the grid model
 # ---------------------------------------------------------------------------
 
@@ -549,9 +605,11 @@ def test_satisfies_physics_protocol() -> None:
 
 
 def test_unstructured_elasticity_registered_as_builtin() -> None:
+    from topokit.fem import UnstructuredElasticity as PublicUnstructuredElasticity
     from topokit.registry import registry
 
     assert registry.get("physics", "unstructured_elasticity") is UnstructuredElasticity
+    assert PublicUnstructuredElasticity is UnstructuredElasticity
 
 
 # ---------------------------------------------------------------------------

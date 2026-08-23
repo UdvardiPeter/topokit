@@ -19,6 +19,7 @@ from topokit.fem import FemError, Material, _d_matrix
 from topokit.fem._elements import (
     NDOF,
     NODES_PER_FACE,
+    body_weights,
     centroid_b_stack,
     face_weights,
     stiffness_stack,
@@ -238,6 +239,23 @@ def test_tet10_quadratic_patch_energy() -> None:
     assert energy == pytest.approx(analytic, abs=1e-9)
 
 
+def test_tet10_inverted_element_raises() -> None:
+    """A deliberately inverted tet10 raises instead of silently np.abs()-ing.
+
+    Swapping vertices 0 and 1 (and the two midsides that touch them, so
+    every midside stays at its true edge midpoint) is still a valid
+    straight-sided tet10 -- just an odd permutation of the corner order, so
+    its (constant, for a straight-sided element) Jacobian is negative at
+    every Gauss point. The mesh constructor already rejects a non-positive
+    signed volume outright, so this calls ``stiffness_stack`` directly to
+    exercise the per-Gauss-point check inside it.
+    """
+    nodes, _elements, dim = _GEOMETRY["tet10"]
+    inverted = np.array([[1, 0, 2, 3, 4, 6, 5, 8, 7, 9]])
+    with pytest.raises(FemError, match="element ids"):
+        stiffness_stack("tet10", _d(dim), nodes, inverted)
+
+
 @pytest.mark.parametrize("kind", _KINDS)
 def test_face_weights_sum_to_one(kind: str) -> None:
     w = face_weights(kind)
@@ -254,6 +272,32 @@ def test_tet10_face_corner_weights_are_zero() -> None:
 def test_face_weights_unknown_kind_raises() -> None:
     with pytest.raises(FemError, match="kind"):
         face_weights("quad4")
+
+
+@pytest.mark.parametrize("kind", _KINDS)
+def test_body_weights_sum_to_one(kind: str) -> None:
+    _nodes, elements, _dim = _GEOMETRY[kind]
+    w = body_weights(kind)
+    assert w.shape == (elements.shape[1],)
+    assert w.sum() == pytest.approx(1.0)
+
+
+def test_tet10_body_weights_negative_at_vertices_positive_at_midsides() -> None:
+    """Derivation: barycentric moment formula int L1^a..L4^d dV = 6V a!b!c!d!/(a+b+c+d+3)!.
+
+    Vertex ``N_i = L_i(2L_i-1)``: ``2*int(L_i^2) - int(L_i) = 2*(V/10) - V/4
+    = -V/20``. Midside ``N_ij = 4 L_i L_j``: ``4*int(L_i L_j) = 4*(V/20) =
+    V/5``. Cross-checked against ``test_body_weights_sum_to_one``: 4*(-1/20)
+    + 6*(1/5) = 1.
+    """
+    w = body_weights("tet10")
+    np.testing.assert_allclose(w[:4], [-1.0 / 20.0] * 4)
+    np.testing.assert_allclose(w[4:], [1.0 / 5.0] * 6)
+
+
+def test_body_weights_unknown_kind_raises() -> None:
+    with pytest.raises(FemError, match="kind"):
+        body_weights("quad4")
 
 
 def test_stiffness_stack_unknown_kind_raises() -> None:

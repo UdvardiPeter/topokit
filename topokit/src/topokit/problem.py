@@ -113,7 +113,7 @@ def _staged_chain(spec: Chain, mesh: Mesh, *, p: float, beta: float) -> BoundCha
     return _staged_spec(spec, p=p, beta=beta).bind(mesh)
 
 
-_NODES_PER_ELEMENT = {"quad4": 4, "hex8": 8}
+_NODES_PER_ELEMENT = {"quad4": 4, "hex8": 8, "tri3": 3, "tet4": 4, "tet10": 10}
 
 
 def _estimate_stiffness_bytes(n_dof: int, nnz: int) -> int:
@@ -532,9 +532,12 @@ class Study:
         # break resume against every checkpoint written for an unmodified
         # structured-grid problem before this code existed. The non-grid
         # branch is new territory with no prior checkpoints and is free to
-        # pick its own shape: it adds a centroid digest so a mesh with the
-        # same dim/n_elements/n_nodes but moved node coordinates (which
-        # dim/n_elements/n_nodes alone cannot see) is still rejected on resume.
+        # pick its own shape: it adds a node-coordinate digest so a mesh with
+        # the same dim/n_elements/n_nodes but moved nodes (which
+        # dim/n_elements/n_nodes alone cannot see) is still rejected on
+        # resume. Hashing the raw node array (not per-element centroids)
+        # also catches a moved tet10 midside node: centroids are corner-only
+        # and a midside move leaves every centroid unchanged.
         mesh_parts: tuple[object, ...] = (
             (tuple(mesh.shape), tuple(float(s) for s in mesh.spacing))
             if isinstance(mesh, StructuredGrid)
@@ -543,7 +546,7 @@ class Study:
                     mesh.dim,
                     mesh.n_elements,
                     mesh.n_nodes,
-                    hashlib.sha256(mesh.element_centroids.tobytes()).hexdigest(),
+                    hashlib.sha256(mesh.nodes.tobytes()).hexdigest(),
                 ),
             )
         )

@@ -15,8 +15,8 @@ from topokit.fem import (
     Material,
     PointLoad,
     SurfaceTraction,
+    UnstructuredElasticity,
 )
-from topokit.fem._unstructured import UnstructuredElasticity
 from topokit.fields import FieldSpec
 from topokit.mesh import Mesh, StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, StepResult
@@ -111,7 +111,7 @@ registry.register(
     "physics",
     "unstructured_elasticity",
     UnstructuredElasticity,
-    source="topokit.fem._unstructured",
+    source="topokit.fem",
 )
 registry.register("solvers", "direct", Direct, source="topokit.solvers")
 registry.register("solvers", "amg_cg", AmgCG, source="topokit.solvers")
