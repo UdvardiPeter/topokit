@@ -865,6 +865,19 @@ wheels = [
 ]
 
 [[package]]
+name = "meshio"
+version = "5.3.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/20/1e/caa4f15c020de3e3486b4133ca689236bd3863a3d6dd0f58e97ce86a296a/meshio-5.3.5.tar.gz", hash = "sha256:f21f01abd9f29ba06ea119304b3d39e610421cfe93b9dd23362834919f87586d", size = 490922, upload-time = "2024-01-31T15:09:41.731Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/89/5f/39cbadc320cd78f4834b0a9f7a2fa3c980dca942bf193f315837eacb8870/meshio-5.3.5-py3-none-any.whl", hash = "sha256:0736c6e34ecc768f62f2cde5d8233a3529512a9399b25c68ea2ca0d5900cdc10", size = 166162, upload-time = "2024-01-31T15:09:36.691Z" },
+]
+
+[[package]]
 name = "mkdocs"
 version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1658,6 +1671,7 @@ dependencies = [
 all = [
     { name = "jax" },
     { name = "matplotlib" },
+    { name = "meshio" },
     { name = "pyamg" },
     { name = "pyvista" },
 ]
@@ -1666,6 +1680,9 @@ fast = [
 ]
 jax = [
     { name = "jax" },
+]
+mesh = [
+    { name = "meshio" },
 ]
 viz = [
     { name = "matplotlib" },
@@ -1677,6 +1694,7 @@ dev = [
     { name = "import-linter" },
     { name = "jax" },
     { name = "matplotlib" },
+    { name = "meshio" },
     { name = "mypy" },
     { name = "pyamg" },
     { name = "pytest" },
@@ -1690,19 +1708,21 @@ dev = [
 requires-dist = [
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.10" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.8" },
+    { name = "meshio", marker = "extra == 'mesh'", specifier = ">=5.3" },
     { name = "numpy", specifier = ">=2.2" },
     { name = "pyamg", marker = "extra == 'fast'", specifier = ">=5" },
     { name = "pyvista", marker = "extra == 'viz'", specifier = ">=0.44" },
     { name = "scipy", specifier = ">=1.15" },
-    { name = "topokit", extras = ["fast", "viz", "jax"], marker = "extra == 'all'" },
+    { name = "topokit", extras = ["fast", "viz", "jax", "mesh"], marker = "extra == 'all'" },
 ]
-provides-extras = ["fast", "viz", "jax", "all"]
+provides-extras = ["fast", "viz", "jax", "mesh", "all"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "import-linter", specifier = ">=2.1" },
     { name = "jax", specifier = ">=0.10" },
     { name = "matplotlib", specifier = ">=3.8" },
+    { name = "meshio", specifier = ">=5.3" },
     { name = "mypy", specifier = ">=1.14,<2" },
     { name = "pyamg", specifier = ">=5" },
     { name = "pytest", specifier = ">=8.3" },

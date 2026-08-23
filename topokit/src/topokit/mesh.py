@@ -26,9 +26,11 @@ the physics modules, not here.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Protocol, runtime_checkable
+from types import ModuleType
+from typing import Any, Protocol, cast, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
@@ -554,6 +556,84 @@ def _signed_measure(nodes: _F64, elements: _I64, kind: str, dim: int) -> _F64:
     return np.asarray(out, dtype=np.float64)
 
 
+# meshio cell-type name -> topokit element kind
+_MESHIO_CELL_KIND: dict[str, str] = {"triangle": "tri3", "tetra": "tet4", "tetra10": "tet10"}
+
+MESH_HINT = "reading external mesh files needs the [mesh] extra: pip install topokit[mesh]"
+
+
+def _require_meshio() -> ModuleType:
+    """Import meshio or raise with the ``[mesh]`` install hint."""
+    try:
+        import meshio
+    except ImportError as exc:
+        raise ImportError(MESH_HINT) from exc
+    return cast(ModuleType, meshio)
+
+
+def _accepted_meshio_block(mesh: Any) -> tuple[int, Any]:
+    """Find the mesh's sole top-dimension cell block, if it is a supported kind.
+
+    Lower-dimension blocks (e.g. boundary triangles alongside a tet volume)
+    are ignored. More than one block at the top dimension, or a top-dimension
+    block whose type is not in `_MESHIO_CELL_KIND`, raises.
+    """
+    top_dim = max((block.dim for block in mesh.cells), default=-1)
+    candidates = [(i, block) for i, block in enumerate(mesh.cells) if block.dim == top_dim]
+    if len(candidates) != 1 or candidates[0][1].type not in _MESHIO_CELL_KIND:
+        kinds = sorted({block.type for _i, block in candidates})
+        raise MeshError(
+            f"expected exactly one supported cell block ({sorted(_MESHIO_CELL_KIND)}) "
+            f"at the mesh's top dimension ({top_dim}D); found: {kinds}"
+        )
+    return candidates[0]
+
+
+def _meshio_groups(mesh: Any, block_index: int, cell_type: str) -> dict[str, npt.ArrayLike]:
+    """Named element-id groups for ``cell_type``, from cell sets or gmsh tags.
+
+    Prefers `mesh.cell_sets_dict` entries restricted to ``cell_type``
+    (element ids already refer to positions within the single accepted
+    block). Falls back to gmsh's ``cell_data["gmsh:physical"]`` tags for the
+    accepted block, resolved to names through `mesh.field_data`
+    (``{name: [tag, dim]}``); tags with no matching name fall back to their
+    numeric string.
+    """
+    groups: dict[str, npt.ArrayLike] = {}
+    for name, by_type in mesh.cell_sets_dict.items():
+        ids = by_type.get(cell_type)
+        if ids is not None and ids.size:
+            groups[name] = np.asarray(ids, dtype=np.int64)
+    if groups:
+        return groups
+
+    tags_by_block = mesh.cell_data.get("gmsh:physical")
+    if not tags_by_block:
+        return groups
+    tags = np.asarray(tags_by_block[block_index])
+    tag_to_name = {int(tag): name for name, (tag, _dim) in mesh.field_data.items()}
+    for tag in np.unique(tags).tolist():
+        name = tag_to_name.get(int(tag), str(int(tag)))
+        groups[name] = np.nonzero(tags == tag)[0].astype(np.int64)
+    return groups
+
+
+def _meshio_nodes(points: npt.ArrayLike, kind: str) -> _F64:
+    """Node coordinates trimmed to ``kind``'s dimension.
+
+    File formats (gmsh, vtk, ...) store points with 3 columns even for
+    planar meshes, with an all-zero 3rd column; drop it so a ``tri3`` mesh
+    matches the constructor's 2D requirement. Genuinely 3D data (nonzero
+    extra columns) is passed through unchanged and left to the
+    constructor's own dimension check to reject.
+    """
+    arr = np.asarray(points, dtype=np.float64)
+    expected_dim = _ELEMENT_KIND_DIM[kind]
+    if arr.ndim == 2 and arr.shape[1] > expected_dim and np.allclose(arr[:, expected_dim:], 0.0):
+        return np.ascontiguousarray(arr[:, :expected_dim])
+    return arr
+
+
 class UnstructuredMesh:
     """Simplex mesh (tri3, tet4, or tet10) with element masks.
 
@@ -718,6 +798,71 @@ class UnstructuredMesh:
     def groups(self) -> dict[str, _I64]:
         """Named element-id sets, e.g. physical groups from an imported mesh."""
         return dict(self._groups)
+
+    @classmethod
+    def from_meshio(
+        cls,
+        mesh: Any,
+        *,
+        solid: npt.ArrayLike | str | None = None,
+        void: npt.ArrayLike | str | None = None,
+    ) -> UnstructuredMesh:
+        """Build an `UnstructuredMesh` from an in-memory ``meshio.Mesh``.
+
+        Exactly one cell block at the mesh's top topological dimension must
+        be a supported kind (``"triangle"`` -> tri3, ``"tetra"`` -> tet4,
+        ``"tetra10"`` -> tet10); a mesh whose top-dimension blocks are mixed
+        or unsupported raises `MeshError` listing the kinds found.
+        Lower-dimension blocks (e.g. boundary triangles alongside a tet
+        volume) are ignored.
+
+        Named element groups are resolved from ``mesh.cell_sets_dict``
+        restricted to the accepted block when present, else from gmsh
+        physical tags, and become the constructor's ``groups=``.
+        ``solid``/``void`` accept either a group name, resolved against
+        those groups (an unknown name raises `MeshError` listing the
+        available ones), or an explicit element mask/id array passed
+        through unchanged.
+        """
+        block_index, block = _accepted_meshio_block(mesh)
+        kind = _MESHIO_CELL_KIND[block.type]
+        nodes = _meshio_nodes(mesh.points, kind)
+        groups = _meshio_groups(mesh, block_index, block.type)
+
+        def _resolve(value: npt.ArrayLike | str | None) -> npt.ArrayLike | None:
+            if not isinstance(value, str):
+                return value
+            if value not in groups:
+                raise MeshError(f"unknown group {value!r}; available: {sorted(groups)}")
+            mask = np.zeros(block.data.shape[0], dtype=bool)
+            mask[np.asarray(groups[value], dtype=np.int64)] = True
+            return mask
+
+        return cls(
+            nodes,
+            block.data,
+            kind,
+            solid=_resolve(solid),
+            void=_resolve(void),
+            groups=groups,
+        )
+
+    @classmethod
+    def from_file(
+        cls,
+        path: str | os.PathLike[str],
+        *,
+        solid: npt.ArrayLike | str | None = None,
+        void: npt.ArrayLike | str | None = None,
+    ) -> UnstructuredMesh:
+        """Read a mesh file through meshio and build an `UnstructuredMesh`.
+
+        Equivalent to ``UnstructuredMesh.from_meshio(meshio.read(path), ...)``.
+        Raises `ImportError` naming the ``[mesh]`` extra if meshio is not
+        installed.
+        """
+        meshio = _require_meshio()
+        return cls.from_meshio(meshio.read(path), solid=solid, void=void)
 
     @cached_property
     def design(self) -> _Bool:
