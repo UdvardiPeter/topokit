@@ -571,33 +571,47 @@ def _require_meshio() -> ModuleType:
     return cast(ModuleType, meshio)
 
 
-def _accepted_meshio_block(mesh: Any) -> tuple[int, Any]:
-    """Find the mesh's sole top-dimension cell block, if it is a supported kind.
+def _accepted_meshio_blocks(mesh: Any) -> tuple[list[int], str]:
+    """Find the mesh's top-dimension cell blocks, if they share a supported kind.
 
+    gmsh (the default meshio write format) emits one `CellBlock` per
+    geometrical entity, so a two-physical-volume tet mesh is ordinarily two
+    ``tetra`` blocks, not one; same-kind blocks at the top dimension are all
+    accepted together (returned in `mesh.cells` order) rather than rejected.
     Lower-dimension blocks (e.g. boundary triangles alongside a tet volume)
-    are ignored. More than one block at the top dimension, or a top-dimension
-    block whose type is not in `_MESHIO_CELL_KIND`, raises.
+    are ignored. Genuinely mixed kinds at the top dimension, or a top
+    dimension whose kind is not in `_MESHIO_CELL_KIND`, raise `MeshError`
+    listing the kinds found.
     """
     top_dim = max((block.dim for block in mesh.cells), default=-1)
-    candidates = [(i, block) for i, block in enumerate(mesh.cells) if block.dim == top_dim]
-    if len(candidates) != 1 or candidates[0][1].type not in _MESHIO_CELL_KIND:
-        kinds = sorted({block.type for _i, block in candidates})
+    indices = [i for i, block in enumerate(mesh.cells) if block.dim == top_dim]
+    kinds = sorted({mesh.cells[i].type for i in indices})
+    if len(kinds) != 1 or kinds[0] not in _MESHIO_CELL_KIND:
         raise MeshError(
-            f"expected exactly one supported cell block ({sorted(_MESHIO_CELL_KIND)}) "
+            f"expected a single supported cell kind ({sorted(_MESHIO_CELL_KIND)}) "
             f"at the mesh's top dimension ({top_dim}D); found: {kinds}"
         )
-    return candidates[0]
+    return indices, kinds[0]
 
 
-def _meshio_groups(mesh: Any, block_index: int, cell_type: str) -> dict[str, npt.ArrayLike]:
+def _meshio_groups(
+    mesh: Any, block_indices: list[int], cell_type: str, dim: int
+) -> dict[str, npt.ArrayLike]:
     """Named element-id groups for ``cell_type``, from cell sets or gmsh tags.
 
-    Prefers `mesh.cell_sets_dict` entries restricted to ``cell_type``
-    (element ids already refer to positions within the single accepted
-    block). Falls back to gmsh's ``cell_data["gmsh:physical"]`` tags for the
-    accepted block, resolved to names through `mesh.field_data`
-    (``{name: [tag, dim]}``); tags with no matching name fall back to their
-    numeric string.
+    Prefers `mesh.cell_sets_dict` entries restricted to ``cell_type``: its
+    indices are already global positions across all same-kind blocks
+    concatenated in `mesh.cells` order (meshio computes them that way), which
+    is exactly how the accepted blocks' elements are concatenated, so no
+    offset math is needed here.
+
+    Falls back to gmsh's ``cell_data["gmsh:physical"]`` tags, concatenated
+    across ``block_indices`` in the same order, resolved to names through
+    `mesh.field_data` (``{name: [tag, dim]}``) restricted to entries whose
+    dim matches ``dim`` -- physical groups of different dimensions (e.g. a
+    surface and a volume) can reuse the same tag number, so an unscoped
+    lookup can resolve to the wrong name. Tags with no matching name fall
+    back to their numeric string.
     """
     groups: dict[str, npt.ArrayLike] = {}
     for name, by_type in mesh.cell_sets_dict.items():
@@ -610,8 +624,10 @@ def _meshio_groups(mesh: Any, block_index: int, cell_type: str) -> dict[str, npt
     tags_by_block = mesh.cell_data.get("gmsh:physical")
     if not tags_by_block:
         return groups
-    tags = np.asarray(tags_by_block[block_index])
-    tag_to_name = {int(tag): name for name, (tag, _dim) in mesh.field_data.items()}
+    tags = np.concatenate([np.asarray(tags_by_block[i]) for i in block_indices])
+    tag_to_name = {
+        int(tag): name for name, (tag, tag_dim) in mesh.field_data.items() if int(tag_dim) == dim
+    }
     for tag in np.unique(tags).tolist():
         name = tag_to_name.get(int(tag), str(int(tag)))
         groups[name] = np.nonzero(tags == tag)[0].astype(np.int64)
@@ -809,41 +825,56 @@ class UnstructuredMesh:
     ) -> UnstructuredMesh:
         """Build an `UnstructuredMesh` from an in-memory ``meshio.Mesh``.
 
-        Exactly one cell block at the mesh's top topological dimension must
-        be a supported kind (``"triangle"`` -> tri3, ``"tetra"`` -> tet4,
-        ``"tetra10"`` -> tet10); a mesh whose top-dimension blocks are mixed
-        or unsupported raises `MeshError` listing the kinds found.
+        All cell blocks at the mesh's top topological dimension must share a
+        single supported kind (``"triangle"`` -> tri3, ``"tetra"`` -> tet4,
+        ``"tetra10"`` -> tet10); gmsh emits one block per geometrical entity,
+        so multiple same-kind blocks (e.g. a design region plus a fixture,
+        both ``tetra``) are concatenated in `mesh.cells` order rather than
+        rejected. A mesh whose top-dimension blocks are genuinely mixed
+        kinds, or unsupported, raises `MeshError` listing the kinds found.
         Lower-dimension blocks (e.g. boundary triangles alongside a tet
         volume) are ignored.
 
         Named element groups are resolved from ``mesh.cell_sets_dict``
-        restricted to the accepted block when present, else from gmsh
+        restricted to the accepted kind when present, else from gmsh
         physical tags, and become the constructor's ``groups=``.
         ``solid``/``void`` accept either a group name, resolved against
         those groups (an unknown name raises `MeshError` listing the
-        available ones), or an explicit element mask/id array passed
-        through unchanged.
+        available ones), or an explicit boolean element mask passed through
+        unchanged -- an integer array carrying values other than 0/1 (e.g. a
+        group's own element-id array) raises `MeshError` rather than being
+        silently miscast to a mask.
         """
-        block_index, block = _accepted_meshio_block(mesh)
-        kind = _MESHIO_CELL_KIND[block.type]
+        block_indices, cell_type = _accepted_meshio_blocks(mesh)
+        kind = _MESHIO_CELL_KIND[cell_type]
         nodes = _meshio_nodes(mesh.points, kind)
-        groups = _meshio_groups(mesh, block_index, block.type)
+        elements = np.concatenate([np.asarray(mesh.cells[i].data) for i in block_indices], axis=0)
+        groups = _meshio_groups(mesh, block_indices, cell_type, _ELEMENT_KIND_DIM[kind])
 
-        def _resolve(value: npt.ArrayLike | str | None) -> npt.ArrayLike | None:
-            if not isinstance(value, str):
-                return value
-            if value not in groups:
-                raise MeshError(f"unknown group {value!r}; available: {sorted(groups)}")
-            mask = np.zeros(block.data.shape[0], dtype=bool)
-            mask[np.asarray(groups[value], dtype=np.int64)] = True
-            return mask
+        def _resolve(value: npt.ArrayLike | str | None, label: str) -> npt.ArrayLike | None:
+            if value is None:
+                return None
+            if isinstance(value, str):
+                if value not in groups:
+                    raise MeshError(f"unknown {label} group {value!r}; available: {sorted(groups)}")
+                mask = np.zeros(elements.shape[0], dtype=bool)
+                mask[np.asarray(groups[value], dtype=np.int64)] = True
+                return mask
+            arr = np.asarray(value)
+            if np.issubdtype(arr.dtype, np.integer) and not np.isin(arr, (0, 1)).all():
+                raise MeshError(
+                    f"{label}= looks like an element-id array, not a boolean mask "
+                    "(values other than 0/1); convert ids to a mask, e.g. via the "
+                    "groups dict, before passing them"
+                )
+            return value
 
         return cls(
             nodes,
-            block.data,
+            elements,
             kind,
-            solid=_resolve(solid),
-            void=_resolve(void),
+            solid=_resolve(solid, "solid"),
+            void=_resolve(void, "void"),
             groups=groups,
         )
 
