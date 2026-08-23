@@ -98,3 +98,6 @@ study.run()
 It draws through matplotlib in 2D and PyVista in 3D, and is a no-op on a
 machine with no display, so the same script runs unmodified on a
 headless CI box or a workstation.
+
+`view_slices` and `LiveView` are structured-grid-only for now; see
+[Unstructured meshes](unstructured.md) for what to use instead.

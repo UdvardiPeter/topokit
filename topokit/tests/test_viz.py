@@ -110,6 +110,24 @@ def test_view_3d_returns_isosurface_with_points() -> None:
     assert any(getattr(m, "n_points", 0) > 0 for m in plotter.meshes)
 
 
+def test_view_3d_raises_when_field_stays_below_iso() -> None:
+    from topokit.viz import VizError, view
+
+    grid = StructuredGrid.box(size=(4.0, 4.0, 4.0), shape=(4, 4, 4))
+    design = DesignField(np.zeros(grid.n_elements), grid, name="density")
+    with pytest.raises(VizError, match="does not cross"):
+        view(design, iso=0.5, off_screen=True)
+
+
+def test_view_3d_raises_when_field_stays_above_iso() -> None:
+    from topokit.viz import VizError, view
+
+    grid = StructuredGrid.box(size=(4.0, 4.0, 4.0), shape=(4, 4, 4))
+    design = DesignField(np.ones(grid.n_elements), grid, name="density")
+    with pytest.raises(VizError, match="does not cross"):
+        view(design, iso=0.5, off_screen=True)
+
+
 def test_view_slices_3d_returns_n_subplots() -> None:
     from matplotlib.figure import Figure
 
@@ -273,6 +291,15 @@ def test_view_renders_3d_unstructured_as_thresholded_plotter() -> None:
     plotter.close()
     # Pin the at-or-above threshold semantics: only the 0.9 cell survives.
     assert _unstructured_grid(values, mesh).threshold(0.5, scalars="rho").n_cells == 1
+
+
+def test_view_3d_unstructured_raises_when_nothing_meets_iso() -> None:
+    from topokit.viz import VizError, view
+
+    mesh = _tet_pair()
+    field = DesignField(np.array([0.1, 0.2]), mesh, name="density")
+    with pytest.raises(VizError, match="lower iso"):
+        view(field, iso=0.5, off_screen=True)
 
 
 def test_unstructured_grid_uses_vtk_cell_types() -> None:

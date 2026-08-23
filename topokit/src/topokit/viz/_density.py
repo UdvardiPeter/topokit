@@ -95,9 +95,20 @@ def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Pl
     pv = require_pyvista()
     plotter: Plotter = pv.Plotter(off_screen=off_screen or not has_display())
     if isinstance(mesh, StructuredGrid):
-        plotter.add_mesh(_isosurface(values, mesh, iso), color="tan")
+        surface = _isosurface(values, mesh, iso)
+        if surface.n_points == 0:
+            raise VizError(
+                f"the iso-surface at iso={iso} is empty; the density field does not cross it "
+                f"(field range [{values.min():.3g}, {values.max():.3g}]) — adjust iso"
+            )
+        plotter.add_mesh(surface, color="tan")
     else:
         solid = _unstructured_grid(values, mesh).threshold(iso, scalars="rho")
+        if solid.n_cells == 0:
+            raise VizError(
+                f"no cells at or above iso={iso}; the field maximum is "
+                f"{values.max():.3g} — lower iso"
+            )
         plotter.add_mesh(solid, color="tan")
     return plotter
 
