@@ -19,6 +19,7 @@ density through ``chain.pullback_density``).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 import warnings
@@ -531,11 +532,20 @@ class Study:
         # break resume against every checkpoint written for an unmodified
         # structured-grid problem before this code existed. The non-grid
         # branch is new territory with no prior checkpoints and is free to
-        # pick its own shape.
+        # pick its own shape: it adds a centroid digest so a mesh with the
+        # same dim/n_elements/n_nodes but moved node coordinates (which
+        # dim/n_elements/n_nodes alone cannot see) is still rejected on resume.
         mesh_parts: tuple[object, ...] = (
             (tuple(mesh.shape), tuple(float(s) for s in mesh.spacing))
             if isinstance(mesh, StructuredGrid)
-            else ((mesh.dim, mesh.n_elements, mesh.n_nodes),)
+            else (
+                (
+                    mesh.dim,
+                    mesh.n_elements,
+                    mesh.n_nodes,
+                    hashlib.sha256(mesh.element_centroids.tobytes()).hexdigest(),
+                ),
+            )
         )
         return (
             *mesh_parts,

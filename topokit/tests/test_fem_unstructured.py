@@ -15,15 +15,29 @@ Mesh fixtures are built by hand (no mesh generator dependency):
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
-from topokit.fem import FemError, Material, PhysicsModel, PointLoad, SurfaceTraction
+from topokit.fem import (
+    FemError,
+    LinearElasticity,
+    Material,
+    PhysicsModel,
+    PointLoad,
+    SurfaceTraction,
+)
 from topokit.fem._unstructured import UnstructuredElasticity
 from topokit.fields import FieldSpec
-from topokit.mesh import UnstructuredMesh
+from topokit.mesh import StructuredGrid, UnstructuredMesh
+from topokit.optimizers import MMA, OC
+from topokit.parametrization import SIMP, DensityFilter
+from topokit.problem import Problem, Schedule, Study
+from topokit.responses import Compliance, Solution, Volume
 from topokit.selection import Box, NearPoint, PlaneSlab
 from topokit.solvers import Direct
+from topokit.testing import assert_gradient_matches
 
 _TET10_MIDSIDE_PAIRS = ((0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3))
 
@@ -538,3 +552,228 @@ def test_unstructured_elasticity_registered_as_builtin() -> None:
     from topokit.registry import registry
 
     assert registry.get("physics", "unstructured_elasticity") is UnstructuredElasticity
+
+
+# ---------------------------------------------------------------------------
+# End-to-end integration: FD, convergence, tet10 vs tet4, and Study smoke runs
+# ---------------------------------------------------------------------------
+
+
+def test_compliance_gradient_fd_through_full_stack_tri3() -> None:
+    """Mirrors ``test_responses.test_compliance_gradient_fd_through_full_stack``.
+
+    ``DensityFilter`` on a non-grid mesh dispatches to its sparse-matrix path
+    (``_BoundMatrixFilter``); this is the first FD check of that path chained
+    all the way through ``UnstructuredElasticity`` and ``Direct``.
+    """
+    mesh = _tri3_grid(4, 3)
+    mat = Material(E=100.0, nu=0.3, rho=1.0)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    tip = Box((4.0, 0.0), (4.0, 3.0), tol=1e-9)
+    model = UnstructuredElasticity(
+        mesh, mat, supports=[(left, "all")], loads=[SurfaceTraction(tip, traction=(1.0, 0.0))]
+    )
+    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(mesh)
+    rng = np.random.default_rng(20260823)
+    x = rng.uniform(0.3, 0.9, size=chain.n_vars)  # random interior densities
+    comp = Compliance()
+
+    def _solution(xx: np.ndarray) -> Solution:
+        scale = chain.apply(xx)
+        rho = chain.physical_density(xx)
+        solver = Direct()
+        solver.prepare(model.assemble(scale))
+        u = np.atleast_2d(np.asarray(solver.solve(model.loads()))).reshape(model.n_dof, -1)
+        return Solution(model=model, mesh=mesh, displacements=u, interpolated=scale, density=rho)
+
+    def f(xx: np.ndarray) -> float:
+        return comp.value(_solution(xx))
+
+    def grad(xx: np.ndarray) -> np.ndarray:
+        sol = _solution(xx)
+        return np.asarray(chain.pullback(xx, comp.grad_field(sol)))
+
+    assert_gradient_matches(f, grad, x, rtol=1e-5)
+
+
+def _tri3_box(length: float, height: float, nx: int, ny: int) -> UnstructuredMesh:
+    """Like ``_tri3_grid`` but over a fixed physical size, decoupled from ``nx``/``ny``.
+
+    Lets a convergence test refine the mesh (``nx``, ``ny`` up) while keeping the
+    same domain, mirroring ``StructuredGrid.box``.
+    """
+    xs, ys = np.linspace(0.0, length, nx + 1), np.linspace(0.0, height, ny + 1)
+    grid = np.meshgrid(xs, ys, indexing="ij")
+    nodes = np.stack([g.ravel(order="F") for g in grid], axis=1)
+
+    def nid(i: int, j: int) -> int:
+        return i + (nx + 1) * j
+
+    elements = []
+    for i in range(nx):
+        for j in range(ny):
+            n0, n1, n2, n3 = nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)
+            elements.append([n0, n1, n2])
+            elements.append([n0, n2, n3])
+    return UnstructuredMesh(nodes, np.array(elements, dtype=np.int64), "tri3")
+
+
+def test_tri3_cantilever_converges_toward_timoshenko() -> None:
+    """Same reference as ``test_fem.test_cantilever_matches_timoshenko``.
+
+    tri3 (constant-strain) elements lock in bending, so convergence is slower
+    than the hex grid's; the assertion is monotonic convergence (finer mesh
+    closer to the reference), not a fixed tolerance -- the same shape as the
+    grid test.
+    """
+    e, nu, length, height, p = 1000.0, 0.3, 6.0, 1.0, 1.0
+    inertia = height**3 / 12.0
+    shear_g = e / (2.0 * (1.0 + nu))
+    kappa = 5.0 / 6.0
+    reference = p * length**3 / (3.0 * e * inertia) + p * length / (kappa * shear_g * height)
+
+    def tip_deflection(nx: int, ny: int) -> float:
+        mesh = _tri3_box(length, height, nx, ny)
+        mat = Material(E=e, nu=nu, rho=1.0)
+        left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+        tip = Box((length, 0.0), (length, height), tol=1e-9)
+        m = UnstructuredElasticity(
+            mesh, mat, supports=[(left, "all")], loads=[PointLoad(tip, (0.0, -p))]
+        )
+        u = _solve(m, _ones(mesh))
+        disp = m.displacement_field(u)
+        tip_nodes = np.isclose(mesh.nodes[:, 0], length)
+        return float(-disp.values[tip_nodes, 1].min())
+
+    coarse = tip_deflection(24, 4)
+    fine = tip_deflection(48, 8)
+    assert abs(fine - reference) < abs(coarse - reference)  # converging
+    assert abs(fine - reference) / reference < 0.1
+
+
+def _scaled_tet_mesh(
+    nx: int, ny: int, nz: int, size: tuple[float, float, float], kind: str
+) -> UnstructuredMesh:
+    """A Kuhn ``nx*ny*nz`` box (see the module docstring), rescaled to ``size``.
+
+    Decouples the mesh's element-count resolution from its physical extent,
+    so a tet4 and a tet10 mesh at different (nx, ny, nz) can still cover the
+    identical domain -- needed to compare them at equal DOF on one cantilever.
+    """
+    nodes4, elements4 = _tet4_box_arrays(nx, ny, nz)
+    nodes, elements = (nodes4, elements4) if kind == "tet4" else _tet4_to_tet10(nodes4, elements4)
+    scale = np.array([size[0] / nx, size[1] / ny, size[2] / nz])
+    return UnstructuredMesh(nodes * scale, elements, kind)
+
+
+def _solve_any(model: Any, scale: np.ndarray) -> np.ndarray:
+    """Like ``_solve``, generalized over ``LinearElasticity``/``UnstructuredElasticity``."""
+    solver = Direct()
+    solver.prepare(model.assemble(scale))
+    return np.asarray(solver.solve(model.loads()[:, 0]))
+
+
+def test_tet10_closer_than_tet4_at_equal_dof_budget() -> None:
+    """tet10 (quadratic) beats tet4 (linear) at matched DOF on one cantilever.
+
+    Both meshes cover the same 6x2x2 box (see ``_scaled_tet_mesh``): tet4 is
+    finely subdivided (13x2x2 Kuhn cubes, 312 elements, 378 DOF) and tet10 is
+    coarsely subdivided (2x2x2 cubes, 48 elements, 375 DOF) -- an equal-DOF
+    pair found by search over small Kuhn grids. The reference is a fine-grid
+    ``LinearElasticity`` (hex) solve on the same domain/BCs, not the
+    Timoshenko closed form: the tet10 cubes are stretched 3:1 along the beam
+    axis, so a beam formula would conflate discretization error with that
+    element-shape choice. Measured errors are ~5% (tet10) vs ~39% (tet4)
+    against the hex reference -- a wide, stable margin, not a close call.
+    """
+    e, nu, p = 1000.0, 0.3, 1.0
+    length, side = 6.0, 2.0
+    size = (length, side, side)
+    mat = Material(E=e, nu=nu, rho=1.0)
+    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    tip_sel = Box((length, 0.0, 0.0), (length, side, side), tol=1e-9)
+    tip_load = [PointLoad(tip_sel, (0.0, 0.0, -p))]
+
+    def tip_deflection(model: Any) -> float:
+        u = _solve_any(model, np.ones(model.mesh.n_elements))
+        disp = model.displacement_field(u)
+        tip_nodes = np.isclose(model.mesh.nodes[:, 0], length)
+        return float(-disp.values[tip_nodes, 2].min())
+
+    g = StructuredGrid.box(size=size, shape=(24, 8, 8))
+    hex_model = LinearElasticity(g, mat, supports=[(left, "all")], loads=tip_load)
+    reference = tip_deflection(hex_model)
+
+    tet4_mesh = _scaled_tet_mesh(13, 2, 2, size, "tet4")
+    tet10_mesh = _scaled_tet_mesh(2, 2, 2, size, "tet10")
+    assert tet4_mesh.n_nodes * 3 == pytest.approx(tet10_mesh.n_nodes * 3, rel=0.02)  # equal DOF
+
+    tet4_model = UnstructuredElasticity(tet4_mesh, mat, supports=[(left, "all")], loads=tip_load)
+    tet10_model = UnstructuredElasticity(tet10_mesh, mat, supports=[(left, "all")], loads=tip_load)
+    tet4_tip = tip_deflection(tet4_model)
+    tet10_tip = tip_deflection(tet10_model)
+
+    assert abs(tet10_tip - reference) < abs(tet4_tip - reference)
+
+
+def test_study_smoke_tri3_oc() -> None:
+    """Full ``Study`` smoke run on a tri3 cantilever built from arrays in-test."""
+    nx, ny = 8, 4
+    xs, ys = np.arange(nx + 1), np.arange(ny + 1)
+    grid = np.meshgrid(xs, ys, indexing="ij")
+    nodes = np.stack([g.ravel(order="F") for g in grid], axis=1).astype(float)
+
+    def nid(i: int, j: int) -> int:
+        return i + (nx + 1) * j
+
+    elements = []
+    for i in range(nx):
+        for j in range(ny):
+            n0, n1, n2, n3 = nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)
+            elements.append([n0, n1, n2])
+            elements.append([n0, n2, n3])
+    mesh = UnstructuredMesh(nodes, np.array(elements, dtype=np.int64), "tri3")
+
+    mat = Material(E=1.0, nu=0.3, rho=1.0)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    tip = Box((float(nx), 0.0), (float(nx), float(ny)), tol=1e-9)
+    model = UnstructuredElasticity(
+        mesh, mat, supports=[(left, "all")], loads=[PointLoad(tip, (0.0, -1.0))]
+    )
+    problem = Problem(
+        model,
+        DensityFilter(radius=1.5) | SIMP(p=3.0),
+        objective=Compliance(),
+        constraints=[Volume() <= 0.5],
+        optimizer=OC(),
+    )
+    result = Study(problem, schedule=Schedule.single(max_iter=25, tol=1e-3)).run()
+
+    assert result.objective < result.history["objective"][0]
+    assert abs(result.history["volume"][-1] - 0.5) < 0.01
+    assert result.converged or result.iterations == 25
+    assert (result.design.values >= 0.0).all() and (result.design.values <= 1.0).all()
+
+
+def test_study_smoke_tet4_mma() -> None:
+    """Full ``Study`` smoke run on the 2-tet-refined tet4 box, MMA, 15 iterations."""
+    mesh = _tet4_box(2, 2, 2)
+    mat = Material(E=1.0, nu=0.3, rho=1.0)
+    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    tip = Box((2.0, 0.0, 0.0), (2.0, 2.0, 2.0), tol=1e-9)
+    model = UnstructuredElasticity(
+        mesh, mat, supports=[(left, "all")], loads=[PointLoad(tip, (0.0, 0.0, -1.0))]
+    )
+    problem = Problem(
+        model,
+        DensityFilter(radius=1.5) | SIMP(p=3.0),
+        objective=Compliance(),
+        constraints=[Volume() <= 0.5],
+        optimizer=MMA(),
+    )
+    result = Study(problem, schedule=Schedule.single(max_iter=15, tol=1e-3)).run()
+
+    assert result.objective < result.history["objective"][0]
+    assert abs(result.history["volume"][-1] - 0.5) < 0.01
+    assert result.converged or result.iterations == 15
+    assert (result.design.values >= 0.0).all() and (result.design.values <= 1.0).all()

@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for the Problem/Study orchestration layer."""
 
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -15,14 +16,15 @@ from topokit.events import (
     StudyFinished,
     StudyStarted,
 )
-from topokit.fem import LinearElasticity, Material, PointLoad
+from topokit.fem import LinearElasticity, Material, PointLoad, SurfaceTraction
+from topokit.fem._unstructured import UnstructuredElasticity
 from topokit.fields import FieldSpec
-from topokit.mesh import StructuredGrid
+from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, Optimizer
 from topokit.parametrization import SIMP, DensityFilter, Heaviside, SymmetryMap
 from topokit.problem import Problem, ProblemError, Schedule, Stage, Study
 from topokit.responses import Compliance, Constraint, Volume
-from topokit.selection import Box, PlaneSlab
+from topokit.selection import Box, NearPoint, PlaneSlab
 from topokit.solvers import AmgCG, Direct, LinearSolver
 
 
@@ -345,6 +347,66 @@ def test_config_parts_keeps_grid_descriptor_flat() -> None:
     assert isinstance(mesh, StructuredGrid)
     assert parts[0] == tuple(mesh.shape)
     assert parts[1] == tuple(float(s) for s in mesh.spacing)
+
+
+def _tri3_mesh(node2: tuple[float, float]) -> UnstructuredMesh:
+    nodes = np.array([[0.0, 0.0], [1.0, 0.0], list(node2), [0.0, 1.0]])
+    elements = np.array([[0, 1, 2], [0, 2, 3]])
+    return UnstructuredMesh(nodes, elements, "tri3")
+
+
+def _unstructured_problem(mesh: UnstructuredMesh, optimizer: Optimizer | None = None) -> Problem:
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    right = Box((1.0, 0.0), (1.0, 1.2), tol=1e-9)
+    model = UnstructuredElasticity(
+        mesh,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
+        loads=[SurfaceTraction(right, traction=(1.0, 0.0))],
+    )
+    return Problem(
+        model,
+        DensityFilter(radius=1.5) | SIMP(p=3.0),
+        objective=Compliance(),
+        constraints=[Volume() <= 0.4],
+        optimizer=optimizer or OC(move=0.2),
+    )
+
+
+def test_config_parts_non_grid_carries_a_centroid_digest_and_resume_sees_moved_nodes(
+    tmp_path: Path,
+) -> None:
+    # (dim, n_elements, n_nodes) alone is blind to a node moving in place (same
+    # counts, different geometry); the centroid digest closes that gap. This is
+    # the non-grid branch's first exercise -- unreachable before UnstructuredMesh.
+    mesh = _tri3_mesh((1.0, 1.0))
+    study = Study(_unstructured_problem(mesh))
+    parts = study._config_parts()
+    expected_digest = hashlib.sha256(mesh.element_centroids.tobytes()).hexdigest()
+    assert parts[0] == (mesh.dim, mesh.n_elements, mesh.n_nodes, expected_digest)
+
+    # round trip: resuming against the identical mesh continues the run
+    full = Study(
+        _unstructured_problem(_tri3_mesh((1.0, 1.0))),
+        schedule=Schedule.single(p=3.0, max_iter=10, tol=0.0),
+    ).run()
+    path = tmp_path / "run.topo"
+    Study(
+        _unstructured_problem(_tri3_mesh((1.0, 1.0))),
+        schedule=Schedule.single(p=3.0, max_iter=4, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=4,
+    ).run()
+    resumed = Study.resume(_unstructured_problem(_tri3_mesh((1.0, 1.0))), str(path))
+    resumed.schedule = Schedule.single(p=3.0, max_iter=10, tol=0.0)
+    out = resumed.run()
+    np.testing.assert_array_equal(out.x, full.x)
+
+    # a mesh with one node moved keeps the same dim/n_elements/n_nodes but must
+    # still be rejected: only the centroid digest can see the move
+    moved = _unstructured_problem(_tri3_mesh((1.0, 1.2)))
+    with pytest.raises(ProblemError, match="different problem"):
+        Study.resume(moved, str(path))
 
 
 def test_result_fields_and_history() -> None:
