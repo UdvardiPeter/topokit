@@ -29,7 +29,7 @@ Implementation notes:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
@@ -308,6 +308,160 @@ def _parse_comps(dofs: str | Sequence[str | int], dim: int) -> tuple[int, ...]:
     return comps
 
 
+def _fixed_dofs(
+    mesh: Mesh,
+    supports: Sequence[tuple[Selector, str | Sequence[str | int]]],
+    cn: _I64,
+    dim: int,
+    n_cdof: int,
+) -> npt.NDArray[np.bool_]:
+    """Fixed-condensed-DOF mask from a support list; mesh-generic.
+
+    Shared by every physics model: resolves each support's selector to
+    active nodes, then flags the requested components in the condensed
+    (active-node-major) DOF numbering.
+    """
+    fixed = np.zeros(n_cdof, dtype=bool)
+    if not supports:
+        raise FemError("at least one support is required")
+    for selector, dofs in supports:
+        nids = selector.nodes(mesh)
+        cnids = cn[nids]
+        cnids = cnids[cnids >= 0]
+        if cnids.size == 0:
+            raise FemError(f"support selector {selector!r} selects no active nodes")
+        for comp in _parse_comps(dofs, dim):
+            fixed[cnids * dim + comp] = True
+    return fixed
+
+
+def _rigid_body_modes(mesh: Mesh, free_index: _I64, dim: int) -> _F64:
+    """Rigid-body modes on the free DOFs, shape ``(n_dof, 3 in 2D / 6 in 3D)``.
+
+    Mesh-generic: translations plus rotations about the active-node
+    centroid, restricted to the free-DOF rows given by ``free_index``
+    (``-1`` at fixed/inactive condensed DOFs). Shared by every physics
+    model's ``near_nullspace``.
+    """
+    coords = mesh.nodes[mesh.active_nodes] - mesh.nodes[mesh.active_nodes].mean(axis=0)
+    n_modes = 3 if dim == 2 else 6
+    full = np.zeros((coords.shape[0] * dim, n_modes))
+    for comp in range(dim):
+        full[comp::dim, comp] = 1.0
+    if dim == 2:
+        full[0::2, 2] = -coords[:, 1]
+        full[1::2, 2] = coords[:, 0]
+    else:
+        full[0::3, 3] = -coords[:, 1]
+        full[1::3, 3] = coords[:, 0]
+        full[1::3, 4] = -coords[:, 2]
+        full[2::3, 4] = coords[:, 1]
+        full[0::3, 5] = coords[:, 2]
+        full[2::3, 5] = -coords[:, 0]
+    # condensed DOFs are active-node-major in node-id order and free_index
+    # numbers free DOFs in that same condensed order, so this boolean mask
+    # lands each row in free-DOF order directly.
+    return full[free_index >= 0]
+
+
+FaceWeightRow = Callable[[int], _F64]
+"""``face_nodes_count -> weights``; per-node share of a face's traction*area."""
+
+
+def _equal_split_weight_row(n: int) -> _F64:
+    """Equal-split face weights: ``1/n`` per node (the grid model's behavior)."""
+    return np.full(n, 1.0) / n
+
+
+def _apply_load(
+    mesh: Mesh, f: _F64, load: Load, cn: _I64, dim: int, face_weight_row: FaceWeightRow
+) -> None:
+    """Accumulate ``load``'s contribution into the full condensed-DOF vector ``f``.
+
+    Mesh-generic; ``face_weight_row`` gives the per-node share of a face's
+    ``traction * area`` for ``SurfaceTraction`` (equal split for the grid,
+    shape-function-consistent weights for simplex elements).
+    """
+    if isinstance(load, PointLoad):
+        if len(load.force) != dim:
+            raise FemError(f"force dim {len(load.force)} != mesh dim {dim}")
+        nids = load.selector.nodes(mesh)
+        cnids = cn[nids]
+        cnids = cnids[cnids >= 0]
+        if cnids.size == 0:
+            raise FemError(f"point load selector {load.selector!r} selects no active nodes")
+        share = np.asarray(load.force) / cnids.size
+        for comp in range(dim):
+            np.add.at(f, cnids * dim + comp, share[comp])
+        return
+    if isinstance(load, SurfaceTraction):
+        fids = load.selector.faces(mesh)
+        if fids.size == 0:
+            raise FemError(f"traction selector {load.selector!r} selects no boundary faces")
+        bf = mesh.boundary_faces()
+        if load.traction is not None:
+            if len(load.traction) != dim:
+                raise FemError(f"traction dim {len(load.traction)} != mesh dim {dim}")
+            t = np.tile(np.asarray(load.traction), (fids.size, 1))
+        else:
+            assert load.pressure is not None
+            t = -load.pressure * bf.normal[fids]
+        face_nodes = bf.nodes[fids]
+        nodes_per_face = face_nodes.shape[1]
+        weights = face_weight_row(nodes_per_face)  # (n,), per-node share of area*traction
+        area_weight = bf.area[fids][:, None] * weights[None, :]  # (n_f, n) = area[f]*weight[j]
+        contrib = t[:, None, :] * area_weight[:, :, None]  # (n_f, n, dim)
+        cnids = cn[face_nodes]
+        for comp in range(dim):
+            np.add.at(f, (cnids * dim + comp).ravel(), contrib[:, :, comp].ravel())
+        return
+    if len(load.vector) != dim:
+        raise FemError(f"body force dim {len(load.vector)} != mesh dim {dim}")
+    conn = mesh.element_nodes[mesh.active_elements]
+    nen = conn.shape[1]
+    per_node = (
+        np.asarray(load.vector)[None, :] * mesh.element_volumes[mesh.active_elements][:, None] / nen
+    )
+    cnids = cn[conn]
+    for comp in range(dim):
+        np.add.at(f, (cnids * dim + comp).ravel(), np.repeat(per_node[:, comp], nen))
+
+
+def _build_loads(
+    mesh: Mesh,
+    loads: Sequence[Load] | Sequence[Sequence[Load]],
+    cn: _I64,
+    dim: int,
+    n_cdof: int,
+    free: npt.NDArray[np.bool_],
+    face_weight_row: FaceWeightRow,
+) -> _F64:
+    """Free-DOF load matrix, shape ``(n_dof, n_cases)``; mesh-generic.
+
+    ``loads`` is either one case (a flat sequence of ``Load``) or a
+    sequence of cases; both forms are accepted for every physics model.
+    """
+    if not loads:
+        raise FemError("at least one load is required")
+    flat = [isinstance(item, PointLoad | SurfaceTraction | BodyForce) for item in loads]
+    if all(flat):
+        cases: list[Sequence[Load]] = [loads]  # type: ignore[list-item]
+    elif any(flat):
+        raise FemError("loads must be either one case of Loads or a list of cases")
+    else:
+        cases = list(loads)  # type: ignore[arg-type]
+        for j, case in enumerate(cases):
+            if not case:
+                raise FemError(f"load case {j} is empty")
+            if not all(isinstance(it, PointLoad | SurfaceTraction | BodyForce) for it in case):
+                raise FemError(f"load case {j} contains non-Load entries")
+    out = np.zeros((n_cdof, len(cases)))
+    for j, case in enumerate(cases):
+        for load in case:
+            _apply_load(mesh, out[:, j], load, cn, dim, face_weight_row)
+    return out[free, :]
+
+
 def _csr_pattern_positions(
     edofs_free: _I64, n_dof: int, chunk: int = 16384
 ) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32]]:
@@ -398,17 +552,7 @@ class LinearElasticity:
         cn = mesh.node_index_map
         n_cdof = int(mesh.active_nodes.sum()) * dim
 
-        fixed = np.zeros(n_cdof, dtype=bool)
-        if not supports:
-            raise FemError("at least one support is required")
-        for selector, dofs in supports:
-            nids = selector.nodes(mesh)
-            cnids = cn[nids]
-            cnids = cnids[cnids >= 0]
-            if cnids.size == 0:
-                raise FemError(f"support selector {selector!r} selects no active nodes")
-            for comp in _parse_comps(dofs, dim):
-                fixed[cnids * dim + comp] = True
+        fixed = _fixed_dofs(mesh, supports, cn, dim, n_cdof)
         free = ~fixed
         self._free_index = np.full(n_cdof, -1, dtype=np.int64)
         self._free_index[free] = np.arange(int(free.sum()), dtype=np.int64)
@@ -427,7 +571,7 @@ class LinearElasticity:
         )
         self._nnz = int(self._indices.size)
 
-        self._loads = self._build_loads(loads, cn, dim, n_cdof, free)
+        self._loads = _build_loads(mesh, loads, cn, dim, n_cdof, free, _equal_split_weight_row)
         self._loads.flags.writeable = False
 
     @property
@@ -462,104 +606,7 @@ class LinearElasticity:
         conditioned). Supports truncate the modes; that is expected, the
         hint only needs to span the low-energy space.
         """
-        mesh = self.mesh
-        dim = mesh.dim
-        coords = mesh.nodes[mesh.active_nodes] - mesh.nodes[mesh.active_nodes].mean(axis=0)
-        n_modes = 3 if dim == 2 else 6
-        full = np.zeros((coords.shape[0] * dim, n_modes))
-        for comp in range(dim):
-            full[comp::dim, comp] = 1.0
-        if dim == 2:
-            full[0::2, 2] = -coords[:, 1]
-            full[1::2, 2] = coords[:, 0]
-        else:
-            full[0::3, 3] = -coords[:, 1]
-            full[1::3, 3] = coords[:, 0]
-            full[1::3, 4] = -coords[:, 2]
-            full[2::3, 4] = coords[:, 1]
-            full[0::3, 5] = coords[:, 2]
-            full[2::3, 5] = -coords[:, 0]
-        # condensed DOFs are active-node-major in node-id order and
-        # _free_index numbers free DOFs in that same condensed order, so
-        # this boolean mask lands each row in free-DOF order directly.
-        return full[self._free_index >= 0]
-
-    def _build_loads(
-        self,
-        loads: Sequence[Load] | Sequence[Sequence[Load]],
-        cn: _I64,
-        dim: int,
-        n_cdof: int,
-        free: npt.NDArray[np.bool_],
-    ) -> _F64:
-        if not loads:
-            raise FemError("at least one load is required")
-        flat = [isinstance(item, PointLoad | SurfaceTraction | BodyForce) for item in loads]
-        if all(flat):
-            cases: list[Sequence[Load]] = [loads]  # type: ignore[list-item]
-        elif any(flat):
-            raise FemError("loads must be either one case of Loads or a list of cases")
-        else:
-            cases = list(loads)  # type: ignore[arg-type]
-            for j, case in enumerate(cases):
-                if not case:
-                    raise FemError(f"load case {j} is empty")
-                if not all(isinstance(it, PointLoad | SurfaceTraction | BodyForce) for it in case):
-                    raise FemError(f"load case {j} contains non-Load entries")
-        out = np.zeros((n_cdof, len(cases)))
-        for j, case in enumerate(cases):
-            for load in case:
-                self._apply_load(out[:, j], load, cn, dim)
-        return out[free, :]
-
-    def _apply_load(self, f: _F64, load: Load, cn: _I64, dim: int) -> None:
-        mesh = self.mesh
-        if isinstance(load, PointLoad):
-            if len(load.force) != dim:
-                raise FemError(f"force dim {len(load.force)} != mesh dim {dim}")
-            nids = load.selector.nodes(mesh)
-            cnids = cn[nids]
-            cnids = cnids[cnids >= 0]
-            if cnids.size == 0:
-                raise FemError(f"point load selector {load.selector!r} selects no active nodes")
-            share = np.asarray(load.force) / cnids.size
-            for comp in range(dim):
-                np.add.at(f, cnids * dim + comp, share[comp])
-            return
-        if isinstance(load, SurfaceTraction):
-            fids = load.selector.faces(mesh)
-            if fids.size == 0:
-                raise FemError(f"traction selector {load.selector!r} selects no boundary faces")
-            bf = mesh.boundary_faces()
-            if load.traction is not None:
-                if len(load.traction) != dim:
-                    raise FemError(f"traction dim {len(load.traction)} != mesh dim {dim}")
-                t = np.tile(np.asarray(load.traction), (fids.size, 1))
-            else:
-                assert load.pressure is not None
-                t = -load.pressure * bf.normal[fids]
-            face_nodes = bf.nodes[fids]
-            nodes_per_face = face_nodes.shape[1]
-            weights = bf.area[fids][:, None] / nodes_per_face
-            contrib = t * weights  # (n_f, dim) per node
-            cnids = cn[face_nodes]
-            for comp in range(dim):
-                np.add.at(
-                    f, (cnids * dim + comp).ravel(), np.repeat(contrib[:, comp], nodes_per_face)
-                )
-            return
-        if len(load.vector) != dim:
-            raise FemError(f"body force dim {len(load.vector)} != mesh dim {dim}")
-        conn = mesh.element_nodes[mesh.active_elements]
-        nen = conn.shape[1]
-        per_node = (
-            np.asarray(load.vector)[None, :]
-            * mesh.element_volumes[mesh.active_elements][:, None]
-            / nen
-        )
-        cnids = cn[conn]
-        for comp in range(dim):
-            np.add.at(f, (cnids * dim + comp).ravel(), np.repeat(per_node[:, comp], nen))
+        return _rigid_body_modes(self.mesh, self._free_index, self.mesh.dim)
 
     def _check_scale(self, scale: Any) -> _F64:
         arr = np.asarray(scale, dtype=np.float64)
