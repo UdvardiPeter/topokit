@@ -262,13 +262,17 @@ def test_view_renders_3d_unstructured_as_thresholded_plotter() -> None:
     import pyvista as pv
 
     from topokit.viz import view
+    from topokit.viz._density import _unstructured_grid
 
     mesh = _tet_pair()
-    field = DesignField(np.array([0.1, 0.9]), mesh, name="density")
+    values = np.array([0.1, 0.9])
+    field = DesignField(values, mesh, name="density")
     plotter = view(field, iso=0.5, off_screen=True)
     assert isinstance(plotter, pv.Plotter)
     assert plotter.mesh is not None or plotter.renderer.actors  # a mesh was added
     plotter.close()
+    # Pin the at-or-above threshold semantics: only the 0.9 cell survives.
+    assert _unstructured_grid(values, mesh).threshold(0.5, scalars="rho").n_cells == 1
 
 
 def test_unstructured_grid_uses_vtk_cell_types() -> None:

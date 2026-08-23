@@ -23,6 +23,7 @@ class LiveView:
 
     Rendering is on the main thread inside the callback; cadence is throttled
     upstream by ``Study.snapshot_every``. With no display it is a silent no-op.
+    Supports ``StructuredGrid`` meshes only for now.
 
     Examples
     --------
@@ -47,8 +48,9 @@ class LiveView:
     def attach(cls, study: Study, *, iso: float = 0.5) -> LiveView:
         """Construct a LiveView and subscribe it to ``study.events``.
 
-        Raises `VizError` for a non-`StructuredGrid` mesh, before subscribing
-        anything -- unstructured live rendering is not supported yet.
+        Raises ``VizError`` for a non-``StructuredGrid`` mesh, before
+        subscribing anything — unstructured live rendering is not supported
+        yet.
         """
         if not isinstance(study.problem.model.mesh, StructuredGrid):
             raise VizError("LiveView supports structured grids only for now")
