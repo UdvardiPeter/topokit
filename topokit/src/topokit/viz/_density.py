@@ -36,8 +36,19 @@ def _image_data(values: np.ndarray, mesh: Any) -> Any:
 
 
 def _isosurface(values: np.ndarray, mesh: Any, iso: float) -> Any:
-    """Density iso-surface at ``iso`` (cell data → point data → contour)."""
-    return _image_data(values, mesh).cell_data_to_point_data().contour([iso], scalars="rho")
+    """Density iso-surface at ``iso`` (cell data → point data → contour).
+
+    Raises ``VizError`` when the contour comes back empty: nothing would be
+    drawn, and PyVista's own empty-mesh error never mentions ``iso``. The check
+    lives here so every caller gets it — ``view`` and ``LiveView`` alike.
+    """
+    surface = _image_data(values, mesh).cell_data_to_point_data().contour([iso], scalars="rho")
+    if surface.n_points == 0:
+        raise VizError(
+            f"the iso-surface at iso={iso} is empty; the density field does not cross it "
+            f"(field range [{values.min():.3g}, {values.max():.3g}]) — adjust iso"
+        )
+    return surface
 
 
 # element_kind -> VTK cell type (VTK_TRIANGLE / VTK_TETRA / VTK_QUADRATIC_TETRA).
@@ -73,6 +84,9 @@ def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Pl
     a file). Pass ``off_screen=True`` to render the 3D scene without a window. On
     unstructured meshes the 3D view shows the cells at or above ``iso`` rather than
     a contoured surface.
+
+    Raises ``VizError`` when the 3D scene would be empty: no part of the field
+    crosses ``iso`` on a grid, or no cell reaches it on an unstructured mesh.
     """
     values, mesh = _resolve(obj)
     if mesh.dim == 2:
@@ -93,23 +107,19 @@ def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Pl
         ax.set_ylabel("y")
         return fig
     pv = require_pyvista()
-    plotter: Plotter = pv.Plotter(off_screen=off_screen or not has_display())
     if isinstance(mesh, StructuredGrid):
-        surface = _isosurface(values, mesh, iso)
-        if surface.n_points == 0:
-            raise VizError(
-                f"the iso-surface at iso={iso} is empty; the density field does not cross it "
-                f"(field range [{values.min():.3g}, {values.max():.3g}]) — adjust iso"
-            )
-        plotter.add_mesh(surface, color="tan")
+        drawable = _isosurface(values, mesh, iso)  # raises VizError when empty
     else:
-        solid = _unstructured_grid(values, mesh).threshold(iso, scalars="rho")
-        if solid.n_cells == 0:
+        drawable = _unstructured_grid(values, mesh).threshold(iso, scalars="rho")
+        if drawable.n_cells == 0:
             raise VizError(
                 f"no cells at or above iso={iso}; the field maximum is "
                 f"{values.max():.3g} — lower iso"
             )
-        plotter.add_mesh(solid, color="tan")
+    # Checked before the Plotter exists: an empty-scene raise must not strand a
+    # VTK render window the caller has no handle to close.
+    plotter: Plotter = pv.Plotter(off_screen=off_screen or not has_display())
+    plotter.add_mesh(drawable, color="tan")
     return plotter
 
 
