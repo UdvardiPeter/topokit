@@ -525,6 +525,93 @@ def test_tet10_body_force_consistent_weights_on_free_dofs() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Void elements: condensation out of the system
+# ---------------------------------------------------------------------------
+
+
+def test_void_elements_leave_the_system_tri3() -> None:
+    """Voiding the right half must give the same answer as never meshing it.
+
+    Every per-element array the model keeps (``_ke_stack``,
+    ``_centroid_b_stack``, ``_edofs_free``) is indexed over ACTIVE elements
+    while the public ones (``element_energies``, ``element_stress``,
+    ``scale``) are indexed over all elements, so a mesh with void elements
+    is the only thing that exercises the two numberings against each other.
+    """
+    full = _tri3_grid(2, 1)
+    void = np.zeros(full.n_elements, dtype=bool)
+    void[2:] = True  # the 2 triangles of the right cell, x in [1, 2]
+    mesh = UnstructuredMesh(full.nodes, full.element_nodes, "tri3", void=void)
+    assert mesh.active_nodes.sum() == 4  # the x=2 nodes drop out entirely
+
+    e, sigma = 100.0, 10.0
+    mat = Material(E=e, nu=0.3, rho=1.0)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    right = Box((1.0, 0.0), (1.0, 1.0), tol=1e-9)
+    m = UnstructuredElasticity(
+        mesh,
+        mat,
+        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
+        loads=[SurfaceTraction(right, traction=(sigma, 0.0))],
+    )
+    assert m.n_dof == 2 * 4 - 3  # 4 active nodes, 2 x-pins + 1 y-pin
+    scale = _ones(mesh)
+    u = _solve(m, scale)
+
+    # the active half is the uniaxial patch test again, exactly
+    np.testing.assert_allclose(m.element_stress(u, scale)[:2], sigma, rtol=1e-9)
+    tip = m.displacement_field(u).values[mesh.nodes[:, 0] == 1.0, 0]
+    np.testing.assert_allclose(tip, sigma * 1.0 / e, rtol=1e-9)
+
+    # void rows are zero in both per-element outputs, and the energies still
+    # sum to the work done
+    np.testing.assert_array_equal(m.element_energies(u, scale)[2:], 0.0)
+    np.testing.assert_array_equal(m.element_stress(u, scale)[2:], 0.0)
+    assert m.element_energies(u, scale).sum() == pytest.approx(
+        float(m.loads()[:, 0] @ u), rel=1e-10
+    )
+    # void nodes carry no displacement
+    np.testing.assert_array_equal(m.displacement_field(u).values[~mesh.active_nodes], 0.0)
+
+
+def test_bad_tet10_names_its_mesh_element_id_not_its_active_row() -> None:
+    """``stiffness_stack`` runs over active elements only, so it must be told ids.
+
+    Element 0 here is void, so the bad element is active row 0 but mesh
+    element 1; reporting the row position would point the user at the wrong
+    element (and at a perfectly good one).
+    """
+    good = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.5, 0.0, 0.0],
+            [0.5, 0.5, 0.0],
+            [0.0, 0.5, 0.0],
+            [0.0, 0.0, 0.5],
+            [0.5, 0.0, 0.5],
+            [0.0, 0.5, 0.5],
+        ]
+    )
+    # a second, detached copy whose mid(0,1) node is dragged far off the edge:
+    # the corner tetrahedron stays positive (so the mesh constructor accepts
+    # it) but the quadratic map folds over at the Gauss points
+    nodes = np.vstack([good, good + np.array([2.0, 0.0, 0.0])])
+    nodes[10 + 4] += np.array([0.0, 0.0, 5.0])
+    elements = np.array([list(range(10)), list(range(10, 20))], dtype=np.int64)
+    mesh = UnstructuredMesh(nodes, elements, "tet10", void=np.array([True, False]))
+    with pytest.raises(FemError, match=r"element ids \[1\]"):
+        UnstructuredElasticity(
+            mesh,
+            Material(E=1.0, nu=0.3, rho=1.0),
+            supports=[(NearPoint((2.0, 0.0, 0.0)), "all")],
+            loads=[BodyForce((0.0, 0.0, -1.0))],
+        )
+
+
+# ---------------------------------------------------------------------------
 # Construction errors: same message family as the grid model
 # ---------------------------------------------------------------------------
 
@@ -652,6 +739,50 @@ def test_compliance_gradient_fd_through_full_stack_tri3() -> None:
         return np.asarray(chain.pullback(xx, comp.grad_field(sol)))
 
     assert_gradient_matches(f, grad, x, rtol=1e-5)
+
+
+def test_compliance_gradient_fd_through_full_stack_tet10() -> None:
+    """The same FD check on a quadratic tet mesh (a 1x1x1 Kuhn box, 6 tet10s).
+
+    The adjoint is only right if the ``_ke_stack`` that ``element_energies``
+    contracts is exactly the one ``assemble`` scatters, and tet10 is the one
+    element whose stack comes out of a quadrature loop rather than a closed
+    form -- so it needs its own check, not just tri3's.
+    """
+    mesh = _tet10_box(1, 1, 1)
+    mat = Material(E=100.0, nu=0.3, rho=1.0)
+    face_x0 = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    face_x1 = Box((1.0, 0.0, 0.0), (1.0, 1.0, 1.0), tol=1e-9)
+    model = UnstructuredElasticity(
+        mesh,
+        mat,
+        supports=[(face_x0, "all")],
+        loads=[SurfaceTraction(face_x1, traction=(1.0, 0.0, -1.0))],
+    )
+    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(mesh)
+    rng = np.random.default_rng(20260824)
+    x = rng.uniform(0.3, 0.9, size=chain.n_vars)
+    comp = Compliance()
+
+    def _solution(xx: np.ndarray) -> Solution:
+        scale = chain.apply(xx)
+        solver = Direct()
+        solver.prepare(model.assemble(scale))
+        u = np.atleast_2d(np.asarray(solver.solve(model.loads()))).reshape(model.n_dof, -1)
+        return Solution(
+            model=model,
+            mesh=mesh,
+            displacements=u,
+            interpolated=scale,
+            density=chain.physical_density(xx),
+        )
+
+    assert_gradient_matches(
+        lambda xx: comp.value(_solution(xx)),
+        lambda xx: np.asarray(chain.pullback(xx, comp.grad_field(_solution(xx)))),
+        x,
+        rtol=1e-5,
+    )
 
 
 def _tri3_box(length: float, height: float, nx: int, ny: int) -> UnstructuredMesh:

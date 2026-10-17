@@ -215,12 +215,18 @@ def _tet10_grad_and_detj(nodes: _F64, elements: _I64, dn_ref: _F64) -> tuple[_F6
     return grad, det_j
 
 
-def stiffness_stack(kind: str, d: _F64, nodes: _F64, elements: _I64) -> _F64:
+def stiffness_stack(
+    kind: str, d: _F64, nodes: _F64, elements: _I64, element_ids: _I64 | None = None
+) -> _F64:
     """Per-element stiffness matrices, shape ``(n_elements, ndof, ndof)``.
 
     ``d`` is the material matrix from ``fem._d_matrix`` (3x3 in 2D, 6x6 in
     3D); ``nodes`` is ``(n_nodes, dim)``, ``elements`` the connectivity
-    ``(n_elements, nodes_per_element)``.
+    ``(n_elements, nodes_per_element)``. ``element_ids`` names the mesh
+    element each row came from, for error messages only -- callers that pass
+    a subset of a mesh's connectivity (the models pass active elements only)
+    must supply it, or the ids reported for a bad element would be row
+    positions in the subset instead.
     """
     if kind == "tri3":
         area, grad = _tri3_measure_and_grad(nodes, elements)
@@ -245,8 +251,9 @@ def stiffness_stack(kind: str, d: _F64, nodes: _F64, elements: _I64) -> _F64:
             # the problem) so a bad tet10 fails loud, naming its element id.
             bad = np.nonzero(det_j <= 0.0)[0]
             if bad.size:
+                ids = bad if element_ids is None else np.asarray(element_ids)[bad]
                 raise FemError(
-                    f"non-positive det(J) at a Gauss point for tet10 element ids {bad.tolist()}"
+                    f"non-positive det(J) at a Gauss point for tet10 element ids {ids.tolist()}"
                 )
             b = _b_stack(grad, dim=3)
             ke += _TET10_GAUSS_WEIGHT * det_j[:, None, None] * _apply_d(b, d)

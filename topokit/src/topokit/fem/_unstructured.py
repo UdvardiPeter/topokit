@@ -86,8 +86,9 @@ class UnstructuredElasticity:
             )
 
         self._d = _d_matrix(material, dim, mode)
+        active_ids = np.nonzero(mesh.active_elements)[0]
         conn = mesh.element_nodes[mesh.active_elements]
-        self._ke_stack = _elements.stiffness_stack(kind, self._d, mesh.nodes, conn)
+        self._ke_stack = _elements.stiffness_stack(kind, self._d, mesh.nodes, conn, active_ids)
         self._ke_stack.flags.writeable = False
         self._centroid_b_stack = _elements.centroid_b_stack(kind, mesh.nodes, conn)
         self._centroid_b_stack.flags.writeable = False

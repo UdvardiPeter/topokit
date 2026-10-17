@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
-"""Linear elasticity on structured grids.
+"""Linear elasticity: the ``PhysicsModel`` implementations and their machinery.
 
-``LinearElasticity`` implements the ``PhysicsModel`` protocol: it assembles
-the free-DOF stiffness system for a given per-element stiffness scale (the
-parametrization chain's output), builds consistent load vectors, and
-evaluates element energies and von Mises stresses.
+``LinearElasticity`` (structured grids) and ``UnstructuredElasticity``
+(simplex meshes, in the private ``_unstructured`` submodule) implement the
+``PhysicsModel`` protocol: they assemble the free-DOF stiffness system for a
+given per-element stiffness scale (the parametrization chain's output), build
+consistent load vectors, and evaluate element energies and von Mises
+stresses. Supports, loads, condensation and rigid-body modes are
+mesh-generic and shared; the element kernels are not.
 
-Implementation notes:
+Implementation notes on ``LinearElasticity``:
 
 - All elements of a structured grid are geometrically identical, so one
   element stiffness matrix is computed per model and assembly is a
