@@ -355,10 +355,20 @@ def test_config_parts_keeps_grid_descriptor_flat() -> None:
     assert parts[1] == tuple(float(s) for s in mesh.spacing)
 
 
-def _tri3_mesh(node2: tuple[float, float]) -> UnstructuredMesh:
+def _tri3_mesh(node2: tuple[float, float], *, other_diagonal: bool = False) -> UnstructuredMesh:
+    """Unit square as 2 triangles; ``other_diagonal`` splits it the other way."""
     nodes = np.array([[0.0, 0.0], [1.0, 0.0], list(node2), [0.0, 1.0]])
-    elements = np.array([[0, 1, 2], [0, 2, 3]])
+    elements = (
+        np.array([[0, 1, 3], [1, 2, 3]]) if other_diagonal else np.array([[0, 1, 2], [0, 2, 3]])
+    )
     return UnstructuredMesh(nodes, elements, "tri3")
+
+
+def _expected_digest(mesh: UnstructuredMesh) -> str:
+    digest = hashlib.sha256()
+    digest.update(mesh.nodes.tobytes())
+    digest.update(mesh.element_nodes.tobytes())
+    return digest.hexdigest()
 
 
 def _unstructured_problem(mesh: UnstructuredMesh, optimizer: Optimizer | None = None) -> Problem:
@@ -383,13 +393,12 @@ def test_config_parts_non_grid_carries_a_node_digest_and_resume_sees_moved_nodes
     tmp_path: Path,
 ) -> None:
     # (dim, n_elements, n_nodes) alone is blind to a node moving in place (same
-    # counts, different geometry); the node digest closes that gap. This is
+    # counts, different geometry); the geometry digest closes that gap. This is
     # the non-grid branch's first exercise -- unreachable before UnstructuredMesh.
     mesh = _tri3_mesh((1.0, 1.0))
     study = Study(_unstructured_problem(mesh))
     parts = study._config_parts()
-    expected_digest = hashlib.sha256(mesh.nodes.tobytes()).hexdigest()
-    assert parts[0] == (mesh.dim, mesh.n_elements, mesh.n_nodes, expected_digest)
+    assert parts[0] == (mesh.dim, mesh.n_elements, mesh.n_nodes, _expected_digest(mesh))
 
     # round trip: resuming against the identical mesh continues the run
     full = Study(
@@ -409,10 +418,24 @@ def test_config_parts_non_grid_carries_a_node_digest_and_resume_sees_moved_nodes
     np.testing.assert_array_equal(out.x, full.x)
 
     # a mesh with one node moved keeps the same dim/n_elements/n_nodes but must
-    # still be rejected: only the node digest can see the move
+    # still be rejected: only the geometry digest can see the move
     moved = _unstructured_problem(_tri3_mesh((1.0, 1.2)))
     with pytest.raises(ProblemError, match="different problem"):
         Study.resume(moved, str(path))
+
+    # re-splitting the square along the other diagonal keeps every count AND
+    # every node coordinate, so only hashing the connectivity too can see it;
+    # element 0 is a different triangle, so resuming would map the stored
+    # design vector onto the wrong elements
+    flipped = _tri3_mesh((1.0, 1.0), other_diagonal=True)
+    np.testing.assert_array_equal(flipped.nodes, mesh.nodes)
+    assert (flipped.dim, flipped.n_elements, flipped.n_nodes) == (
+        mesh.dim,
+        mesh.n_elements,
+        mesh.n_nodes,
+    )
+    with pytest.raises(ProblemError, match="different problem"):
+        Study.resume(_unstructured_problem(flipped), str(path))
 
 
 def _tet10_single(mid_shift: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> UnstructuredMesh:
