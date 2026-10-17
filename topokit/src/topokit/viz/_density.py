@@ -44,6 +44,18 @@ def _isosurface(values: np.ndarray, mesh: Any, iso: float) -> Any:
 _VTK_CELL_TYPE: dict[str, int] = {"tri3": 5, "tet4": 10, "tet10": 24}
 
 
+def _cell_type(mesh: Any) -> int:
+    """Look up ``mesh``'s VTK cell type, naming the kind if there is none.
+
+    The unstructured views render simplices; any other `Mesh` implementation
+    fails here with its element kind instead of deep inside VTK.
+    """
+    kind = mesh.element_kind
+    if kind not in _VTK_CELL_TYPE:
+        raise VizError(f"unsupported element kind {kind!r}; supported: {sorted(_VTK_CELL_TYPE)}")
+    return _VTK_CELL_TYPE[kind]
+
+
 def _unstructured_grid(values: np.ndarray, mesh: Any) -> Any:
     """Build a PyVista UnstructuredGrid with density as cell data.
 
@@ -51,12 +63,13 @@ def _unstructured_grid(values: np.ndarray, mesh: Any) -> Any:
     already follows VTK node ordering (see ``mesh.py``'s module docstring),
     so no reordering is needed here.
     """
+    cell_type = _cell_type(mesh)
     pv = require_pyvista()
     connectivity = np.asarray(mesh.element_nodes, dtype=np.int64)
     n_elements, nodes_per_element = connectivity.shape
     counts = np.full((n_elements, 1), nodes_per_element, dtype=np.int64)
     cells = np.hstack([counts, connectivity]).ravel()
-    celltypes = np.full(n_elements, _VTK_CELL_TYPE[mesh.element_kind], dtype=np.uint8)
+    celltypes = np.full(n_elements, cell_type, dtype=np.uint8)
     points = np.asarray(mesh.nodes, dtype=np.float64)
     if mesh.dim == 2:  # VTK points are always 3D
         points = np.hstack([points, np.zeros((points.shape[0], 1))])
@@ -76,6 +89,10 @@ def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Pl
     """
     values, mesh = _resolve(obj)
     if mesh.dim == 2:
+        if not isinstance(mesh, StructuredGrid) and mesh.element_kind != "tri3":
+            raise VizError(
+                f"unsupported element kind {mesh.element_kind!r} for a 2D view; supported: ['tri3']"
+            )
         require_matplotlib()
         from matplotlib.figure import Figure
 

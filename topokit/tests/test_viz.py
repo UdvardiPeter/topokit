@@ -2,6 +2,9 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tier-1 tests for topokit.viz (headless: asserts on data/geometry, not pixels)."""
 
+from types import SimpleNamespace
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -249,13 +252,23 @@ def _single_tet10() -> UnstructuredMesh:
 
 
 def test_view_renders_2d_unstructured_as_tripcolor_figure() -> None:
+    from matplotlib.figure import Figure
+
     from topokit.viz import view
 
     mesh = _tri_square()
-    field = DesignField(np.array([0.2, 0.9]), mesh, name="density")
-    fig = view(field)
-    assert type(fig).__name__ == "Figure"
-    assert fig.axes  # something was drawn
+    values = np.array([0.2, 0.9])
+    fig = view(DesignField(values, mesh, name="density"))
+    assert isinstance(fig, Figure)
+    (ax,) = fig.axes
+    assert not ax.images  # the triangulation itself, not a resampled grid image
+    (triangles,) = ax.collections
+    np.testing.assert_allclose(np.asarray(triangles.get_array()), values)  # per-triangle density
+    np.testing.assert_allclose(
+        np.asarray(triangles.get_paths()[0].vertices)[:3], mesh.nodes[mesh.element_nodes[0]]
+    )
+    assert triangles.get_clim() == (0.0, 1.0)  # same fixed density scale as the grid path
+    assert ax.get_xlabel() == "x" and ax.get_ylabel() == "y"
 
 
 def test_view_renders_3d_unstructured_as_thresholded_plotter() -> None:
@@ -300,7 +313,10 @@ def test_view_slices_rejects_unstructured() -> None:
         view_slices(field)
 
 
-def test_liveview_attach_rejects_unstructured_study() -> None:
+def test_liveview_attach_rejects_unstructured_study(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from topokit.events import FieldSnapshot
     from topokit.fem import Material, PointLoad, UnstructuredElasticity
     from topokit.parametrization import SIMP, DensityFilter
     from topokit.problem import Problem, Study
@@ -324,6 +340,11 @@ def test_liveview_attach_rejects_unstructured_study() -> None:
     study = Study(problem)
     with pytest.raises(VizError, match="structured grids only"):
         LiveView.attach(study)
+    # Nothing was subscribed: a leaked subscriber would raise inside publish, and the
+    # bus logs subscriber failures instead of propagating them.
+    with caplog.at_level(logging.ERROR, logger="topokit.events"):
+        study.events.publish(FieldSnapshot(iteration=0, rho=np.zeros(mesh.n_elements), mesh=mesh))
+    assert not caplog.records
 
 
 def test_view_3d_offscreen_screenshot_renders() -> None:
@@ -343,3 +364,61 @@ def test_view_3d_offscreen_screenshot_renders() -> None:
     assert isinstance(plotter, pv.Plotter)
     img = plotter.screenshot(return_img=True)
     assert img is not None and np.asarray(img).size > 0
+
+
+def test_unstructured_cells_carry_the_mesh_geometry() -> None:
+    # Area/volume comes out wrong if the VTK cell type or the node order is wrong: a
+    # tet10 with its last two midsides swapped (the gmsh order) measures 1/24, not 1/6.
+    from topokit.viz._density import _unstructured_grid
+
+    for mesh in (_tri_square(), _tet_pair(), _single_tet10()):
+        grid = _unstructured_grid(np.full(mesh.n_elements, 0.5), mesh)
+        measured = grid.area if mesh.dim == 2 else grid.volume
+        assert measured == pytest.approx(float(mesh.element_volumes.sum()))
+
+
+def _foreign_field(kind: str, dim: int) -> Any:
+    # A density field on a third-party Mesh whose elements the views cannot draw.
+    square = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
+    if dim == 2:
+        nodes = np.array(square)
+        elements = np.arange(4)[None, :]
+    else:
+        nodes = np.array([[x, y, z] for z in (0.0, 1.0) for x, y in square])
+        elements = np.arange(8)[None, :]
+    mesh = SimpleNamespace(dim=dim, element_kind=kind, nodes=nodes, element_nodes=elements)
+    return SimpleNamespace(values=np.array([0.5]), mesh=mesh)
+
+
+def test_view_2d_rejects_unrenderable_element_kind() -> None:
+    from topokit.viz import VizError, view
+
+    with pytest.raises(VizError, match=r"unsupported element kind 'quad4'.*\['tri3'\]"):
+        view(_foreign_field("quad4", dim=2))
+
+
+def test_view_3d_rejects_unrenderable_element_kind() -> None:
+    from topokit.viz import VizError, view
+
+    with pytest.raises(VizError, match="unsupported element kind 'hex8'"):
+        view(_foreign_field("hex8", dim=3), off_screen=True)
+
+
+def test_view_slices_keeps_its_dim_and_axis_errors_for_unstructured() -> None:
+    # The structured-only guard sits behind the argument checks, so a bad call on an
+    # unstructured mesh still gets the error naming what is actually wrong with it.
+    from topokit.viz import VizError, view_slices
+
+    with pytest.raises(VizError, match="needs a 3D field"):
+        view_slices(DesignField(np.array([0.5, 0.5]), _tri_square(), name="density"))
+    with pytest.raises(VizError, match="axis must be one of"):
+        view_slices(DesignField(np.array([0.5, 0.5]), _tet_pair(), name="density"), axis="w")
+
+
+def test_liveview_draw_rejects_an_unstructured_snapshot() -> None:
+    from topokit.events import FieldSnapshot
+    from topokit.viz import LiveView, VizError
+
+    mesh = _tri_square()
+    with pytest.raises(VizError, match="structured grids only"):
+        LiveView()._draw(FieldSnapshot(iteration=0, rho=np.zeros(2), mesh=mesh))
