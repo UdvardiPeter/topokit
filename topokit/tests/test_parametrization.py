@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for the unified parametrization chain."""
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -691,3 +692,31 @@ def test_chain_binds_on_a_non_grid_mesh_and_fd_verifies() -> None:
     assert_gradient_matches(
         lambda xx: float(bound.apply(xx) @ w), lambda xx: bound.pullback(xx, w), x
     )
+
+
+def test_filter_radius_below_element_size_warns() -> None:
+    for link in (DensityFilter(radius=0.5), RadialDensityFilter(radius=0.5)):
+        with pytest.warns(UserWarning, match="no neighboring element"):
+            (link | SIMP()).bind(G42)
+
+
+def test_filter_warns_only_for_the_unfiltered_axis() -> None:
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 5.0))
+    with pytest.warns(UserWarning, match=r"along y \(element size 5\)") as caught:
+        (DensityFilter(radius=1.5) | SIMP()).bind(g)
+    assert "x (" not in str(caught[0].message)  # x reaches a neighbor at radius 1.5
+
+
+def test_default_filter_radius_on_a_unit_grid_is_silent() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        (DensityFilter() | SIMP()).bind(G42)
+        (RadialDensityFilter() | SIMP()).bind(G42)
+
+
+def test_matrix_filter_without_neighbors_warns() -> None:
+    from topokit.parametrization import _BoundMatrixFilter
+
+    with pytest.warns(UserWarning, match="no neighboring element"):
+        _BoundMatrixFilter(_stub_from_grid(G42), radius=0.5)
+

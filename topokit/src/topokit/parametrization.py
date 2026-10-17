@@ -35,6 +35,7 @@ sensitivity filter) declare ``fd_exempt`` with a reason.
 from __future__ import annotations
 
 import math
+import os
 import warnings
 from dataclasses import dataclass
 from typing import Any, ClassVar, cast
@@ -48,6 +49,11 @@ from topokit.mesh import Mesh, StructuredGrid
 
 _F64 = npt.NDArray[np.float64]
 _I64 = npt.NDArray[np.int64]
+
+# Warnings raised here are about the caller's configuration, and binding
+# happens both directly and from Problem(); skipping the package's own frames
+# points every one of them at the user's line instead of an internal bind.
+_PACKAGE_DIR = os.path.dirname(__file__)
 
 STIFFNESS_SCALE = FieldSpec("stiffness_scale")
 
@@ -104,6 +110,40 @@ def _radial_correlate(grid: _F64, kernel: _F64) -> _F64:
 
 
 register_kernel("radial_correlate", "generic", _radial_correlate)
+
+
+def _axis_halves(mesh: StructuredGrid, radius: float) -> list[int]:
+    """Kernel half-width in elements per axis for a physical ``radius``."""
+    return [max(0, math.ceil(radius / mesh.spacing[axis]) - 1) for axis in range(mesh.dim)]
+
+
+def _unfiltered_axes(mesh: StructuredGrid, halves: list[int]) -> str:
+    """Name the axes whose kernel reaches no neighbor, with their element size."""
+    return ", ".join(
+        f"{'xyz'[axis]} (element size {mesh.spacing[axis]:g})"
+        for axis, half in enumerate(halves)
+        if half == 0
+    )
+
+
+def _warn_if_unfiltered(radius: float, where: str) -> None:
+    """Warn that the bound kernel reaches no neighbor in the directions ``where``.
+
+    A radius at or below the element size leaves a width-1 kernel, i.e. the
+    identity: no minimum member size is enforced and checkerboarding is not
+    suppressed there. The default radius reaches a neighbor on the unit-spacing
+    grids the docs use, so this fires only on a radius that cannot do its job --
+    the usual cause being one sized for different length units.
+    """
+    if not where:
+        return
+    warnings.warn(
+        f"filter radius {radius:g} reaches no neighboring element along {where}: "
+        "the filter is the identity there, so it enforces no minimum member size "
+        "and suppresses no checkerboarding. Use a radius of at least ~1.5 element "
+        "sizes -- radius is a physical length in mesh units, not an element count.",
+        skip_file_prefixes=(_PACKAGE_DIR,),
+    )
 
 
 @dataclass(frozen=True)
@@ -500,12 +540,13 @@ class _BoundDensityFilter(BoundLink):
     def __init__(self, mesh: StructuredGrid, radius: float) -> None:
         self.mesh = mesh
         self._weights: list[_F64] = []
-        for axis in range(mesh.dim):
+        halves = _axis_halves(mesh, radius)
+        for axis, half in enumerate(halves):
             h = mesh.spacing[axis]
-            half = max(0, math.ceil(radius / h) - 1)
             offs = np.arange(-half, half + 1)
             w = np.maximum(0.0, 1.0 - np.abs(offs) * h / radius)
             self._weights.append(w)
+        _warn_if_unfiltered(radius, _unfiltered_axes(mesh, halves))
         active = mesh.active_elements.astype(np.float64)
         self._active = active
         # Bakes in the bind-context kernel (unlike apply/pullback, which
@@ -574,10 +615,10 @@ class _BoundRadialDensityFilter(BoundLink):
     def __init__(self, mesh: StructuredGrid, radius: float) -> None:
         self.mesh = mesh
         axes = []
-        for axis in range(mesh.dim):
-            h = mesh.spacing[axis]
-            half = max(0, math.ceil(radius / h) - 1)
-            axes.append(np.arange(-half, half + 1) * h)
+        halves = _axis_halves(mesh, radius)
+        for axis, half in enumerate(halves):
+            axes.append(np.arange(-half, half + 1) * mesh.spacing[axis])
+        _warn_if_unfiltered(radius, _unfiltered_axes(mesh, halves))
         offsets = np.meshgrid(*axes, indexing="ij")
         dist = np.sqrt(sum(o**2 for o in offsets))
         self._kernel = np.maximum(0.0, radius - dist)
@@ -632,6 +673,11 @@ class _BoundMatrixFilter(BoundLink):
         tree = cKDTree(centroids[idx])
         neighbors = tree.query_ball_point(centroids[idx], r=radius)
         counts = np.fromiter((len(nb) for nb in neighbors), dtype=np.int64, count=idx.size)  # type: ignore[arg-type]
+        if int(counts.max()) <= 1:
+            # every active element neighbors only itself: the same degenerate
+            # identity the grid filters warn about, caught here on real distances
+            typical = float(np.median(volumes[idx]) ** (1.0 / mesh.dim))
+            _warn_if_unfiltered(radius, f"any direction (typical element size {typical:g})")
         rows = np.repeat(idx, counts)
         # active is never empty (an all-void mesh fails at construction) and
         # every point neighbors itself, so the concatenation is never empty
