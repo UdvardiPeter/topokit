@@ -12,7 +12,7 @@ import numpy.typing as npt
 from topokit.fem import LinearElasticity, Material, PointLoad, UnstructuredElasticity
 from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, Optimizer
-from topokit.parametrization import SIMP, DensityFilter, RadialDensityFilter
+from topokit.parametrization import SIMP, RadialDensityFilter
 from topokit.problem import Problem
 from topokit.responses import Compliance, Volume
 from topokit.selection import Box, NearPoint, PlaneSlab
@@ -27,8 +27,13 @@ def _grid(nelx: int, nely: int) -> StructuredGrid:
 def _tri_mesh(nelx: int, nely: int, size: tuple[float, float]) -> UnstructuredMesh:
     """Quad-split triangulation on an ``(nelx+1) x (nely+1)`` x-fastest lattice.
 
-    Each quad is split into two tri3s along the same diagonal (the tutorial's
-    ``[0,1,2],[0,2,3]`` pattern).
+    Each quad is split into two tri3s along the same diagonal (the
+    ``[0,1,2],[0,2,3]`` winding). One fixed diagonal makes the mesh
+    directionally biased and not mirror-symmetric about the box centrelines:
+    no element has a mirror twin, so a symmetric problem on this mesh has an
+    asymmetric optimum. Deliberate -- a frozen reference only has to be
+    deterministic -- but it is part of why the tri3 and quad4 cantilever
+    compliances differ (see ``test_tri3_vs_quad4_cantilever_agree``).
     """
     sx, sy = size
     nx1 = nelx + 1
@@ -210,7 +215,7 @@ def cantilever_tri(
         supports=[(left, "all")],
         loads=[PointLoad(mid_right, (0.0, -1.0))],
     )
-    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    chain = RadialDensityFilter(radius=rmin) | SIMP(p=penal)
     return Problem(
         model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
     )
@@ -236,7 +241,7 @@ def cantilever_tet4(
         supports=[(left, "all")],
         loads=[PointLoad(tip, (0.0, -1.0, 0.0))],
     )
-    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    chain = RadialDensityFilter(radius=rmin) | SIMP(p=penal)
     return Problem(
         model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
     )
@@ -262,7 +267,7 @@ def cantilever_tet10(
         supports=[(left, "all")],
         loads=[PointLoad(tip, (0.0, -1.0, 0.0))],
     )
-    chain = DensityFilter(radius=rmin) | SIMP(p=penal)
+    chain = RadialDensityFilter(radius=rmin) | SIMP(p=penal)
     return Problem(
         model, chain, objective=Compliance(), constraints=[Volume() <= volfrac], optimizer=optimizer
     )

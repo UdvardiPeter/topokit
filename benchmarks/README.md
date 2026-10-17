@@ -38,10 +38,23 @@ same cantilever problem on a 60x20 tri3 mesh (deterministic quad-split
 triangulation, `UnstructuredElasticity`) instead of the quad4 grid. It gets
 the same frozen-reference assertions plus a dedicated cross-check
 (`test_tri3_vs_quad4_cantilever_agree`) against the quad4 `cantilever_60x20`
-reference: constant-strain triangles are stiffer than bilinear quads at equal
-grid resolution, so the two meshes' compliance is close but not equal — the
-measured gap (2.08%) and the tolerance derived from it are recorded in that
+reference. The two cases differ only in discretization — same box, supports,
+load point, plane-stress material, radial filter radius, SIMP exponent — so
+their compliance is close but not equal. The measured gap is 2.08%, tri3
+lower: constant-strain triangles are stiffer than bilinear quads at equal
+nodes, the split doubles the design variables, and its fixed diagonal biases
+the design. The gap and the tolerance derived from it are recorded in that
 test.
+
+The four unstructured references (`cantilever_tri_60x20_{oc,mma}`,
+`cantilever_tet4_16x8x8_oc`, `cantilever_tet10_10x5x5_oc`) were frozen on
+macOS arm64 — recorded in the files — not on the Linux platform CI runs on, so
+they spend part of the suite's cross-platform margin instead of leaving all of
+it for genuine numerical change. The tolerances are coarse enough to absorb
+that: the OC iteration is contractive, so a 1e-10 perturbation moves the final
+field by 1e-10 against a `1e-2` gate. The tri3 pair is validated
+cross-platform by the per-PR gate, the tet pair only by the nightly. Refreeze
+them on Linux at the next deliberate baseline reset.
 
 ## Regenerating references
 
@@ -52,6 +65,15 @@ e.g. `--only full` regenerates just the 3D + Michell references below — and
 `--case SUBSTRING` to further limit it to reference files whose name contains
 the substring, e.g. `--only full --case cantilever_tet` touches only the
 tet4/tet10 nightly references, leaving every other frozen reference untouched.
+A `--case` matching nothing (a typo, or the wrong `--only` set) exits nonzero
+instead of reporting success over an unchanged tree.
+
+Each reference holds the frozen `density`, `compliance`, `volume` and
+`iterations`, plus the provenance to read them against: `element_kind`,
+`n_elements`, `optimizer`, `penal`, `max_iter`, `tol`, the `platform` it was
+frozen on and the `topokit` version. Only the unstructured references carry
+the provenance keys so far — the earlier baselines predate them and pick them
+up on their next regeneration.
 
 ## Nightly full suite
 

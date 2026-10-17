@@ -2,12 +2,41 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from topokit_bench.problems import _tet10_mesh, _tet_mesh, _tri_mesh
+from topokit_bench.problems import (
+    BUILDERS,
+    CASES,
+    FULL_CASES,
+    Builder,
+    _tet10_mesh,
+    _tet_mesh,
+    _tri_mesh,
+    make_optimizer,
+)
 
 _TET_LOCAL_EDGES: tuple[tuple[int, int], ...] = ((0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3))
+_REGENERATE = Path(__file__).resolve().parents[1] / "scripts" / "regenerate.py"
+DATA = Path(__file__).resolve().parent / "data"
+
+# Every frozen unstructured reference, read off the case matrices rather than
+# listed, so a case added there cannot land here unchecked.
+_REFERENCES: list[tuple[str, Builder, dict[str, int], str]] = [
+    (f"{name}_{nelx}x{nely}_{opt}", BUILDERS[name], {"nelx": nelx, "nely": nely}, opt)
+    for name, nelx, nely, opt in CASES
+    if name == "cantilever_tri"
+] + [
+    (f"{case.key}_{opt}", case.build, dict(case.kwargs), opt)
+    for case in FULL_CASES
+    for opt in case.optimizers
+    if "tet" in case.key
+]
+_REFERENCE_IDS = [stem for stem, *_ in _REFERENCES]
 
 
 def test_tri_mesh_construction_and_measures() -> None:
@@ -80,3 +109,69 @@ def test_tet10_mesh_deterministic() -> None:
     b = _tet10_mesh(3, 2, 4, (3.0, 2.0, 4.0))
     np.testing.assert_array_equal(a.nodes, b.nodes)
     np.testing.assert_array_equal(a.element_nodes, b.element_nodes)
+
+
+def _tip_face_center(kwargs: dict[str, int]) -> tuple[float, ...]:
+    # what every cantilever builder means to load: mid-height of the far face
+    point = [float(kwargs["nelx"]), kwargs["nely"] / 2.0]
+    if "nelz" in kwargs:
+        point.append(kwargs["nelz"] / 2.0)
+    return tuple(point)
+
+
+@pytest.mark.parametrize("build,kwargs", [r[1:3] for r in _REFERENCES], ids=_REFERENCE_IDS)
+def test_frozen_case_loads_the_tip_face_center(build: Builder, kwargs: dict[str, int]) -> None:
+    # NearPoint snaps to the nearest node and never complains, so a size whose
+    # tip-face center is no node (an even nely on tet10, say) would silently
+    # load somewhere else and the frozen reference would pin that instead. A
+    # load landing on a supported node would be silently dropped by the DOF
+    # condensation, which the load vector catches.
+    problem = build(**kwargs, optimizer=make_optimizer("oc"))
+    mesh = problem.model.mesh
+    point = _tip_face_center(kwargs)
+    dist = np.linalg.norm(np.asarray(mesh.nodes) - np.asarray(point), axis=1)
+    assert int(np.count_nonzero(dist == 0.0)) == 1, f"no node at {point}"
+    loads = np.asarray(problem.model.loads())
+    assert loads.shape[1] == 1, "one load case"
+    nonzero = np.flatnonzero(loads.ravel())
+    assert nonzero.size == 1
+    assert loads.ravel()[nonzero[0]] == -1.0
+
+
+@pytest.mark.parametrize("stem,build,kwargs,opt", _REFERENCES, ids=_REFERENCE_IDS)
+def test_frozen_reference_records_its_provenance(
+    stem: str, build: Builder, kwargs: dict[str, int], opt: str
+) -> None:
+    # A frozen number is only readable against what produced it. The
+    # unstructured references carry that; the structured baselines predate it
+    # and pick it up on their next regeneration (see README).
+    ref = np.load(DATA / f"{stem}.npz")
+    mesh = build(**kwargs, optimizer=make_optimizer(opt)).model.mesh
+    assert str(ref["element_kind"]) == mesh.element_kind
+    assert int(ref["n_elements"]) == mesh.n_elements == ref["density"].size
+    assert str(ref["optimizer"]) == opt
+    # the schedule both regression suites re-run; a reference frozen under a
+    # different one no longer describes the run it gates, and the coarse
+    # compliance/field tolerances would not necessarily say so
+    assert float(ref["penal"]) == 3.0
+    assert int(ref["max_iter"]) == 100
+    assert float(ref["tol"]) == 1e-3
+    assert str(ref["platform"]) != ""
+    assert str(ref["topokit"]) != ""
+
+
+def test_regenerate_rejects_a_case_filter_that_matches_nothing() -> None:
+    # The --case filter exists so the unstructured references could be frozen
+    # without touching the older baselines; a mistyped filter (or the wrong
+    # --only set) must not exit 0 over an unchanged tree and read as a
+    # successful regeneration. The filter below matches no case, so this writes
+    # nothing whatever the guard does.
+    proc = subprocess.run(
+        [sys.executable, str(_REGENERATE), "--only", "2d", "--case", "__no_such_case__"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert "matched no reference file" in proc.stderr
+    assert proc.stdout == ""
