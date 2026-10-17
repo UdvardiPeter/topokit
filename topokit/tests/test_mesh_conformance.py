@@ -112,12 +112,49 @@ def _tet10_cube_slice() -> Fixture:
     )
 
 
+def _tri3_void() -> Fixture:
+    # two unit squares, each split into 2 triangles; the right square's pair
+    # is void, so the active domain is the unit square [0,1]x[0,1] (perimeter
+    # 4) and the two x=2 nodes become inactive
+    nodes = np.array(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [2.0, 1.0],
+        ]
+    )
+    elements = np.array([[0, 1, 4], [0, 4, 3], [1, 2, 5], [1, 5, 4]])
+    m = UnstructuredMesh(
+        nodes, elements, "tri3", solid=[True, False, False, False], void=[False, False, True, True]
+    )
+    return Fixture("tri3_void", m, total_volume=2.0, boundary_measure=4.0)
+
+
+def _tet10_void() -> Fixture:
+    # _tet10_cube_slice() with its second tet voided: the active domain is the
+    # single tet (0,1,2,4), all 4 of whose faces are boundary, and corner 3
+    # plus the 3 midsides only it touches become inactive
+    base = _tet10_cube_slice().mesh
+    m = UnstructuredMesh(
+        base.nodes,
+        base.element_nodes,
+        "tet10",
+        void=[False, True],
+    )
+    return Fixture("tet10_void", m, total_volume=1.0 / 3.0, boundary_measure=1.0 + math.sqrt(2.0))
+
+
 FIXTURES = [
     _structured_2d(),
     _structured_3d(),
     _tri3_square(),
+    _tri3_void(),
     _tet4_cube_slice(),
     _tet10_cube_slice(),
+    _tet10_void(),
 ]
 
 

@@ -400,6 +400,18 @@ def test_unstructured_negative_volume_raises_naming_element() -> None:
         UnstructuredMesh(_SQUARE_NODES, elements, "tri3")
 
 
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_unstructured_non_finite_nodes_raise_naming_the_node(bad: float) -> None:
+    # the signed-measure check cannot catch these on its own: `nan <= 0.0` is
+    # False, and an inf coordinate can give a (meaningless) positive measure,
+    # so without an explicit guard the mesh constructs and every derived
+    # number -- volumes, centroids, stiffness, compliance -- is non-finite.
+    nodes = _SQUARE_NODES.copy()
+    nodes[2, 0] = bad
+    with pytest.raises(MeshError, match=r"non-finite node coordinates for node ids \[2\]"):
+        UnstructuredMesh(nodes, _SQUARE_ELEMENTS, "tri3")
+
+
 def test_unstructured_out_of_range_connectivity_raises() -> None:
     nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
     elements = np.array([[0, 1, 3]])

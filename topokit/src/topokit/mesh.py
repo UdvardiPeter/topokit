@@ -64,7 +64,9 @@ def _validate_mask(mask: npt.ArrayLike | None, n: int, name: str) -> _Bool:
 class BoundaryFaces:
     """Boundary faces of the active (non-void) domain, as flat arrays.
 
-    In 2D, faces are edges with two nodes; in 3D, quads with four nodes.
+    In 2D, faces are edges with two nodes; in 3D they are the element's
+    facet kind -- quads with four nodes on a hex grid, triangles with three
+    (tet4) or six (tet10, corners then midsides) on a simplex mesh.
     """
 
     owner: _I64
@@ -202,8 +204,8 @@ class StructuredGrid:
             )
         self._origin = tuple(float(x) for x in origin)
 
-        self._solid = self._validated_mask(solid, "solid")
-        self._void = self._validated_mask(void, "void")
+        self._solid = _validate_mask(solid, self.n_elements, "solid")
+        self._void = _validate_mask(void, self.n_elements, "void")
         if bool((self._solid & self._void).any()):
             raise MeshError("solid and void masks must be disjoint")
         if bool(self._void.all()):
@@ -291,16 +293,6 @@ class StructuredGrid:
             shape = tuple(max(1, round(s / hi)) for s, hi in zip(size, h, strict=True))
         spacing = tuple(s / n for s, n in zip(size, shape, strict=True))
         return cls(shape=shape, spacing=spacing, origin=origin)
-
-    def _validated_mask(self, mask: npt.ArrayLike | None, name: str) -> _Bool:
-        if mask is None:
-            out = np.zeros(self.n_elements, dtype=bool)
-        else:
-            out = np.array(mask, dtype=bool, copy=True)
-            if out.shape != (self.n_elements,):
-                raise MeshError(f"{name} mask shape {out.shape} != ({self.n_elements},)")
-        out.flags.writeable = False
-        return out
 
     @property
     def n_elements(self) -> int:
@@ -689,6 +681,13 @@ class UnstructuredMesh:
                 f"element kind {element_kind!r} requires {expected_dim}D nodes, got dim {dim}"
             )
         self._dim = dim
+        # NaN survives every comparison below (`nan <= 0.0` is False), so the
+        # signed-measure check cannot see it: without this guard a mesh with a
+        # NaN or inf coordinate constructs happily and every downstream number
+        # -- volumes, centroids, stiffness, compliance -- comes out non-finite.
+        bad_nodes = np.nonzero(~np.isfinite(nodes_arr).all(axis=1))[0]
+        if bad_nodes.size:
+            raise MeshError(f"non-finite node coordinates for node ids {bad_nodes.tolist()}")
 
         elements_arr = np.array(elements, dtype=np.int64, copy=True)
         expected_cols = _ELEMENT_KIND_COLUMNS[element_kind]
