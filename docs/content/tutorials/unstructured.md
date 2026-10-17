@@ -16,6 +16,10 @@ CAD mesher. The triangulated grid below is just an easy in-page example,
 splitting each quad of a regular grid into two triangles so the tutorial
 needs no extra dependency to run.
 
+Connectivity follows VTK node order, and every element needs a positive
+signed area (volume in 3D): a flipped triangle raises `MeshError` naming
+its element id rather than being reoriented silently.
+
 ```python
 import numpy as np
 
@@ -88,12 +92,11 @@ print(f"compliance {result.history['objective'][0]:.1f} -> {result.objective:.1f
 
 ## Viewing the result
 
-`result.view()` renders the triangulation directly: a matplotlib
-`tripcolor` plot in 2D, colored by each triangle's density. In 3D, an
-unstructured mesh's view returns a PyVista scene showing the cells at or
-above the `iso` threshold rather than a contoured surface, since a simplex
-mesh has no implicit smooth field to contour the way a structured grid's
-iso-surface does.
+`result.view()` needs the `[viz]` extra and renders the triangulation
+directly: a matplotlib `tripcolor` plot in 2D, colored by each triangle's
+density. In 3D it returns a PyVista scene of the cells at or above the
+`iso` threshold rather than a contoured iso-surface, so the view keeps the
+mesh's own faces instead of a surface interpolated through them.
 
 ```python
 fig = result.view()
@@ -105,10 +108,15 @@ fig.savefig("part.png", dpi=150)
 Hand-building arrays works for a tutorial; real geometry comes from a
 mesher. `UnstructuredMesh.from_file` reads gmsh and other formats through
 meshio, installed with the `mesh` extra: `pip install --pre
-'topokit[mesh]'`. gmsh physical-group names resolve directly to `solid`/
-`void` regions: pass the group name and it's matched against the mesh's
-elements automatically. `groups` on the resulting mesh carries every named
-region, not just the ones picked as `solid` or `void`.
+'topokit[mesh]'`. The element kind comes from the file, so there is no
+`element_kind` argument here.
+
+gmsh physical-group names resolve directly to `solid`/`void` regions: pass
+the group name and it's matched against the mesh's elements automatically,
+while an unknown name raises `MeshError` listing the names the file does
+carry. Give neither and every element is a design element. `groups` on the
+resulting mesh carries every named region, not just the ones picked as
+`solid` or `void`.
 
 <!-- no-run -->
 ```python
@@ -119,8 +127,12 @@ mesh = UnstructuredMesh.from_file("bracket.msh", solid="fixture", void="hole")
 
 `UnstructuredMesh` supports three element kinds, chosen by the
 `element_kind` argument: `tri3` (2D triangles, used above), `tet4` (3D
-tetrahedra), and `tet10` (quadratic tetrahedra, curved-edge accuracy at
-higher cost). `UnstructuredElasticity` runs on all three.
+tetrahedra), and `tet10` (quadratic tetrahedra, more accurate
+displacements at higher cost). `UnstructuredElasticity` runs on all three.
+A `tet10`'s stiffness is integrated from the full 10-node map, so curved
+edges are handled; its volume and centroid come from the corner
+tetrahedron, exact for straight edges and approximate on a curved
+second-order mesh.
 
 ## What's still structured-only
 
@@ -133,7 +145,7 @@ wrong on an unstructured mesh.
 
 ## Next
 
-[Custom physics](../extend/custom-physics.md) extends the same
-`Mesh`/`PhysicsModel` protocol seam this tutorial uses, with a worked
-heat-conduction example outside elasticity. The [Gallery](../gallery/index.md)
-has full-size results built the same way.
+[Custom physics](../extend/custom-physics.md) builds on the `PhysicsModel`
+seam `UnstructuredElasticity` sits behind, with a worked heat-conduction
+example outside elasticity. The [Gallery](../gallery/index.md) has
+full-size results from the same pipeline on structured grids.
