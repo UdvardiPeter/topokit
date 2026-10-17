@@ -720,3 +720,15 @@ def test_matrix_filter_without_neighbors_warns() -> None:
     with pytest.warns(UserWarning, match="no neighboring element"):
         _BoundMatrixFilter(_stub_from_grid(G42), radius=0.5)
 
+
+def test_check_clips_the_tolerated_bound_noise() -> None:
+    # _check admits [-1e-6, 1+1e-6] as float noise at the bounds; a non-integer
+    # SIMP exponent turns a negative value into NaN (negative base, fractional
+    # power), so the noise must be clipped rather than passed down the chain.
+    x = np.full(G42.n_elements, 0.4)
+    x[0] = -1e-7
+    for chain in (DensityFilter(radius=1.5) | SIMP(p=2.5), Chain((SIMP(p=2.5),))):
+        bound = chain.bind(G42)
+        assert np.isfinite(bound.apply(x)).all()
+        assert np.isfinite(bound.physical_density(x)).all()
+        assert np.isfinite(bound.pullback(x, np.ones(G42.n_elements))).all()

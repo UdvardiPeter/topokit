@@ -289,7 +289,10 @@ class BoundChain:
             raise ParametrizationError(
                 f"design variables must be in [0, 1], got [{arr.min():.4g}, {arr.max():.4g}]"
             )
-        return arr
+        # Clip the absorbed noise instead of passing it on: a value a hair below
+        # zero makes a non-integer SIMP exponent produce NaN (a negative base
+        # raised to 2.5), and that NaN reaches the stiffness matrix.
+        return np.clip(arr, 0.0, 1.0)
 
     def _embed(self, design_values: _F64) -> _F64:
         rho = np.zeros(self.mesh.n_elements)
