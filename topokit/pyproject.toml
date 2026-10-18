@@ -57,10 +57,12 @@ dev = [
   "ruff>=0.9",
   "import-linter>=2.1",
   "scipy-stubs>=1.17",
+  # pyamg, matplotlib and meshio stay: the AmgCG path, the 2D views and the
+  # gmsh reader are exercised by the default suite. pyvista and jax are not,
+  # so they live only in the [viz] and [jax] extras; without those extras
+  # test_viz.py and test_jax.py skip. CI installs both, so CI runs everything.
   "pyamg>=5",
-  "pyvista>=0.44",
   "matplotlib>=3.8",
-  "jax>=0.10",
   "meshio>=5.3",
 ]
 
