@@ -3,8 +3,8 @@
 """Optimality-criteria optimizer.
 
 ``OC`` is the classic optimality-criteria update for a single volume-type
-constraint: it scales each variable by a sensitivity ratio and bisects the
-Lagrange multiplier until the constraint is met. It is the standard
+constraint: it scales each variable by a sensitivity ratio and solves for the
+Lagrange multiplier that makes the constraint active. It is the standard
 optimizer of the 88-line density method. General multi-constraint problems
 need MMA.
 """
@@ -53,7 +53,7 @@ class OC:
         self._lower, self._upper = validate_bounds(n_vars, lower, upper)
 
     def step(self, x: _F64, f0: float, df0: _F64, g: _F64, dg: _F64) -> StepResult:
-        """One OC update; bisects the multiplier so the constraint is active."""
+        """One OC update; solves for the multiplier that makes the constraint active."""
         x, df0, g, dg = check_step_inputs(self._lower, x, df0, g, dg)
         assert self._lower is not None and self._upper is not None
         if g.shape != (1,):
