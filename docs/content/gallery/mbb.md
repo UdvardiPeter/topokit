@@ -12,13 +12,13 @@ from topokit import (
     OC,
     SIMP,
     Compliance,
+    DensityFilter,
     LinearElasticity,
     Material,
     NearPoint,
     PlaneSlab,
     PointLoad,
     Problem,
-    RadialDensityFilter,
     Schedule,
     StructuredGrid,
     Study,
@@ -36,7 +36,7 @@ model = LinearElasticity(
     supports=[(left, "x"), (bottom_right, "y")],
     loads=[PointLoad(top_left, force=(0.0, -1.0))],
 )
-chain = RadialDensityFilter(radius=2.4) | SIMP(p=3.0)
+chain = DensityFilter(radius=2.4) | SIMP(p=3.0)
 problem = Problem(
     model, chain, objective=Compliance(), constraints=[Volume() <= 0.5], optimizer=OC(move=0.2)
 )

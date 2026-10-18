@@ -43,7 +43,6 @@ from topokit import (
     PlaneSlab,
     PointLoad,
     Problem,
-    RadialDensityFilter,
     Result,
     Schedule,
     StructuredGrid,
@@ -82,7 +81,7 @@ def mbb() -> Path:
         supports=[(left, "x"), (bottom_right, "y")],
         loads=[PointLoad(top_left, force=(0.0, -1.0))],
     )
-    chain = RadialDensityFilter(radius=2.4) | SIMP(p=3.0)
+    chain = DensityFilter(radius=2.4) | SIMP(p=3.0)
     problem = Problem(
         model,
         chain,
@@ -110,7 +109,7 @@ def cantilever() -> Path:
         supports=[(left, "all")],
         loads=[PointLoad(mid_right, force=(0.0, -1.0))],
     )
-    chain = RadialDensityFilter(radius=2.4) | SIMP(p=3.0)
+    chain = DensityFilter(radius=2.4) | SIMP(p=3.0)
     problem = Problem(
         model,
         chain,
@@ -138,7 +137,7 @@ def michell() -> Path:
         supports=[(band, "all")],
         loads=[PointLoad(mid_right, force=(0.0, -1.0))],
     )
-    chain = RadialDensityFilter(radius=2.4) | SIMP(p=3.0)
+    chain = DensityFilter(radius=2.4) | SIMP(p=3.0)
     problem = Problem(
         model,
         chain,
@@ -168,7 +167,7 @@ def cantilever_3d() -> Path:
         supports=[(left, "all")],
         loads=[PointLoad(tip, force=(0.0, -1.0, 0.0))],
     )
-    chain = RadialDensityFilter(radius=1.5) | SIMP(p=3.0)
+    chain = DensityFilter(radius=1.5) | SIMP(p=3.0)
     problem = Problem(
         model,
         chain,

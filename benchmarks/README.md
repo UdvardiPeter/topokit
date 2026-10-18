@@ -16,8 +16,8 @@ The reference designs *are* the 88-line method's designs: TopoKit's Q4
 plane-stress element stiffness (eigenvalues), modified SIMP (`E = Emin +
 x^p (E0 - Emin)`), compliance functional, and boundary conditions match the
 88-line (Andreassen et al. 2011) exactly; `OC` is the clean-room 88-line
-optimality-criteria update, validated against scipy on convex problems; and `RadialDensityFilter`
-reproduces the 88-line density filter (`ft = 2`). So a faithful single-stage
+optimality-criteria update, validated against scipy on convex problems; and `DensityFilter`'s
+radial kernel reproduces the 88-line density filter (`ft = 2`). So a faithful single-stage
 run reproduces the 88-line, and the frozen `.npz` pins that result against
 drift.
 

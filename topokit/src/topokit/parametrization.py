@@ -59,29 +59,6 @@ class ParametrizationError(TopoKitError, ValueError):
     """Invalid chain composition or input."""
 
 
-def _separable_correlate(grid: _F64, axis_weights: list[_F64]) -> _F64:
-    """Correlate with a tensor-product kernel, zero outside the domain."""
-    out = grid
-    for axis, weights in enumerate(axis_weights):
-        half = (len(weights) - 1) // 2
-        acc = np.zeros_like(out)
-        for k, w in zip(range(-half, half + 1), weights, strict=True):
-            if w == 0.0:
-                continue
-            src = [slice(None)] * out.ndim
-            dst = [slice(None)] * out.ndim
-            if k < 0:
-                src[axis], dst[axis] = slice(-k, None), slice(None, k)
-            elif k > 0:
-                src[axis], dst[axis] = slice(None, -k), slice(k, None)
-            acc[tuple(dst)] += w * out[tuple(src)]
-        out = acc
-    return out
-
-
-register_kernel("separable_correlate", "generic", _separable_correlate)
-
-
 def _radial_correlate(grid: _F64, kernel: _F64) -> _F64:
     """Correlate with a dense N-D kernel, zero outside the domain.
 
@@ -382,99 +359,26 @@ class ChainEval:
 
 @dataclass(frozen=True)
 class DensityFilter(LinkSpec):
-    """Separable triangular-kernel density filter with mask-aware normalization.
+    """Radial-cone density filter with mask-aware normalization.
 
-    The kernel is the tensor product of per-axis triangles of physical
-    ``radius`` (the spec's deliberate separable approximation of the radial
-    cone, chosen for its O(n*r) cost). Void is excluded; solid participates
-    pinned at 1. The pullback is the exact transpose of the normalized
-    correlation.
+    Weights ``max(0, radius - dist)`` over the Euclidean distance between
+    element centroids, row-normalized, with ``radius`` a physical length in
+    the mesh's units on every mesh type -- not an element count. Void is
+    excluded; solid participates pinned at 1. The pullback is the exact
+    transpose of the normalized correlation.
 
-    Because the kernel is separable, its reach is ``sqrt(dim)`` larger along
-    diagonals than along axes (measured 1.41x in 2D, 1.73x in 3D), so the
-    minimum member size it enforces is orientation-dependent, tightest for
-    axis-aligned features. Use :class:`RadialDensityFilter` when isotropic
-    reach or a literature-faithful radius-to-member-size relation matters.
+    This is the filter of the topology-optimization literature: it reproduces
+    the 88-line density filter (``ft = 2``), and the frozen benchmark
+    references to 1e-12. The reach is isotropic, so the minimum member size
+    the radius enforces does not depend on feature orientation.
 
-    On a non-grid mesh the filter falls back to an explicit sparse-matrix
-    implementation with the radial kernel, so ``DensityFilter`` and
-    ``RadialDensityFilter`` coincide there; ``radius`` is a physical length
-    on every mesh type.
-    """
-
-    radius: float = 1.5
-
-    def __post_init__(self) -> None:
-        if self.radius <= 0.0:
-            raise ParametrizationError(f"radius must be > 0, got {self.radius}")
-
-    def build(self, mesh: Mesh) -> BoundLink:
-        """Precompute kernels and the mask normalization."""
-        if isinstance(mesh, StructuredGrid):
-            return _BoundDensityFilter(mesh, self.radius)
-        return _BoundMatrixFilter(mesh, self.radius)
-
-    @classmethod
-    def fd_example(cls, mesh: Mesh) -> DensityFilter:
-        """FD meta-test instance."""
-        return cls(radius=1.6 * float(np.max(mesh.element_volumes) ** (1.0 / mesh.dim)))
-
-
-class _BoundDensityFilter(BoundLink):
-    def __init__(self, mesh: StructuredGrid, radius: float) -> None:
-        self.mesh = mesh
-        self._weights: list[_F64] = []
-        halves = _axis_halves(mesh, radius)
-        for axis, half in enumerate(halves):
-            h = mesh.spacing[axis]
-            offs = np.arange(-half, half + 1)
-            w = np.maximum(0.0, 1.0 - np.abs(offs) * h / radius)
-            self._weights.append(w)
-        _warn_if_unfiltered(radius, _unfiltered_axes(mesh, halves))
-        active = mesh.active_elements.astype(np.float64)
-        self._active = active
-        # Bakes in the bind-context kernel (unlike apply/pullback, which
-        # resolve per call); fine under the kernels' rtol<=1e-12 agreement
-        # contract.
-        denom = self._kern()(mesh.to_grid(active), self._weights)
-        self._denom = np.maximum(mesh.to_flat(denom), 1e-300)
-
-    def _kern(self) -> Any:
-        # resolved per call: use_backend must apply to chains bound outside it
-        return get_kernel("separable_correlate")
-
-    def apply(self, x: _F64) -> _F64:
-        mesh = self.mesh
-        num = self._kern()(mesh.to_grid(x * self._active), self._weights)
-        out = mesh.to_flat(num) / self._denom
-        return np.where(mesh.active_elements, out, 0.0)
-
-    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
-        # Forward is F = A D^-1 C A (mask, normalize, correlate, mask), with
-        # A and D diagonal and the separable correlation C symmetric. The
-        # exact transpose is A C D^-1 A; the diagonal factors commute, so the
-        # code below (A C A D^-1) equals it. Keep that commutativity in mind
-        # before reordering these operations.
-        mesh = self.mesh
-        scaled = np.where(mesh.active_elements, grad_out / self._denom, 0.0)
-        back = self._kern()(mesh.to_grid(scaled), self._weights)
-        return mesh.to_flat(back) * self._active
-
-
-@dataclass(frozen=True)
-class RadialDensityFilter(LinkSpec):
-    """Radial-cone density filter; the topology-optimization literature standard.
-
-    Weights ``max(0, radius - dist)`` over the Euclidean element-center
-    distance, mask-aware (void excluded, solid pinned at 1) and row-normalized.
-    Unlike :class:`DensityFilter` (a cheaper separable approximation) the reach
-    is isotropic, reproducing the 88-line density filter (``ft = 2``); use it
-    when matching published references. Cost is O(n*r^dim) vs the separable
-    O(n*r), traded for a literature-faithful, orientation-independent kernel.
-
-    On a non-grid mesh this filter and :class:`DensityFilter` both dispatch
-    to the same sparse-matrix radial kernel, so they coincide there;
-    ``radius`` is a physical length on every mesh type.
+    Two implementations serve it, both exercised by the suite and agreeing to
+    1e-12 on a uniform grid: a grid fast path that correlates the dense
+    N-D kernel over the structured array (6 ms and 16 MiB to bind at 524k
+    elements), and an explicit sparse matrix for every other mesh (10.4 s and
+    1.2 GiB at the same size, which is why the fast path stays). The matrix
+    form scales each weight by the neighbor's element volume; on a uniform
+    mesh that factor cancels in the normalization.
     """
 
     radius: float = 1.5
@@ -486,22 +390,22 @@ class RadialDensityFilter(LinkSpec):
     def build(self, mesh: Mesh) -> BoundLink:
         """Precompute the radial kernel and the mask normalization."""
         if isinstance(mesh, StructuredGrid):
-            return _BoundRadialDensityFilter(mesh, self.radius)
+            return _BoundGridFilter(mesh, self.radius)
         return _BoundMatrixFilter(mesh, self.radius)
 
     @classmethod
-    def fd_example(cls, mesh: Mesh) -> RadialDensityFilter:
+    def fd_example(cls, mesh: Mesh) -> DensityFilter:
         """FD meta-test instance."""
         return cls(radius=1.6 * float(np.max(mesh.element_volumes) ** (1.0 / mesh.dim)))
 
 
-class _BoundRadialDensityFilter(BoundLink):
+class _BoundGridFilter(BoundLink):
+    """Radial cone correlated over the structured array; the grid fast path."""
+
     def __init__(self, mesh: StructuredGrid, radius: float) -> None:
         self.mesh = mesh
-        axes = []
         halves = _axis_halves(mesh, radius)
-        for axis, half in enumerate(halves):
-            axes.append(np.arange(-half, half + 1) * mesh.spacing[axis])
+        axes = [np.arange(-half, half + 1) * mesh.spacing[axis] for axis, half in enumerate(halves)]
         _warn_if_unfiltered(radius, _unfiltered_axes(mesh, halves))
         offsets = np.meshgrid(*axes, indexing="ij")
         dist = np.sqrt(sum(o**2 for o in offsets))
@@ -525,8 +429,10 @@ class _BoundRadialDensityFilter(BoundLink):
         return np.where(mesh.active_elements, out, 0.0)
 
     def pullback(self, x: _F64, grad_out: _F64) -> _F64:
-        # forward is A D^-1 C A with the radial correlation C symmetric; the
-        # transpose is A C D^-1 A (diagonal factors commute), as below.
+        # Forward is F = A D^-1 C A (mask, normalize, correlate, mask), with A
+        # and D diagonal and the radial correlation C symmetric. The exact
+        # transpose is A C D^-1 A; the diagonal factors commute, so the code
+        # below equals it. Keep that in mind before reordering these operations.
         mesh = self.mesh
         scaled = np.where(mesh.active_elements, grad_out / self._denom, 0.0)
         back = self._kern()(mesh.to_grid(scaled), self._kernel)
@@ -534,13 +440,13 @@ class _BoundRadialDensityFilter(BoundLink):
 
 
 class _BoundMatrixFilter(BoundLink):
-    """Radial hat-kernel filter as an explicit sparse matrix; serves any mesh.
+    """The same radial cone as an explicit sparse matrix; serves any mesh.
 
     Weights ``max(0, radius - dist)`` over Euclidean element-centroid
     distance, scaled by neighbor element volume (constant volumes cancel in
-    the normalization, so on a uniform mesh this reproduces the radial grid
-    filter exactly). Mask semantics match the grid filters: void is excluded,
-    normalization runs over active neighbors only.
+    the normalization, so on a uniform mesh this reproduces
+    :class:`_BoundGridFilter` exactly). Mask semantics match: void is
+    excluded, normalization runs over active neighbors only.
     """
 
     def __init__(self, mesh: Mesh, radius: float) -> None:

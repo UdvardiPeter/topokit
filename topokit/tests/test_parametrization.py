@@ -16,7 +16,6 @@ from topokit.parametrization import (
     DensityFilter,
     Heaviside,
     ParametrizationError,
-    RadialDensityFilter,
 )
 from topokit.testing import assert_gradient_matches
 
@@ -107,33 +106,22 @@ def test_density_filter_solid_pulls_neighbors_up() -> None:
     assert out[3] == pytest.approx(0.0)  # out of filter reach
 
 
-def test_radial_filter_reduces_to_separable_in_1d() -> None:
-    # in 1D the radial and separable kernels are proportional, so identical
-    # after the row normalization
-    g = StructuredGrid(shape=(3, 1), spacing=(1.0, 1.0))
-    x = np.array([1.0, 0.0, 0.0])
-    sep = (DensityFilter(radius=1.1) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(x)
-    rad = (RadialDensityFilter(radius=1.1) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(x)
-    np.testing.assert_allclose(rad, sep, rtol=1e-12)
-
-
-def test_radial_differs_from_separable_in_2d() -> None:
-    # in 2D the radial cone weights diagonal neighbors less than the separable box
+def test_density_filter_kernel_is_a_radial_cone() -> None:
+    # The kernel is max(0, radius - dist) over centroid distance, so a diagonal
+    # neighbor weighs 1.5 - sqrt(2), not the (1 - 1/1.5)^2 a separable
+    # tensor-product triangle would give. Impulse at the center of a 3x3, every
+    # value checked against the cone weights and that element's own row sum.
     g = StructuredGrid(shape=(3, 3), spacing=(1.0, 1.0))
     impulse = np.zeros(9)
     impulse[4] = 1.0  # center element (x-fastest id 4 = (1, 1))
-    sep = (DensityFilter(radius=1.5) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(impulse)
-    rad = (RadialDensityFilter(radius=1.5) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(impulse)
-    assert not np.allclose(rad, sep)
-    gs, gr = g.to_grid(sep), g.to_grid(rad)
-    # diagonal-to-face response ratio is smaller under the radial cone
-    assert gr[0, 0] / gr[1, 0] < gs[0, 0] / gs[1, 0]
+    out = (DensityFilter(radius=1.5) | SIMP(p=1.0, scale_min=0.0)).bind(g).apply(impulse)
 
-
-def test_radial_uniform_invariance() -> None:
-    g = StructuredGrid(shape=(4, 3), spacing=(0.7, 0.45))
-    bound = (RadialDensityFilter(radius=1.2) | SIMP(p=1.0, scale_min=0.0)).bind(g)
-    np.testing.assert_allclose(bound.apply(np.full(bound.n_vars, 0.6)), 0.6, rtol=1e-12)
+    w_self, w_face, w_diag = 1.5, 0.5, 1.5 - np.sqrt(2.0)
+    corner = w_diag / (w_self + 2 * w_face + w_diag)
+    edge = w_face / (w_self + 3 * w_face + 2 * w_diag)
+    center = w_self / (w_self + 4 * w_face + 4 * w_diag)
+    expected = np.array([corner, edge, corner, edge, center, edge, corner, edge, corner])
+    np.testing.assert_allclose(out, expected, rtol=1e-12)
 
 
 def test_chain_validates_input() -> None:
@@ -295,7 +283,7 @@ def test_simp_requires_p_at_least_one() -> None:
 
 def test_filter_kernel_resolves_at_call_time() -> None:
     from topokit.backend import NumpyBackend, register_kernel, use_backend
-    from topokit.parametrization import _separable_correlate
+    from topokit.parametrization import _radial_correlate
 
     class Named(NumpyBackend):
         @property
@@ -304,11 +292,11 @@ def test_filter_kernel_resolves_at_call_time() -> None:
 
     calls: list[str] = []
 
-    def marker(grid: np.ndarray, weights: list[np.ndarray]) -> np.ndarray:
+    def marker(grid: np.ndarray, kernel: np.ndarray) -> np.ndarray:
         calls.append("variant")
-        return _separable_correlate(grid, weights)
+        return _radial_correlate(grid, kernel)
 
-    register_kernel("separable_correlate", "filter_ctx", marker)
+    register_kernel("radial_correlate", "filter_ctx", marker)
     bound = (DensityFilter(radius=1.5) | SIMP()).bind(G42)  # bound OUTSIDE the context
     x = np.full(bound.n_vars, 0.5)
     with use_backend(Named()):
@@ -501,30 +489,29 @@ def test_matrix_filter_transpose_holds_with_nonuniform_volumes() -> None:
     assert np.isclose(float(f.apply(z) @ y), float(z @ f.pullback(x, y)), rtol=1e-12)
 
 
-def test_matrix_filter_matches_radial_filter_on_a_grid() -> None:
-    from topokit.parametrization import _BoundMatrixFilter, _BoundRadialDensityFilter
+def test_matrix_filter_matches_the_grid_filter() -> None:
+    from topokit.parametrization import _BoundGridFilter, _BoundMatrixFilter
 
     void = np.zeros(24, dtype=bool)
     void[5] = True
     g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0), void=void)
-    radial = _BoundRadialDensityFilter(g, radius=1.9)
+    grid_filter = _BoundGridFilter(g, radius=1.9)
     matrix = _BoundMatrixFilter(_stub_from_grid(g), radius=1.9)
     rng = np.random.default_rng(3)
     x = rng.uniform(0.0, 1.0, g.n_elements)
-    np.testing.assert_allclose(matrix.apply(x), radial.apply(x), rtol=1e-12, atol=1e-14)
+    np.testing.assert_allclose(matrix.apply(x), grid_filter.apply(x), rtol=1e-12, atol=1e-14)
     grad = rng.standard_normal(g.n_elements)
     np.testing.assert_allclose(
-        matrix.pullback(x, grad), radial.pullback(x, grad), rtol=1e-12, atol=1e-14
+        matrix.pullback(x, grad), grid_filter.pullback(x, grad), rtol=1e-12, atol=1e-14
     )
 
 
-def test_filters_dispatch_to_matrix_on_non_grid_meshes() -> None:
+def test_filter_dispatches_to_the_matrix_form_on_non_grid_meshes() -> None:
     from topokit.parametrization import _BoundMatrixFilter
 
     g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
     stub = _stub_from_grid(g)
     assert isinstance(DensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
-    assert isinstance(RadialDensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
 
 
 def test_chain_binds_on_a_non_grid_mesh_and_fd_verifies() -> None:
@@ -542,9 +529,8 @@ def test_chain_binds_on_a_non_grid_mesh_and_fd_verifies() -> None:
 
 
 def test_filter_radius_below_element_size_warns() -> None:
-    for link in (DensityFilter(radius=0.5), RadialDensityFilter(radius=0.5)):
-        with pytest.warns(UserWarning, match="no neighboring element"):
-            (link | SIMP()).bind(G42)
+    with pytest.warns(UserWarning, match="no neighboring element"):
+        (DensityFilter(radius=0.5) | SIMP()).bind(G42)
 
 
 def test_filter_warns_only_for_the_unfiltered_axis() -> None:
@@ -558,7 +544,6 @@ def test_default_filter_radius_on_a_unit_grid_is_silent() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         (DensityFilter() | SIMP()).bind(G42)
-        (RadialDensityFilter() | SIMP()).bind(G42)
 
 
 def test_matrix_filter_without_neighbors_warns() -> None:
