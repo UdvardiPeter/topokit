@@ -39,6 +39,8 @@ from typing import Any, ClassVar
 import numpy as np
 import numpy.typing as npt
 import scipy.ndimage
+import scipy.sparse
+from scipy.spatial import cKDTree
 
 from topokit.backend import get_kernel, register_kernel
 from topokit.exceptions import TopoKitError
@@ -441,9 +443,6 @@ class _BoundMatrixFilter(BoundLink):
     """
 
     def __init__(self, mesh: Mesh, radius: float) -> None:
-        from scipy import sparse
-        from scipy.spatial import cKDTree
-
         self.mesh = mesh
         active = np.asarray(mesh.active_elements)
         self._active_mask = active
@@ -452,23 +451,25 @@ class _BoundMatrixFilter(BoundLink):
         volumes = np.asarray(mesh.element_volumes)
         idx = np.flatnonzero(active)
         tree = cKDTree(centroids[idx])
-        neighbors = tree.query_ball_point(centroids[idx], r=radius)
-        counts = np.fromiter((len(nb) for nb in neighbors), dtype=np.int64, count=idx.size)  # type: ignore[arg-type]
-        if int(counts.max()) <= 1:
+        # Pairs come back already matched to their distances, so no ragged
+        # neighbor lists and no second distance pass. The zero self-distance is
+        # stored as an *explicit zero*, which is why no diagonal is added here;
+        # calling eliminate_zeros() on this distance matrix would silently drop
+        # every self-weight. (The eliminate_zeros() below is on the *weight*
+        # matrix, where a stored zero really is a zero weight.)
+        pairs = tree.sparse_distance_matrix(tree, radius, output_type="coo_matrix")
+        rows = idx[pairs.row]
+        cols = idx[pairs.col]
+        weights = np.maximum(0.0, radius - pairs.data) * volumes[cols]
+        n = mesh.n_elements
+        self._w = scipy.sparse.csr_matrix((weights, (rows, cols)), shape=(n, n))
+        if int(np.diff(self._w.indptr).max()) <= 1:
             # every active element neighbors only itself: the same degenerate
-            # identity the grid filters warn about, caught here on real distances
+            # identity the grid filter warns about, caught here on real distances
             typical = float(np.median(volumes[idx]) ** (1.0 / mesh.dim))
             _warn_if_unfiltered(radius, f"any direction (typical element size {typical:g})")
-        rows = np.repeat(idx, counts)
-        # active is never empty (an all-void mesh fails at construction) and
-        # every point neighbors itself, so the concatenation is never empty
-        cols = idx[np.concatenate(neighbors).astype(np.int64)]
-        dist = np.linalg.norm(centroids[rows] - centroids[cols], axis=1)
-        weights = np.maximum(0.0, radius - dist) * volumes[cols]
-        n = mesh.n_elements
-        self._w = sparse.csr_matrix((weights, (rows, cols)), shape=(n, n))
-        # query_ball_point is inclusive at r=radius, so exact-radius neighbors
-        # (weight = radius - dist = 0) get stored as explicit zeros; drop them.
+        # sparse_distance_matrix is inclusive at r=radius, so exact-radius
+        # neighbors (weight = radius - dist = 0) are stored as explicit zeros.
         self._w.eliminate_zeros()
         denom = np.asarray(self._w @ self._active).ravel()
         # every active row has at least its self-weight radius * volume > 0
