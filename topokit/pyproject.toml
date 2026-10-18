@@ -26,7 +26,8 @@ Repository = "https://github.com/UdvardiPeter/topokit"
 fast = ["pyamg>=5"]
 viz = ["pyvista>=0.44", "matplotlib>=3.8"]
 jax = ["jax>=0.10"]
-all = ["topokit[fast,viz,jax]"]
+mesh = ["meshio>=5.3"]
+all = ["topokit[fast,viz,jax,mesh]"]
 
 [project.entry-points."topokit.backends"]
 jax = "topokit.jax:BACKEND"
@@ -44,6 +45,7 @@ dev = [
   "pyvista>=0.44",
   "matplotlib>=3.8",
   "jax>=0.10",
+  "meshio>=5.3",
 ]
 
 [build-system]
@@ -70,6 +72,10 @@ strict = true
 files = ["src", "tests"]
 warn_unreachable = true
 cache_dir = "../.mypy_cache"
+
+[[tool.mypy.overrides]]
+module = "meshio.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

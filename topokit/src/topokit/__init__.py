@@ -15,9 +15,10 @@ from topokit.fem import (
     Material,
     PointLoad,
     SurfaceTraction,
+    UnstructuredElasticity,
 )
 from topokit.fields import FieldSpec
-from topokit.mesh import Mesh, StructuredGrid
+from topokit.mesh import Mesh, StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, StepResult
 from topokit.parametrization import (
     SIMP,
@@ -92,6 +93,8 @@ __all__ = [
     "Study",
     "SurfaceTraction",
     "SymmetryMap",
+    "UnstructuredElasticity",
+    "UnstructuredMesh",
     "Volume",
     "active_backend",
     "default_backend",
@@ -104,6 +107,12 @@ __all__ = [
 # (physics, optimizers, solvers, ...) store classes.
 registry.register("backends", "numpy", default_backend(), source="topokit.backend")
 registry.register("physics", "linear_elasticity", LinearElasticity, source="topokit.fem")
+registry.register(
+    "physics",
+    "unstructured_elasticity",
+    UnstructuredElasticity,
+    source="topokit.fem",
+)
 registry.register("solvers", "direct", Direct, source="topokit.solvers")
 registry.register("solvers", "amg_cg", AmgCG, source="topokit.solvers")
 registry.register("chain_links", "symmetry", SymmetryMap, source="topokit.parametrization")

@@ -19,6 +19,7 @@ density through ``chain.pullback_density``).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 import warnings
@@ -112,7 +113,19 @@ def _staged_chain(spec: Chain, mesh: Mesh, *, p: float, beta: float) -> BoundCha
     return _staged_spec(spec, p=p, beta=beta).bind(mesh)
 
 
-_NODES_PER_ELEMENT = {"quad4": 4, "hex8": 8}
+_NODES_PER_ELEMENT = {"quad4": 4, "hex8": 8, "tri3": 3, "tet4": 4, "tet10": 10}
+
+
+def _geometry_digest(mesh: Mesh) -> str:
+    """Hex digest of a mesh's node coordinates and connectivity.
+
+    The non-grid half of the checkpoint fingerprint: element counts alone
+    cannot tell two meshes over the same nodes apart.
+    """
+    digest = hashlib.sha256()
+    digest.update(mesh.nodes.tobytes())
+    digest.update(mesh.element_nodes.tobytes())
+    return digest.hexdigest()
 
 
 def _estimate_stiffness_bytes(n_dof: int, nnz: int) -> int:
@@ -531,11 +544,28 @@ class Study:
         # break resume against every checkpoint written for an unmodified
         # structured-grid problem before this code existed. The non-grid
         # branch is new territory with no prior checkpoints and is free to
-        # pick its own shape.
+        # pick its own shape: it adds a geometry digest over the node
+        # coordinates AND the connectivity, so a mesh with the same
+        # dim/n_elements/n_nodes but moved nodes or a different element
+        # topology (neither of which the counts can see) is still rejected on
+        # resume. Connectivity matters as much as coordinates: re-splitting a
+        # quad along the other diagonal keeps every count and every node
+        # coordinate, yet element 0 is a different triangle, so the stored
+        # design vector would resume onto the wrong elements. Hashing the raw
+        # node array (not per-element centroids) also catches a moved tet10
+        # midside node: centroids are corner-only and a midside move leaves
+        # every centroid unchanged.
         mesh_parts: tuple[object, ...] = (
             (tuple(mesh.shape), tuple(float(s) for s in mesh.spacing))
             if isinstance(mesh, StructuredGrid)
-            else ((mesh.dim, mesh.n_elements, mesh.n_nodes),)
+            else (
+                (
+                    mesh.dim,
+                    mesh.n_elements,
+                    mesh.n_nodes,
+                    _geometry_digest(mesh),
+                ),
+            )
         )
         return (
             *mesh_parts,

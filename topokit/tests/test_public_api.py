@@ -9,8 +9,10 @@ import topokit
 USER_FACING = [
     # mesh
     "StructuredGrid",
+    "UnstructuredMesh",
     # fem: model, materials, loads
     "LinearElasticity",
+    "UnstructuredElasticity",
     "Material",
     "STEEL",
     "ALUMINUM_6061",
