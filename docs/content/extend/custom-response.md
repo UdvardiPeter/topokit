@@ -78,7 +78,7 @@ print(f"x_centroid {result.history['x_centroid'][-1]:.3f}")
 
 Once added to `constraints` or passed as `objective`, the response appears in `result.history` under its own `name` (`"x_centroid"` here), the same place `"objective"` and every other constraint's series live.
 
-`XCentroid` never touches `solution.displacements`, so its gradient can be checked without a physics solve: bind the chain directly, evaluate it at a design `x`, and build a `Solution` with `model=None` and placeholder displacements.
+`XCentroid` reads only `solution.density` -- no displacements, no model -- so its gradient can be checked without a physics solve. `Solution.for_density` builds the state such a response needs: bind the chain, evaluate it at a design `x`, and hand the density straight over.
 
 ```python
 from topokit.testing import assert_gradient_matches
@@ -89,15 +89,12 @@ x = np.full(bound.n_vars, 0.5)
 
 def f(xx):
     ev = bound.evaluate(xx)
-    sol = Solution(model=None, mesh=mesh, displacements=np.zeros((1, 1)),
-                   interpolated=ev.field, density=ev.density)
-    return XCentroid().value(sol)
+    return XCentroid().value(Solution.for_density(mesh, ev.density))
 
 
 def grad(xx):
     ev = bound.evaluate(xx)
-    sol = Solution(model=None, mesh=mesh, displacements=np.zeros((1, 1)),
-                   interpolated=ev.field, density=ev.density)
+    sol = Solution.for_density(mesh, ev.density)
     return ev.pullback_density(XCentroid().grad_field(sol))
 
 

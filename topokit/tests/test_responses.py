@@ -131,11 +131,7 @@ def test_volume_value_and_region() -> None:
 
 
 def _solution_no_solve(g: StructuredGrid, chain: Any, x: np.ndarray) -> Solution:
-    scale = chain.apply(x)
-    rho = chain.physical_density(x)
-    return Solution(
-        model=None, mesh=g, displacements=np.zeros((1, 1)), interpolated=scale, density=rho
-    )
+    return Solution.for_density(g, chain.physical_density(x))
 
 
 def test_volume_gradient_fd() -> None:
@@ -433,3 +429,23 @@ def test_von_mises_selects_the_load_case() -> None:
     np.testing.assert_allclose(von_mises(sol, case=-1).values, second)
     with pytest.raises(ResponseError, match="out of range"):
         von_mises(sol, case=2)
+
+
+def test_for_density_needs_no_model_or_solve() -> None:
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
+    rho = np.linspace(0.2, 0.9, g.n_elements)
+    sol = Solution.for_density(g, rho)
+
+    assert sol.model is None
+    np.testing.assert_allclose(sol.density, rho)
+    np.testing.assert_allclose(sol.interpolated, rho)  # mirrored, not a real scale
+    # a density-basis response works off it
+    assert Volume().value(sol) == pytest.approx(float(rho.mean()))
+    np.testing.assert_allclose(Volume().grad_field(sol), np.full(g.n_elements, 1 / g.n_elements))
+
+
+def test_for_density_sends_an_fe_state_response_to_the_missing_model_error() -> None:
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
+    sol = Solution.for_density(g, np.full(g.n_elements, 0.5))
+    with pytest.raises(ResponseError, match="needs a solved model"):
+        Compliance().value(sol)

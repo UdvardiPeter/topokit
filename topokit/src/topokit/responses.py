@@ -54,6 +54,29 @@ class Solution:
     interpolated: _F64  # (n_elements,) stiffness scale from chain.apply
     density: _F64  # (n_elements,) physical density from chain.physical_density
 
+    @classmethod
+    def for_density(cls, mesh: Mesh, density: npt.ArrayLike) -> Solution:
+        """Build a solve-free Solution for a response that reads the density.
+
+        A response whose ``field_basis`` is ``"density"`` reads neither the
+        model nor the displacements, so finite-difference checking one needs
+        no physics solve -- just a mesh and a density field. This spares the
+        caller the ``model=None, displacements=np.zeros((1, 1))`` placeholders.
+
+        ``interpolated`` mirrors ``density`` rather than carrying a real
+        stiffness scale; an interpolated-basis response handed one of these
+        raises :class:`ResponseError` for the missing model, which is the
+        intended outcome -- it needs a solve.
+        """
+        rho = np.asarray(density, dtype=np.float64)
+        return cls(
+            model=None,
+            mesh=mesh,
+            displacements=np.zeros((1, 1)),
+            interpolated=rho,
+            density=rho,
+        )
+
 
 @runtime_checkable
 class Response(Protocol):
