@@ -1,8 +1,8 @@
 # benchmarks
 
 Tier-3 reference regression for TopoKit: the 2D MBB beam and cantilever at
-60x20 and 150x50, run with OC and MMA, validated against frozen reference
-fields.
+60x20 and 150x50, plus a tri3 cantilever at 60x20, run with OC and MMA,
+validated against frozen reference fields.
 
 Run: `npx nx run benchmarks:test-regression`.
 
@@ -33,12 +33,47 @@ OC, and the radial filter reproducing the 88-line filter — plus the
 independently-validated FE / optimizer / filter pieces; the frozen regression
 carries the precision and guards drift.
 
+The suite also includes one unstructured case per-PR: `cantilever_tri`, the
+same cantilever problem on a 60x20 tri3 mesh (deterministic quad-split
+triangulation, `UnstructuredElasticity`) instead of the quad4 grid. It gets
+the same frozen-reference assertions plus a dedicated cross-check
+(`test_tri3_vs_quad4_cantilever_agree`) against the quad4 `cantilever_60x20`
+reference. The two cases differ only in discretization — same box, supports,
+load point, plane-stress material, radial filter radius, SIMP exponent — so
+their compliance is close but not equal. The measured gap is 2.08%, tri3
+lower: constant-strain triangles are stiffer than bilinear quads at equal
+nodes, the split doubles the design variables, and its fixed diagonal biases
+the design. The gap and the tolerance derived from it are recorded in that
+test.
+
+The four unstructured references (`cantilever_tri_60x20_{oc,mma}`,
+`cantilever_tet4_16x8x8_oc`, `cantilever_tet10_10x5x5_oc`) were frozen on
+macOS arm64 — recorded in the files — not on the Linux platform CI runs on, so
+they spend part of the suite's cross-platform margin instead of leaving all of
+it for genuine numerical change. The tolerances are coarse enough to absorb
+that: the OC iteration is contractive, so a 1e-10 perturbation moves the final
+field by 1e-10 against a `1e-2` gate. The tri3 pair is validated
+cross-platform by the per-PR gate, the tet pair only by the nightly. Refreeze
+them on Linux at the next deliberate baseline reset.
+
 ## Regenerating references
 
 Reference `.npz` under `tests/data/` are regenerated only by deliberate
 maintainer action: `uv run python scripts/regenerate.py` (commit with a
 changelog note; never run in CI). Use `--only {2d,full,all}` to limit the set —
-e.g. `--only full` regenerates just the 3D + Michell references below.
+e.g. `--only full` regenerates just the 3D + Michell references below — and
+`--case SUBSTRING` to further limit it to reference files whose name contains
+the substring, e.g. `--only full --case cantilever_tet` touches only the
+tet4/tet10 nightly references, leaving every other frozen reference untouched.
+A `--case` matching nothing (a typo, or the wrong `--only` set) exits nonzero
+instead of reporting success over an unchanged tree.
+
+Each reference holds the frozen `density`, `compliance`, `volume` and
+`iterations`, plus the provenance to read them against: `element_kind`,
+`n_elements`, `optimizer`, `penal`, `max_iter`, `tol`, the `platform` it was
+frozen on and the `topokit` version. Only the unstructured references carry
+the provenance keys so far — the earlier baselines predate them and pick them
+up on their next regeneration.
 
 ## Nightly full suite
 
@@ -49,15 +84,22 @@ correctness on top of the per-PR 2D gate:
   frozen-reference regression with the same reference assertions as the 2D suite
   (volume, compliance, density field, iteration band) plus OC/MMA agreement, and
   a mirror-symmetry topology check on the Michell reference.
+- **Unstructured 3D cantilever** — the same 3D cantilever problem on
+  `UnstructuredElasticity` simplex meshes: `cantilever_tet4` (`16x8x8`, OC) and
+  `cantilever_tet10` (`10x5x5`, OC; shrunk from `12x6x6` — that size measured at
+  2.27x the hex `cantilever_3d_24x12x12` case's wall time, over the ~2x nightly
+  runtime budget). Same frozen-reference assertions as the other nightly cases,
+  no separate literature anchor.
 - **Robustness sweep** (`test_robustness.py`) — `volfrac x rmin x resolution`
   over the 2D builders plus small 3D points, asserting *clean convergence*
   (finite field in `[0, 1]`, volume on target, net objective progress, no
   blow-up) rather than frozen values.
 
-3D / Michell references are regenerated with `scripts/regenerate.py --only full`
-(maintainer-only). The anchor is the same as the 2D suite — method-level lineage
-(hex8 element, SIMP, compliance, BCs) plus the frozen `.npz` guarding drift — not
-a published 3D compliance number.
+3D / Michell / unstructured references are regenerated with
+`scripts/regenerate.py --only full` (maintainer-only; add `--case SUBSTRING` to
+target one case). The anchor is the same as the 2D suite — method-level lineage
+(element formulation, SIMP, compliance, BCs) plus the frozen `.npz` guarding
+drift — not a published 3D compliance number.
 
 ## Scaling study
 

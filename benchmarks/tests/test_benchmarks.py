@@ -33,12 +33,38 @@ def test_matches_reference(name: str, nelx: int, nely: int, opt_name: str) -> No
     assert abs(result.iterations - int(ref["iterations"])) <= 0.25 * int(ref["iterations"]) + 1
 
 
+# Every geometry in the 2D matrix, derived from CASES rather than listed: a
+# hardcoded list leaves a newly added case silently ungated, which is how
+# cantilever_tri landed with an MMA reference nothing compared against. Each 2D
+# case is frozen for both optimizers, so an OC-only addition fails here loudly
+# rather than being skipped.
+_GEOMETRIES = sorted({(name, nelx, nely) for name, nelx, nely, _ in CASES})
+
+
 @pytest.mark.regression
-@pytest.mark.parametrize("name", ["mbb", "cantilever"])
-@pytest.mark.parametrize("nelx,nely", [(60, 20), (150, 50)])
+@pytest.mark.parametrize("name,nelx,nely", _GEOMETRIES)
 def test_oc_and_mma_agree(name: str, nelx: int, nely: int) -> None:
     # the two optimizers reach the same optimum; checked on the frozen references
     # so the per-PR suite does not pay a second full run per case.
     c_oc = float(np.load(DATA / f"{name}_{nelx}x{nely}_oc.npz")["compliance"])
     c_mma = float(np.load(DATA / f"{name}_{nelx}x{nely}_mma.npz")["compliance"])
     assert abs(c_mma - c_oc) / c_oc < 0.05
+
+
+@pytest.mark.regression
+def test_tri3_vs_quad4_cantilever_agree() -> None:
+    # tri3 (cantilever_tri) vs quad4 (cantilever) cantilever compliance at
+    # 60x20, read off the frozen OC references, so this pays no extra run and
+    # gates the pair whenever either is regenerated rather than every run.
+    # Both cases are the same problem bar the discretization: same box, same
+    # supports and load point, same plane-stress material, same radial filter
+    # radius and SIMP exponent.
+    # Measured gap: 2.08%, tri3 the lower. Three small effects, all pushing
+    # the same way: constant-strain triangles are stiffer than bilinear quads
+    # at equal nodes, the split doubles the design variables, and its fixed
+    # diagonal biases the design. Tolerance ~2x the measured gap (the plan's
+    # 0.15 cap does not bind). A modeling inconsistency -- a different
+    # constitutive mode, filter kernel or load node -- moves this by far more.
+    c_quad = float(np.load(DATA / "cantilever_60x20_oc.npz")["compliance"])
+    c_tri = float(np.load(DATA / "cantilever_tri_60x20_oc.npz")["compliance"])
+    assert abs(c_tri - c_quad) / c_quad < 0.05
