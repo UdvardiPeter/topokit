@@ -5,7 +5,6 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  actions: read
 jobs:
   nightly:
     runs-on: ubuntu-latest
@@ -13,31 +12,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       # pyamg is in topokit's dev group, so the standard sync installs it and the
-      # AmgCG path exercises on the larger 3D bench sizes.
-      - run: uv sync --all-packages --frozen
-      # test-regression (2D smalls) is a per-PR tier; the nightly runs the heavy
-      # tiers the per-PR gate skips. e2e is deferred (Phase 3/4).
-      - name: Heavy tiers (run-many; main HEAD, no PR diff)
-        run: npx nx run-many -t test test-fd test-regression-full --skip-nx-cache
+      # AmgCG path exercises on the larger 3D bench sizes. viz and jax are extras,
+      # so they are named explicitly or their tests skip.
+      - run: uv sync --all-packages --extra viz --extra jax --frozen
+      # The regression tier (2D smalls) is a per-PR gate; the nightly runs the
+      # heavy tiers the per-PR gate skips. e2e is deferred (Phase 3/4).
+      - name: Heavy tiers (main HEAD, no PR diff)
+        run: |
+          uv run --directory topokit pytest
+          uv run --directory benchmarks pytest -m "not regression and not regression_full"
+          uv run --directory benchmarks pytest -m regression_full -n auto
       # The perf gate runs alone, after the test tiers, because its timings are
       # the measurement: sharing the runner's 2 vCPUs with pytest -n auto added
       # ~2.8 s/iteration of size-independent cost to every case. Runs after a
       # failing tier too, so a red night still yields perf numbers, but not
-      # after a cancellation. `nx run` rather than run-many because run-many
-      # silently skips a target no project defines, so a rename of bench-check
-      # would leave the nightly green having gated nothing.
+      # after a cancellation.
       - name: Perf gate (alone; its timings are the measurement)
         if: success() || failure()
-        run: npx nx run benchmarks:bench-check --skip-nx-cache
+        run: uv run --directory benchmarks python scripts/bench.py --check
       - uses: actions/upload-artifact@v4
         if: always()
         with:
