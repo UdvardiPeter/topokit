@@ -139,6 +139,20 @@ def _geometry_digest(mesh: Mesh) -> str:
     return digest.hexdigest()
 
 
+def _mask_digest(mesh: Mesh) -> str:
+    """Hex digest of a mesh's solid and void masks.
+
+    Which elements are fixed material and which are removed is part of the
+    problem's identity, and neither the element counts nor ``n_dof`` can see
+    a swap that keeps them equal (moving the solid element from one end of
+    the grid to the other, say).
+    """
+    digest = hashlib.sha256()
+    digest.update(np.asarray(mesh.solid).tobytes())
+    digest.update(np.asarray(mesh.void).tobytes())
+    return digest.hexdigest()
+
+
 def _estimate_stiffness_bytes(n_dof: int, nnz: int) -> int:
     """Rough CSR float64 stiffness-matrix size: data + indices + indptr."""
     return nnz * (8 + 4) + (n_dof + 1) * 4
@@ -577,11 +591,11 @@ class Study:
         p = self.problem
         assert self.schedule is not None
         mesh = p.model.mesh
-        # This tuple is repr()-hashed into the checkpoint fingerprint, so the
-        # grid case unpacks shape/spacing flat (matching the pre-Mesh-protocol
-        # layout byte-for-byte); regrouping them would change the hash and
-        # break resume against every checkpoint written for an unmodified
-        # structured-grid problem before this code existed. The non-grid
+        # This tuple is repr()-hashed into the checkpoint fingerprint. The
+        # grid case unpacks shape/spacing flat, which is also the layout every
+        # earlier checkpoint used; the mask digest below changes the hash for
+        # both kinds anyway, which is what SCHEMA_VERSION 2 announces. The
+        # non-grid
         # branch is new territory with no prior checkpoints and is free to
         # pick its own shape: it adds a geometry digest over the node
         # coordinates AND the connectivity, so a mesh with the same
@@ -608,6 +622,7 @@ class Study:
         )
         return (
             *mesh_parts,
+            _mask_digest(mesh),
             int(p.model.n_dof),
             repr(p.chain.spec),
             p.objective.name,

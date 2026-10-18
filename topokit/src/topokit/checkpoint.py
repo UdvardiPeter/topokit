@@ -21,7 +21,9 @@ import numpy as np
 import numpy.typing as npt
 
 _F64 = npt.NDArray[np.float64]
-SCHEMA_VERSION = 1
+# 2: the config fingerprint gained a digest of the solid/void masks, so a
+# checkpoint written under schema 1 cannot be verified against it.
+SCHEMA_VERSION = 2
 
 
 def config_fingerprint(parts: tuple[Any, ...]) -> str:

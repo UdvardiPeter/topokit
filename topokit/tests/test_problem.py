@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from topokit.checkpoint import read_topo
+from topokit.checkpoint import read_topo, write_topo
 from topokit.events import (
     FieldSnapshot,
     IterationFinished,
@@ -1020,3 +1020,58 @@ def test_problem_accepts_a_lone_terminal_link() -> None:
 def test_problem_rejects_a_lone_non_terminal_link() -> None:
     with pytest.raises(ParametrizationError, match="terminal"):
         Problem(_cantilever(), DensityFilter(radius=1.5), objective=Compliance())
+
+
+def _masked_problem(solid_element: int) -> Problem:
+    """A cantilever with exactly one solid element, chosen by id."""
+    solid = np.zeros(8, dtype=bool)
+    solid[solid_element] = True
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
+    model = LinearElasticity(
+        g,
+        Material(E=1.0, nu=0.3, rho=1.0),
+        supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9), "all")],
+        loads=[PointLoad(NearPoint((4.0, 1.0)), (0.0, -1.0))],
+    )
+    return Problem(
+        model,
+        SIMP(p=3.0),
+        objective=Compliance(),
+        constraints=[Volume() <= 0.4],
+        optimizer=OC(move=0.2),
+    )
+
+
+def test_resume_rejects_a_moved_solid_mask(tmp_path: Path) -> None:
+    # The two problems agree on every count the fingerprint used to carry:
+    # same shape, spacing, n_dof, design-variable count and chain. Only which
+    # element is solid differs, so the stored design vector would resume onto
+    # a differently masked mesh.
+    first, moved = _masked_problem(0), _masked_problem(7)
+    assert first.model.n_dof == moved.model.n_dof
+    assert first.chain.n_vars == moved.chain.n_vars
+
+    path = tmp_path / "masked.topo"
+    Study(
+        first,
+        schedule=Schedule.single(p=3.0, max_iter=3, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=3,
+    ).run()
+    with pytest.raises(ProblemError, match="different problem"):
+        Study.resume(moved, str(path))
+
+
+def test_resume_rejects_an_older_schema(tmp_path: Path) -> None:
+    path = tmp_path / "old.topo"
+    Study(
+        _masked_problem(0),
+        schedule=Schedule.single(p=3.0, max_iter=3, tol=0.0),
+        checkpoint_path=str(path),
+        checkpoint_every=3,
+    ).run()
+    manifest, arrays = read_topo(str(path))
+    manifest["schema"] = 1
+    write_topo(str(path), manifest, arrays)
+    with pytest.raises(ProblemError, match=r"unsupported \.topo schema 1"):
+        Study.resume(_masked_problem(0), str(path))
