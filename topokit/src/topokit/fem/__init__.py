@@ -41,6 +41,7 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
+import scipy.sparse
 
 from topokit.backend import SparseMatrix, active_backend, get_kernel, register_kernel
 from topokit.exceptions import FemError
@@ -461,6 +462,25 @@ def _build_loads(
     return out[free, :]
 
 
+def _chunk_pattern(edofs_chunk: _I64, n_dof: int) -> Any:
+    """Sparsity pattern of one chunk of elements, as a deduplicated CSR.
+
+    COO-to-CSR conversion is exactly the dedup-and-sort this needs, so scipy
+    does it; the data is bool because only the pattern is ever read. Indices
+    stay int32 (``n_dof`` and ``nnz`` are both well inside it), which halves
+    the pattern memory.
+    """
+    m = edofs_chunk.shape[1]
+    ef = edofs_chunk.astype(np.int32)
+    rows = np.repeat(ef, m, axis=1).ravel()
+    cols = np.tile(ef, (1, m)).ravel()
+    keep = (rows >= 0) & (cols >= 0)
+    return scipy.sparse.coo_array(
+        (np.ones(int(keep.sum()), dtype=bool), (rows[keep], cols[keep])),
+        shape=(n_dof, n_dof),
+    ).tocsr()
+
+
 def _csr_pattern_positions(
     edofs_free: _I64, n_dof: int, chunk: int = 16384
 ) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32]]:
@@ -468,36 +488,38 @@ def _csr_pattern_positions(
 
     Returns ``(indptr, indices, pos)`` with ``pos[k, e]`` the CSR data slot of
     element ``e``'s local stiffness entry ``k = a*m + b``; entries touching a
-    fixed DOF point at the trailing dump slot ``nnz``. Chunked so setup
-    transients stay bounded.
+    fixed DOF point at the trailing dump slot ``nnz``. Both passes run in
+    chunks of ``chunk`` elements so setup transients stay bounded by the
+    chunk and the pattern, never by ``n_elements * m**2``.
     """
     n_ae, m = edofs_free.shape
-    keys_unique = np.empty(0, dtype=np.int64)
-    for lo in range(0, n_ae, chunk):
-        ef = edofs_free[lo : lo + chunk].astype(np.int64)
-        rows = np.repeat(ef, m, axis=1).ravel()
-        cols = np.tile(ef, (1, m)).ravel()
-        keep = (rows >= 0) & (cols >= 0)
-        keys_unique = np.union1d(keys_unique, rows[keep] * n_dof + cols[keep])
-    nnz = int(keys_unique.size)
+    pattern = _chunk_pattern(edofs_free[:chunk], n_dof)
+    for lo in range(chunk, n_ae, chunk):
+        pattern = pattern + _chunk_pattern(edofs_free[lo : lo + chunk], n_dof)
+    indptr = np.asarray(pattern.indptr, dtype=np.int32)
+    indices = np.asarray(pattern.indices, dtype=np.int32)
+    nnz = int(indices.size)
     # int32 halves the pattern memory; positions index the data array, so the
     # binding bound is nnz (~81 per DOF in 3D), not n_dof. int32 overflows at
     # ~2.1e9 entries (~8.5M 3D elements), far beyond any grid this path can
     # hold in memory, but fail loud rather than silently wrap.
     if nnz >= np.iinfo(np.int32).max:
         raise FemError(f"CSR pattern has {nnz} nonzeros, exceeding int32 indexing")
-    indices = (keys_unique % n_dof).astype(np.int32)
-    counts = np.bincount((keys_unique // n_dof).astype(np.int64), minlength=n_dof)
-    indptr = np.concatenate([[0], np.cumsum(counts)]).astype(np.int32)
+    # A second CSR over the same pattern, carrying each entry's data slot as
+    # its value: sampling it at (row, col) is the position lookup.
+    slots = scipy.sparse.csr_array(
+        (np.arange(nnz, dtype=np.int32), indices, indptr), shape=(n_dof, n_dof)
+    )
     pos = np.full((m * m, n_ae), nnz, dtype=np.int32)
     for lo in range(0, n_ae, chunk):
-        ef = edofs_free[lo : lo + chunk].astype(np.int64)
+        ef = edofs_free[lo : lo + chunk]
         rows = np.repeat(ef, m, axis=1)
         cols = np.tile(ef, (1, m))
-        keys = (rows * n_dof + cols).ravel()
-        found = np.searchsorted(keys_unique, keys).clip(max=max(nnz - 1, 0))
-        ok = (rows.ravel() >= 0) & (cols.ravel() >= 0)
-        p = np.where(ok, found, nnz).astype(np.int32)
+        ok = (rows >= 0) & (cols >= 0)
+        # fixed-DOF entries are sampled at (0, 0) and then overwritten with
+        # the dump slot: a negative index would wrap to the far end instead
+        found = slots[np.where(ok, rows, 0).ravel(), np.where(ok, cols, 0).ravel()]
+        p = np.where(ok.ravel(), np.asarray(found), nnz).astype(np.int32)
         pos[:, lo : lo + ef.shape[0]] = p.reshape(ef.shape[0], m * m).T
     return indptr, indices, pos
 
