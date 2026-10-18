@@ -603,3 +603,52 @@ def test_near_nullspace_3d_shape() -> None:
     b = model.near_nullspace()
     assert b.shape == (model.n_dof, 6)
     assert np.linalg.matrix_rank(b) == 6
+
+
+def test_a_per_element_stack_assembles_exactly_like_the_shared_matrix() -> None:
+    """`ElasticityBase`'s hook may return either stiffness layout.
+
+    One assembly kernel serves both because the base hands it the stiffness
+    pair-major, so a grid's single matrix and a per-element stack carrying
+    copies of it must produce the same CSR data bit for bit. This is also the
+    smallest `ElasticityBase` subclass in the suite: one overridden hook.
+    """
+
+    class StackedElasticity(LinearElasticity):
+        def _build_elements(
+            self, conn: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            ke, b, face_w, body_w = super()._build_elements(conn)
+            n_ae = conn.shape[0]
+            return (
+                np.broadcast_to(ke, (n_ae, *ke.shape)).copy(),
+                np.broadcast_to(b, (n_ae, *b.shape)).copy(),
+                face_w,
+                body_w,
+            )
+
+    void = np.zeros(8, dtype=bool)
+    void[5] = True
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.5), void=void)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    supports = [(left, "all")]
+    loads = [SurfaceTraction(Box((4.0, 0.0), (4.0, 3.0), tol=1e-9), traction=(1.0, -2.0))]
+    shared = LinearElasticity(g, STEEL, supports, loads)
+    stacked = StackedElasticity(g, STEEL, supports, loads)
+
+    rng = np.random.default_rng(20261018)
+    scale = rng.uniform(0.2, 1.0, g.n_elements)
+    u = rng.normal(size=shared.n_dof)
+    np.testing.assert_array_equal(shared.loads(), stacked.loads())
+    np.testing.assert_array_equal(
+        np.asarray(shared.assemble(scale).csr_arrays()[2]),
+        np.asarray(stacked.assemble(scale).csr_arrays()[2]),
+    )
+    # the energy and stress contractions broadcast over both layouts; BLAS
+    # reassociates between them, so they agree to rounding, not bit for bit
+    np.testing.assert_allclose(
+        shared.element_energies(u, scale), stacked.element_energies(u, scale), rtol=1e-12
+    )
+    np.testing.assert_allclose(
+        shared.element_stress(u, scale), stacked.element_stress(u, scale), rtol=1e-12
+    )

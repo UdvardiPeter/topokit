@@ -6,6 +6,11 @@ Runs identical checks against `StructuredGrid` and `UnstructuredMesh` so a
 regression in either implementation shows up immediately. If an assertion
 here fails against `StructuredGrid`, the assertion is wrong: `StructuredGrid`
 is the reference implementation, not the suite.
+
+The protocol members `MeshBase` derives (`active_elements`, `active_nodes`,
+`node_index_map`, the `boundary_faces` cache) are checked once against a
+minimal subclass at the bottom of this file instead of once per fixture:
+both shipped implementations inherit the one implementation.
 """
 
 from __future__ import annotations
@@ -16,7 +21,14 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from topokit.mesh import Mesh, StructuredGrid, UnstructuredMesh
+from topokit.mesh import (
+    BoundaryFaces,
+    Mesh,
+    MeshBase,
+    MeshError,
+    StructuredGrid,
+    UnstructuredMesh,
+)
 
 
 @dataclass(frozen=True)
@@ -187,22 +199,6 @@ class TestMeshConformance:
         assert not (m.solid & m.void).any()
         assert not m.void.all()
 
-    def test_active_elements_is_not_void(self, fx: Fixture) -> None:
-        m = fx.mesh
-        np.testing.assert_array_equal(m.active_elements, ~m.void)
-
-    def test_active_nodes_match_active_element_references(self, fx: Fixture) -> None:
-        m = fx.mesh
-        referenced = set(m.element_nodes[m.active_elements].ravel().tolist())
-        active_ids = set(np.nonzero(m.active_nodes)[0].tolist())
-        assert active_ids == referenced
-
-    def test_node_index_map_is_consecutive_over_active_nodes(self, fx: Fixture) -> None:
-        m = fx.mesh
-        n_active = int(m.active_nodes.sum())
-        np.testing.assert_array_equal(m.node_index_map[m.active_nodes], np.arange(n_active))
-        assert (m.node_index_map[~m.active_nodes] == -1).all()
-
     def test_element_volumes_positive_and_sum_to_domain_measure(self, fx: Fixture) -> None:
         m = fx.mesh
         assert (m.element_volumes > 0).all()
@@ -216,15 +212,6 @@ class TestMeshConformance:
             centroid = m.element_centroids[e]
             assert (centroid >= lo - 1e-12).all()
             assert (centroid <= hi + 1e-12).all()
-
-    def test_boundary_faces_deterministic(self, fx: Fixture) -> None:
-        m = fx.mesh
-        a, b = m.boundary_faces(), m.boundary_faces()
-        np.testing.assert_array_equal(a.owner, b.owner)
-        np.testing.assert_array_equal(a.nodes, b.nodes)
-        np.testing.assert_allclose(a.normal, b.normal)
-        np.testing.assert_allclose(a.area, b.area)
-        np.testing.assert_allclose(a.centroid, b.centroid)
 
     def test_boundary_faces_owners_are_active(self, fx: Fixture) -> None:
         m = fx.mesh
@@ -266,3 +253,88 @@ class TestMeshConformance:
         ):
             with pytest.raises(ValueError, match="read-only"):
                 arr[0] = 0
+
+
+# --- MeshBase: the derived members, checked once ----------------------
+
+
+class _TwoTriangles(MeshBase):
+    # The whole authoring surface of MeshBase, and nothing else: the five
+    # geometry members, the masks, and the face builder. If this class needs
+    # to grow, the base stopped deriving something it used to.
+    def __init__(self, void: list[bool] | None = None) -> None:
+        self._nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+        self._elements = np.array([[0, 1, 2], [0, 2, 3]])
+        self.face_builds = 0
+        self._set_masks(None, void)
+
+    @property
+    def element_kind(self) -> str:
+        return "tri3"
+
+    @property
+    def nodes(self) -> np.ndarray:
+        return self._nodes
+
+    @property
+    def element_nodes(self) -> np.ndarray:
+        return self._elements
+
+    @property
+    def element_volumes(self) -> np.ndarray:
+        return np.full(2, 0.5)
+
+    @property
+    def element_centroids(self) -> np.ndarray:
+        return np.asarray(self._nodes[self._elements].mean(axis=1))
+
+    def _compute_boundary_faces(self) -> BoundaryFaces:
+        self.face_builds += 1
+        return BoundaryFaces(
+            owner=np.array([0, 0, 1, 1]),
+            normal=np.array([[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]),
+            area=np.ones(4),
+            centroid=np.array([[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]]),
+            nodes=np.array([[0, 1], [1, 2], [2, 3], [3, 0]]),
+        )
+
+
+def test_base_fills_in_the_rest_of_the_protocol() -> None:
+    assert isinstance(_TwoTriangles(), Mesh)
+
+
+def test_base_counts_come_off_the_arrays() -> None:
+    m = _TwoTriangles()
+    assert (m.n_nodes, m.n_elements, m.dim) == (4, 2, 2)
+
+
+def test_base_active_elements_is_not_void() -> None:
+    m = _TwoTriangles(void=[False, True])
+    np.testing.assert_array_equal(m.active_elements, ~m.void)
+    np.testing.assert_array_equal(m.design, [True, False])
+
+
+def test_base_active_nodes_match_active_element_references() -> None:
+    m = _TwoTriangles(void=[False, True])
+    referenced = set(m.element_nodes[m.active_elements].ravel().tolist())
+    assert set(np.nonzero(m.active_nodes)[0].tolist()) == referenced
+
+
+def test_base_node_index_map_is_consecutive_over_active_nodes() -> None:
+    m = _TwoTriangles(void=[False, True])
+    n_active = int(m.active_nodes.sum())
+    np.testing.assert_array_equal(m.node_index_map[m.active_nodes], np.arange(n_active))
+    assert (m.node_index_map[~m.active_nodes] == -1).all()
+
+
+def test_base_builds_boundary_faces_once_and_caches_them() -> None:
+    m = _TwoTriangles()
+    assert m.boundary_faces() is m.boundary_faces()
+    assert m.face_builds == 1
+
+
+def test_base_validates_the_masks_it_is_given() -> None:
+    with pytest.raises(MeshError, match="shape"):
+        _TwoTriangles(void=[True])
+    with pytest.raises(MeshError, match="all elements are void"):
+        _TwoTriangles(void=[True, True])

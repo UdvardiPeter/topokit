@@ -532,8 +532,8 @@ def test_tet10_body_force_consistent_weights_on_free_dofs() -> None:
 def test_void_elements_leave_the_system_tri3() -> None:
     """Voiding the right half must give the same answer as never meshing it.
 
-    Every per-element array the model keeps (``_ke_stack``,
-    ``_centroid_b_stack``, ``_edofs_free``) is indexed over ACTIVE elements
+    Every per-element array the model keeps (``_ke``, ``_centroid_b``,
+    ``_edofs_free``) is indexed over ACTIVE elements
     while the public ones (``element_energies``, ``element_stress``,
     ``scale``) are indexed over all elements, so a mesh with void elements
     is the only thing that exercises the two numberings against each other.
@@ -744,7 +744,7 @@ def test_compliance_gradient_fd_through_full_stack_tri3() -> None:
 def test_compliance_gradient_fd_through_full_stack_tet10() -> None:
     """The same FD check on a quadratic tet mesh (a 1x1x1 Kuhn box, 6 tet10s).
 
-    The adjoint is only right if the ``_ke_stack`` that ``element_energies``
+    The adjoint is only right if the ``_ke`` stack that ``element_energies``
     contracts is exactly the one ``assemble`` scatters, and tet10 is the one
     element whose stack comes out of a quadrature loop rather than a closed
     form -- so it needs its own check, not just tri3's.

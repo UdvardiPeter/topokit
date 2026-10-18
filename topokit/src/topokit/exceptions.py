@@ -8,6 +8,11 @@ catches ``ValueError`` keeps working. ``TopoKitError`` sits alongside those
 so a caller can wrap a whole run in one ``except`` without naming every
 module, and so adding an error type later does not break that catch.
 
+``FemError`` is the exception to "each module keeps its own": ``topokit.fem``
+is a package whose element kernels raise it, and a submodule importing it
+from the package root would close an import cycle. ``topokit.fem`` re-exports
+it, so ``from topokit.fem import FemError`` still works.
+
 This module has no imports and sits at the bottom of the layer DAG.
 """
 
@@ -29,3 +34,7 @@ class TopoKitError(Exception):
     The specific types stay available (and keep their builtin bases), so
     ``except ProblemError`` and ``except ValueError`` are both unaffected.
     """
+
+
+class FemError(TopoKitError, ValueError):
+    """Invalid physics setup or input."""
