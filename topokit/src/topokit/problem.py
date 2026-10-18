@@ -690,15 +690,21 @@ class Study:
         t0 = time.perf_counter()
         self.events.publish(StudyStarted(config={"stages": len(self.schedule.stages)}))
 
-        ran_any = False
-        prev_spec: Chain | None = None
-        for stage_index, stage in enumerate(self.schedule.stages):
-            if stage_index < start_stage:
+        # Decide which stages run before running any: a stage whose staged spec
+        # repeats the previous one changes nothing, and resolving that here
+        # means no skipped stage index can leak into a checkpoint cursor.
+        planned: list[tuple[int, Stage, Chain]] = []
+        for index, stage in enumerate(self.schedule.stages):
+            if index < start_stage:
                 continue  # already completed in a prior session (resume)
             staged = _staged_spec(p.chain.spec, p=stage.p, beta=stage.beta)
-            if staged == prev_spec:
-                continue  # dedup: identical to the previous executed stage (no bind paid)
-            prev_spec = staged
+            if planned and staged == planned[-1][2]:
+                continue  # identical to the previous executed stage: no bind paid
+            planned.append((index, stage, staged))
+
+        ran_any = False
+        final_cursor: tuple[int, int, float | None] | None = None
+        for stage_index, stage, staged in planned:
             chain = staged.bind(p.model.mesh)
             self._final_chain = chain
             p.optimizer.setup(chain.n_vars, np.zeros(chain.n_vars), np.ones(chain.n_vars))
@@ -725,8 +731,10 @@ class Study:
                 j_start = 1
             self._converged = False
 
+            reached = 0  # the last iteration this stage actually ran
             for j in range(j_start, stage.max_iter + 1):
                 iteration += 1
+                reached = j
                 ran_any = True
                 sol, f0, df0, gvals, dgs, responses = self._evaluate(x, chain)
                 if c0 is None:
@@ -792,15 +800,19 @@ class Study:
                     self._checkpoint(stage_index, j + 1, iteration, x, c0)
 
             self._reason = stage_reason
+            if reached:
+                # resuming at the end of a stage leaves the range empty, so only
+                # a stage that ran can name the cursor to resume from
+                final_cursor = (stage_index, reached + 1, c0)
             self.events.publish(StageFinished(stage=stage_index, reason=stage_reason))
 
-        if not ran_any:
+        if not ran_any or final_cursor is None:
             raise ProblemError(
-                "nothing to resume: the checkpoint is already at the end of its schedule; "
-                "continue it with Study.resume(problem, path, schedule=...) carrying a "
-                "larger per-stage max_iter or more stages"
+                "nothing to resume: the checkpoint is already at the end of its schedule. "
+                "Start a new study from the result instead: "
+                "Study(problem, schedule=longer, x0=result.x)"
             )
-        self._checkpoint(stage_index, j + 1, iteration, x, c0)
+        self._checkpoint(*final_cursor[:2], iteration, x, final_cursor[2])
         self._timing = time.perf_counter() - t0
         self.events.publish(
             StudyFinished(
