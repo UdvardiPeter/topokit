@@ -170,12 +170,161 @@ class Mesh(Protocol):
         ...
 
 
-class StructuredGrid:
+class MeshBase:
+    """Optional base for `Mesh` implementations: the derived half of the protocol.
+
+    Seven of the protocol's fifteen members follow mechanically from the
+    other eight, so a subclass supplies only what its geometry decides --
+    `nodes`, `element_nodes`, `element_kind`, `element_volumes`,
+    `element_centroids`, the ``solid``/``void`` masks (through `_set_masks`)
+    and `_compute_boundary_faces` -- and gets `n_nodes`, `n_elements`, `dim`,
+    `design`, `active_elements`, `active_nodes`, `node_index_map` and the
+    caching `boundary_faces` accessor from here. The derivations are the
+    binding conventions: ``design = ~(solid | void)``,
+    ``active_elements = ~void``, a node is active when a non-void element
+    references it, and `node_index_map` numbers the active nodes
+    consecutively in node-id order with ``-1`` elsewhere.
+
+    `StructuredGrid` and `UnstructuredMesh` are both built on it. Subclassing
+    is optional -- the runtime-checkable `Mesh` protocol stays the
+    consumption contract -- and a mesh that can count its nodes and elements
+    more cheaply than the base's array shapes should override `n_nodes`,
+    `n_elements` and `dim`, as `StructuredGrid` does.
+    """
+
+    # Written by _set_masks and read by every derived member below. The
+    # face cache is a class default so a subclass needs no __init__ line.
+    _solid: _Bool
+    _void: _Bool
+    _boundary_faces: BoundaryFaces | None = None
+
+    def _set_masks(self, solid: npt.ArrayLike | None, void: npt.ArrayLike | None) -> None:
+        """Validate and store the element masks; call from ``__init__``.
+
+        Reads `n_elements`, so the geometry must already be in place. An
+        all-void mesh has no system to solve, so it is rejected here rather
+        than as an empty matrix two layers up.
+        """
+        self._solid = _validate_mask(solid, self.n_elements, "solid")
+        self._void = _validate_mask(void, self.n_elements, "void")
+        if bool((self._solid & self._void).any()):
+            raise MeshError("solid and void masks must be disjoint")
+        if bool(self._void.all()):
+            raise MeshError("all elements are void")
+
+    @property
+    def nodes(self) -> _F64:
+        """Node coordinates, shape ``(n_nodes, dim)``; a subclass must provide it."""
+        raise NotImplementedError
+
+    @property
+    def element_nodes(self) -> _I64:
+        """Connectivity, shape ``(n_elements, nodes_per_element)``; subclass-provided."""
+        raise NotImplementedError
+
+    @property
+    def element_kind(self) -> str:
+        """Element identifier, e.g. ``"quad4"``; subclass-provided."""
+        raise NotImplementedError
+
+    @property
+    def element_volumes(self) -> _F64:
+        """Element volumes (areas in 2D), shape ``(n_elements,)``; subclass-provided."""
+        raise NotImplementedError
+
+    @property
+    def element_centroids(self) -> _F64:
+        """Element centroids, shape ``(n_elements, dim)``; subclass-provided."""
+        raise NotImplementedError
+
+    @property
+    def n_nodes(self) -> int:
+        """Number of nodes, off the node array."""
+        return int(self.nodes.shape[0])
+
+    @property
+    def n_elements(self) -> int:
+        """Number of elements, off the connectivity."""
+        return int(self.element_nodes.shape[0])
+
+    @property
+    def dim(self) -> int:
+        """Spatial dimension, off the node array."""
+        return int(self.nodes.shape[1])
+
+    @property
+    def solid(self) -> _Bool:
+        """Elements with fixed material."""
+        return self._solid
+
+    @property
+    def void(self) -> _Bool:
+        """Elements removed from the system."""
+        return self._void
+
+    @cached_property
+    def design(self) -> _Bool:
+        """Elements whose density is optimized."""
+        out = ~(self._solid | self._void)
+        out.flags.writeable = False
+        return out
+
+    @cached_property
+    def active_elements(self) -> _Bool:
+        """Elements that are part of the system (non-void)."""
+        out = ~self._void
+        out.flags.writeable = False
+        return out
+
+    @cached_property
+    def active_nodes(self) -> _Bool:
+        """Nodes referenced by at least one non-void element."""
+        active = np.zeros(self.n_nodes, dtype=bool)
+        active[self.element_nodes[self.active_elements].ravel()] = True
+        active.flags.writeable = False
+        return active
+
+    @cached_property
+    def node_index_map(self) -> _I64:
+        """Node id to condensed id; ``-1`` for inactive nodes."""
+        out = np.full(self.n_nodes, -1, dtype=np.int64)
+        out[self.active_nodes] = np.arange(int(self.active_nodes.sum()), dtype=np.int64)
+        out.flags.writeable = False
+        return out
+
+    def boundary_faces(self) -> BoundaryFaces:
+        """Faces of non-void elements not shared with another non-void element.
+
+        Computed once by `_compute_boundary_faces` and cached, so face ids
+        (indices into the arrays) are stable identifiers for the lifetime of
+        the mesh.
+        """
+        if self._boundary_faces is None:
+            self._boundary_faces = self._compute_boundary_faces()
+        return self._boundary_faces
+
+    def _compute_boundary_faces(self) -> BoundaryFaces:
+        """Build the boundary faces; called once, behind `boundary_faces`."""
+        raise NotImplementedError
+
+    def _role_suffix(self) -> str:
+        """``", 3 solid, 1 void"`` for ``__repr__``; empty when all elements are design."""
+        roles = []
+        if self._solid.any():
+            roles.append(f"{int(self._solid.sum())} solid")
+        if self._void.any():
+            roles.append(f"{int(self._void.sum())} void")
+        return f", {', '.join(roles)}" if roles else ""
+
+
+class StructuredGrid(MeshBase):
     """Regular quad/hex grid with anisotropic spacing and element masks.
 
     Instances are immutable after construction: geometry and masks are
     exposed as read-only properties, derived arrays are cached and
     write-protected. Masks are flat arrays in element-id (x-fastest) order.
+    Boundary-face nodes come out in perimeter order with unspecified
+    winding; the outward normal is explicit.
     """
 
     def __init__(
@@ -205,25 +354,12 @@ class StructuredGrid:
                 f"origin length ({len(origin)}) must match shape length ({len(self._shape)})"
             )
         self._origin = tuple(float(x) for x in origin)
-
-        self._solid = _validate_mask(solid, self.n_elements, "solid")
-        self._void = _validate_mask(void, self.n_elements, "void")
-        if bool((self._solid & self._void).any()):
-            raise MeshError("solid and void masks must be disjoint")
-        if bool(self._void.all()):
-            raise MeshError("all elements are void")
-        self._boundary_faces: BoundaryFaces | None = None
+        self._set_masks(solid, void)
 
     def __repr__(self) -> str:
-        roles = []
-        if self._solid.any():
-            roles.append(f"{int(self._solid.sum())} solid")
-        if self._void.any():
-            roles.append(f"{int(self._void.sum())} void")
-        suffix = f", {', '.join(roles)}" if roles else ""
         return (
             f"StructuredGrid(shape={self.shape}, spacing={self.spacing}, "
-            f"origin={self.origin}, {self.n_elements} elements{suffix})"
+            f"origin={self.origin}, {self.n_elements} elements{self._role_suffix()})"
         )
 
     @property
@@ -240,16 +376,6 @@ class StructuredGrid:
     def origin(self) -> tuple[float, ...]:
         """Coordinates of the first node."""
         return self._origin
-
-    @property
-    def solid(self) -> _Bool:
-        """Elements with fixed material."""
-        return self._solid
-
-    @property
-    def void(self) -> _Bool:
-        """Elements removed from the system."""
-        return self._void
 
     @classmethod
     def box(
@@ -280,6 +406,8 @@ class StructuredGrid:
         spacing = tuple(s / n for s, n in zip(size, shape, strict=True))
         return cls(shape=shape, spacing=spacing, origin=origin)
 
+    # The counts come off the shape, not off the arrays the base would read:
+    # a grid must not materialize its connectivity just to be counted.
     @property
     def n_elements(self) -> int:
         """Number of elements."""
@@ -299,20 +427,6 @@ class StructuredGrid:
     def element_kind(self) -> str:
         """``"quad4"`` in 2D, ``"hex8"`` in 3D."""
         return "quad4" if self.dim == 2 else "hex8"
-
-    @cached_property
-    def design(self) -> _Bool:
-        """Elements whose density is optimized."""
-        out = ~(self._solid | self._void)
-        out.flags.writeable = False
-        return out
-
-    @cached_property
-    def active_elements(self) -> _Bool:
-        """Elements that are part of the system (non-void)."""
-        out = ~self._void
-        out.flags.writeable = False
-        return out
 
     @cached_property
     def nodes(self) -> _F64:
@@ -369,22 +483,6 @@ class StructuredGrid:
         out.flags.writeable = False
         return out
 
-    @cached_property
-    def active_nodes(self) -> _Bool:
-        """Nodes referenced by at least one non-void element."""
-        active = np.zeros(self.n_nodes, dtype=bool)
-        active[self.element_nodes[self.active_elements].ravel()] = True
-        active.flags.writeable = False
-        return active
-
-    @cached_property
-    def node_index_map(self) -> _I64:
-        """Old node id to condensed id; ``-1`` for inactive nodes."""
-        out = np.full(self.n_nodes, -1, dtype=np.int64)
-        out[self.active_nodes] = np.arange(int(self.active_nodes.sum()), dtype=np.int64)
-        out.flags.writeable = False
-        return out
-
     def to_grid(self, flat: npt.NDArray[Any]) -> npt.NDArray[Any]:
         """View a flat element array as the ``(nx, ny[, nz])`` grid.
 
@@ -422,18 +520,8 @@ class StructuredGrid:
             shift = {0: 1, 1: x, 2: layer}[axis]
         return offsets + (shift if positive else 0)
 
-    def boundary_faces(self) -> BoundaryFaces:
-        """Faces of non-void elements not shared with another non-void element.
-
-        Computed once and cached; face ids (indices into the arrays) are
-        stable. Face nodes are in perimeter order; winding is unspecified,
-        the outward normal is explicit.
-        """
-        if self._boundary_faces is None:
-            self._boundary_faces = self._compute_boundary_faces()
-        return self._boundary_faces
-
     def _compute_boundary_faces(self) -> BoundaryFaces:
+        """Sweep the six (four in 2D) axis directions for unpaired element faces."""
         active = self.to_grid(self.active_elements)
         volume = math.prod(self.spacing)
         owners: list[_I64] = []
@@ -500,6 +588,7 @@ _FACE_CORNER_PATTERNS: dict[str, tuple[tuple[int, ...], ...]] = {
     "tet4": ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)),
     "tet10": ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)),
 }
+
 
 # VTK_QUADRATIC_TETRA midside column, keyed by the unordered pair of
 # corner-local indices whose edge midpoint it sits on.
@@ -628,7 +717,7 @@ def _meshio_nodes(points: npt.ArrayLike, kind: str) -> _F64:
     return arr
 
 
-class UnstructuredMesh:
+class UnstructuredMesh(MeshBase):
     """Simplex mesh (tri3, tet4, or tet10) with element masks.
 
     Instances are immutable after construction: geometry and masks are
@@ -637,7 +726,9 @@ class UnstructuredMesh:
     node ordering; ``tet10`` is VTK_QUADRATIC_TETRA (4 vertices, then
     midsides on edges (0,1),(1,2),(2,0),(0,3),(1,3),(2,3)). Elements must
     have positive signed area/volume; construction raises rather than
-    silently reorienting.
+    silently reorienting. Boundary faces come out ordered by their sorted
+    corner-node-id tuple, so a face id identifies the same facet for any
+    mesh with the same connectivity.
     """
 
     def __init__(
@@ -666,7 +757,6 @@ class UnstructuredMesh:
             raise MeshError(
                 f"element kind {element_kind!r} requires {expected_dim}D nodes, got dim {dim}"
             )
-        self._dim = dim
         # NaN survives every comparison below (`nan <= 0.0` is False), so the
         # signed-measure check cannot see it: without this guard a mesh with a
         # NaN or inf coordinate constructs happily and every downstream number
@@ -701,27 +791,13 @@ class UnstructuredMesh:
         elements_arr.flags.writeable = False
         self._nodes = nodes_arr
         self._elements = elements_arr
-
-        self._solid = _validate_mask(solid, self.n_elements, "solid")
-        self._void = _validate_mask(void, self.n_elements, "void")
-        if bool((self._solid & self._void).any()):
-            raise MeshError("solid and void masks must be disjoint")
-        if bool(self._void.all()):
-            raise MeshError("all elements are void")
-
+        self._set_masks(solid, void)
         self._groups = self._validated_groups(groups)
-        self._boundary_faces: BoundaryFaces | None = None
 
     def __repr__(self) -> str:
-        roles = []
-        if self._solid.any():
-            roles.append(f"{int(self._solid.sum())} solid")
-        if self._void.any():
-            roles.append(f"{int(self._void.sum())} void")
-        suffix = f", {', '.join(roles)}" if roles else ""
         return (
             f"UnstructuredMesh(kind={self._kind!r}, {self.n_elements} elements, "
-            f"{self.n_nodes} nodes{suffix})"
+            f"{self.n_nodes} nodes{self._role_suffix()})"
         )
 
     def _validated_groups(self, groups: dict[str, npt.ArrayLike] | None) -> dict[str, _I64]:
@@ -739,21 +815,6 @@ class UnstructuredMesh:
         return out
 
     @property
-    def n_nodes(self) -> int:
-        """Number of nodes."""
-        return int(self._nodes.shape[0])
-
-    @property
-    def n_elements(self) -> int:
-        """Number of elements."""
-        return int(self._elements.shape[0])
-
-    @property
-    def dim(self) -> int:
-        """Spatial dimension."""
-        return self._dim
-
-    @property
     def element_kind(self) -> str:
         """``"tri3"``, ``"tet4"``, or ``"tet10"``, as given to the constructor."""
         return self._kind
@@ -767,16 +828,6 @@ class UnstructuredMesh:
     def element_nodes(self) -> _I64:
         """Connectivity, shape ``(n_elements, nodes_per_element)``."""
         return self._elements
-
-    @property
-    def solid(self) -> _Bool:
-        """Elements with fixed material."""
-        return self._solid
-
-    @property
-    def void(self) -> _Bool:
-        """Elements removed from the system."""
-        return self._void
 
     @property
     def groups(self) -> dict[str, _I64]:
@@ -884,7 +935,7 @@ class UnstructuredMesh:
         ``tet10`` volumes use the corner tetrahedron; exact for straight
         edges.
         """
-        out = _signed_measure(self._nodes, self._elements, self._kind, self._dim)
+        out = _signed_measure(self._nodes, self._elements, self._kind, self.dim)
         out.flags.writeable = False
         return out
 
@@ -899,35 +950,6 @@ class UnstructuredMesh:
         out = np.asarray(self._nodes[self._elements[:, :n_corners]].mean(axis=1), dtype=np.float64)
         out.flags.writeable = False
         return out
-
-    @cached_property
-    def active_nodes(self) -> _Bool:
-        """Nodes referenced by at least one non-void element."""
-        active = np.zeros(self.n_nodes, dtype=bool)
-        active[self._elements[self.active_elements].ravel()] = True
-        active.flags.writeable = False
-        return active
-
-    @cached_property
-    def node_index_map(self) -> _I64:
-        """Old node id to condensed id; ``-1`` for inactive nodes."""
-        out = np.full(self.n_nodes, -1, dtype=np.int64)
-        out[self.active_nodes] = np.arange(int(self.active_nodes.sum()), dtype=np.int64)
-        out.flags.writeable = False
-        return out
-
-    def boundary_faces(self) -> BoundaryFaces:
-        """Faces of non-void elements not shared with another non-void element.
-
-        Computed once and cached; face ids (indices into the arrays) are
-        stable, ordered by each face's sorted corner-node-id tuple. Corner
-        nodes are ordered so the normal points away from the owner; tet10
-        faces additionally carry the 3 midside nodes of their corner edges,
-        appended after the 3 corners.
-        """
-        if self._boundary_faces is None:
-            self._boundary_faces = self._compute_boundary_faces()
-        return self._boundary_faces
 
     def _compute_boundary_faces(self) -> BoundaryFaces:
         patterns = _FACE_CORNER_PATTERNS[self._kind]
@@ -973,9 +995,9 @@ class UnstructuredMesh:
         n_face_nodes = n_corner + (3 if self._kind == "tet10" else 0)
         n_faces = len(boundary)
         owner = np.empty(n_faces, dtype=np.int64)
-        normal = np.empty((n_faces, self._dim), dtype=np.float64)
+        normal = np.empty((n_faces, self.dim), dtype=np.float64)
         area = np.empty(n_faces, dtype=np.float64)
-        centroid = np.empty((n_faces, self._dim), dtype=np.float64)
+        centroid = np.empty((n_faces, self.dim), dtype=np.float64)
         face_nodes = np.empty((n_faces, n_face_nodes), dtype=np.int64)
 
         for row, (_key, e, pattern) in enumerate(boundary):
