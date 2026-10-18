@@ -2,13 +2,16 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tier-1 tests for topokit.viz (headless: asserts on data/geometry, not pixels)."""
 
+import pytest
+
+pytest.importorskip("pyvista")  # the [viz] extra, not a dev dependency
+
 import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
-import pytest
 from matplotlib.figure import Figure
 
 from topokit.fields import DesignField

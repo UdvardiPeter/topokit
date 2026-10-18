@@ -2,7 +2,7 @@
 
 TopoKit is a layered library. Each module sits behind a small protocol and can be
 replaced without touching the rest. Layer boundaries are enforced in CI by
-import-linter; the `boundaries` target fails on any violation.
+import-linter; `uv run --directory topokit lint-imports` fails on any violation.
 
 ## Layers
 
@@ -53,7 +53,13 @@ L3 modules are mutually independent. Core dependencies are only NumPy and SciPy.
 | Tier | What | When |
 |---|---|---|
 | 0 | ruff, mypy strict, import-linter boundaries | every PR |
-| 1 | unit tests, FEM patch and analytic tests | every PR |
-| 2 | finite-difference checks of every gradient (`test-fd`) | every PR |
+| 1 | unit tests: FEM patch and analytic cases, finite-difference gradient checks | every PR |
+| 2 | the documentation's code blocks execute as written | every PR |
 | 3 | benchmark regressions against published results | small on PR, full nightly |
 | 4 | end-to-end CAD pipeline, performance budgets | nightly and release |
+
+Gradient checks are Tier-1 unit tests, not a tier of their own. Every analytic
+pullback is verified against a finite difference with
+`topokit.testing.assert_gradient_matches`, in the 20 tests that live beside the
+code they check: `test_responses.py`, `test_parametrization.py` and
+`test_fem_unstructured.py`. `test_fd_harness.py` tests that harness itself.

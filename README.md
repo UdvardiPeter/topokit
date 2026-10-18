@@ -89,7 +89,8 @@ Pre-alpha. The numerical core runs end to end (2D and 3D)
 ## Dev quick start
 
 ```
-npm ci
-uv sync --all-packages
-npx nx run-many -t lint typecheck boundaries test test-fd
+uv sync --all-packages --extra viz --extra jax
+uv run --directory topokit pytest
 ```
+
+Every gate the PR workflow runs is listed in [CONTRIBUTING.md](CONTRIBUTING.md).

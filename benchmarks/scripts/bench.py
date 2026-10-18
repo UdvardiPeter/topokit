@@ -133,9 +133,7 @@ def _compare(report: dict[str, Any]) -> None:
     if not BASELINE.exists():
         raise SystemExit(f"no committed baseline at {BASELINE}; run without --check first")
     baseline = load_baseline(BASELINE)
-    failures, notes = check_regressions(baseline, report)
-    for note in notes:
-        print(f"note: {note}")
+    failures = check_regressions(baseline, report)
     if failures:
         for failure in failures:
             print(f"REGRESSION: {failure}")

@@ -5,47 +5,45 @@ on:
     branches: [main]
 permissions:
   contents: read
-  actions: read
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          # The docs-pages gate and bench scripts read the git history.
           fetch-depth: 0
-      - uses: nrwl/nx-set-shas@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: npm ci
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --all-packages --frozen
-      - uses: actions/cache@v4
-        with:
-          path: .nx/cache
-          key: nx-${{ runner.os }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-${{ github.sha }}
-          restore-keys: nx-${{ runner.os }}-${{ hashFiles('uv.lock', 'package-lock.json') }}-
+      # viz and jax are extras, not dev dependencies, so a contributor's plain
+      # `uv sync` skips their tests. CI installs them, so nothing is skipped here.
+      - run: uv sync --all-packages --extra viz --extra jax --frozen
       - name: Lint
-        run: npx nx affected -t lint
+        run: |
+          uv run --directory topokit ruff check src tests
+          uv run --directory topokit ruff format --check src tests
+          uv run --directory benchmarks ruff check src tests scripts
+          uv run --directory benchmarks ruff format --check src tests scripts
       - name: Type check
-        run: npx nx affected -t typecheck
+        run: |
+          uv run --directory topokit mypy
+          uv run --directory benchmarks mypy
       - name: Import boundaries
-        run: npx nx affected -t boundaries
+        run: uv run --directory topokit lint-imports
       - name: Unit tests
-        run: npx nx affected -t test
-      - name: FD gradient tests
-        run: npx nx affected -t test-fd
+        run: |
+          uv run --directory topokit pytest
+          uv run --directory benchmarks pytest -m "not regression and not regression_full"
       - name: Regression (Tier 3)
-        run: npx nx affected -t test-regression
+        run: uv run --directory benchmarks pytest -m regression -n auto
       - name: Build
-        run: npx nx affected -t build
+        run: uv build --package topokit
+        env:
+          SOURCE_DATE_EPOCH: "315532800"
       - name: Docs build
-        run: npx nx affected -t docs-build
-      # Executes the code blocks in the documentation. The docs project depends
-      # on topokit, so a library change runs this too -- a page that drifts from
+        run: uv run --group docs mkdocs build --strict
+      # Executes the code blocks in the documentation: a page that drifts from
       # the API fails here instead of in the next nightly.
       - name: Docs pages execute
-        run: npx nx affected -t docs-pages
+        run: uv run --directory benchmarks pytest -q tests/test_docs_pages.py

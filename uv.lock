@@ -1692,14 +1692,12 @@ viz = [
 [package.dev-dependencies]
 dev = [
     { name = "import-linter" },
-    { name = "jax" },
     { name = "matplotlib" },
     { name = "meshio" },
     { name = "mypy" },
     { name = "pyamg" },
     { name = "pytest" },
     { name = "pytest-cov" },
-    { name = "pyvista" },
     { name = "ruff" },
     { name = "scipy-stubs" },
 ]
@@ -1720,14 +1718,12 @@ provides-extras = ["fast", "viz", "jax", "mesh", "all"]
 [package.metadata.requires-dev]
 dev = [
     { name = "import-linter", specifier = ">=2.1" },
-    { name = "jax", specifier = ">=0.10" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "meshio", specifier = ">=5.3" },
     { name = "mypy", specifier = ">=1.14,<2" },
     { name = "pyamg", specifier = ">=5" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-cov", specifier = ">=6.0" },
-    { name = "pyvista", specifier = ">=0.44" },
     { name = "ruff", specifier = ">=0.9" },
     { name = "scipy-stubs", specifier = ">=1.17" },
 ]

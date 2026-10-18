@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
+import pytest
+
+pytest.importorskip("jax")  # the [jax] extra, not a dev dependency
+
 import numpy as np
 
 import topokit.jax

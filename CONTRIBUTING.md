@@ -3,14 +3,13 @@
 ## Dev setup
 
 ```
-npm ci
-uv sync --all-packages
-npx nx run-many -t lint typecheck boundaries test test-fd
+uv sync --all-packages --extra viz --extra jax
+uv run --directory topokit pytest
 ```
 
-The last command is what CI runs (affected-only on PRs). Green locally means green in CI.
-
-Requires Node >= 20.19 and uv. Python 3.12 is installed by uv automatically.
+Requires uv. Python 3.12 is installed by uv automatically. The two extras are
+what CI installs: without them `test_viz.py` and `test_jax.py` skip and mypy
+cannot check `topokit.viz` or `topokit.jax`.
 
 ## Rules
 
@@ -19,7 +18,7 @@ Requires Node >= 20.19 and uv. Python 3.12 is installed by uv automatically.
   `topokit.testing.assert_gradient_matches`. PRs adding a `Response` or
   `ChainLink` without one will not be merged.
 - mypy strict, ruff, and import-linter gate every PR. Module boundaries are
-  enforced by the `boundaries` target.
+  enforced by `lint-imports` against the contract in `topokit/pyproject.toml`.
 - New `ArrayBackend` implementations must pass the conformance suite. Subclass
   `topokit.backend.conformance.ArrayBackendConformance` in your tests and set
   `backend`. Register a module-level instance (not the class) via an entry
@@ -38,16 +37,33 @@ Every commit needs a `Signed-off-by` line (`git commit -s`), certifying the
 [Developer Certificate of Origin](https://developercertificate.org/).
 There is no CLA. Contributions are MIT, permanently.
 
-## Common commands
+## What the PR gate runs
 
-| What | Command |
-|---|---|
-| Everything CI checks | `npx nx run-many -t lint typecheck boundaries test test-fd` |
-| Unit tests only | `npx nx run topokit:test` |
-| FD gradient tests | `npx nx run topokit:test-fd` |
-| Autofix lint + format | `npx nx run topokit:format` |
-| Build the wheel | `npx nx run topokit:build` |
-| Build the docs | `npx nx run docs:docs-build` |
+In this order, and nothing else. Run all of it and green locally means green in
+CI; the test suite alone does not, because it leaves out the regression tier,
+the wheel build and the two documentation gates.
 
-Nx caches results. Second runs are instant. `npx nx affected -t test` runs only
-what your change touched.
+```
+# lint and format
+uv run --directory topokit ruff check src tests
+uv run --directory topokit ruff format --check src tests
+uv run --directory benchmarks ruff check src tests scripts
+uv run --directory benchmarks ruff format --check src tests scripts
+# types and module boundaries
+uv run --directory topokit mypy
+uv run --directory benchmarks mypy
+uv run --directory topokit lint-imports
+# tests
+uv run --directory topokit pytest
+uv run --directory benchmarks pytest -m "not regression and not regression_full"
+uv run --directory benchmarks pytest -m regression -n auto
+# packaging and docs
+uv build --package topokit
+uv run --group docs mkdocs build --strict
+uv run --directory benchmarks pytest -q tests/test_docs_pages.py
+```
+
+To autofix instead of checking, drop `--check` from `ruff format` and add `--fix`
+to `ruff check`. The nightly adds the heavy tiers (`-m regression_full`) and the
+perf gate (`uv run --directory benchmarks python scripts/bench.py --check`, Linux
+x86_64 only; see `benchmarks/README.md`).

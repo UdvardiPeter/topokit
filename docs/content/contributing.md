@@ -6,7 +6,8 @@ in the repository.
 Quick start:
 
 ```
-npm ci
-uv sync --all-packages
-npx nx run-many -t lint typecheck boundaries test test-fd
+uv sync --all-packages --extra viz --extra jax
+uv run --directory topokit pytest
 ```
+
+The full list of gates the PR workflow runs is in `CONTRIBUTING.md`.
