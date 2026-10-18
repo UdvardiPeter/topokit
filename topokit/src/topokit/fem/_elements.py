@@ -32,7 +32,6 @@ _F64 = npt.NDArray[np.float64]
 _I64 = npt.NDArray[np.int64]
 
 NDOF: dict[str, int] = {"tri3": 6, "tet4": 12, "tet10": 30}
-NODES_PER_FACE: dict[str, int] = {"tri3": 2, "tet4": 3, "tet10": 6}
 
 # Consistent nodal weights for constant traction on a straight boundary face
 # (shape-function integration); multiply by traction * face area. tet10's

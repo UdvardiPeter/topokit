@@ -226,22 +226,6 @@ class StructuredGrid:
             f"origin={self.origin}, {self.n_elements} elements{suffix})"
         )
 
-    def __getstate__(self) -> dict[str, Any]:
-        """Pickle only the defining state; caches rebuild on demand."""
-        return {
-            "_shape": self._shape,
-            "_spacing": self._spacing,
-            "_origin": self._origin,
-            "_solid": self._solid,
-            "_void": self._void,
-        }
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        self.__dict__.update(state)
-        for mask in (self._solid, self._void):
-            mask.flags.writeable = False  # numpy does not preserve the flag
-        self._boundary_faces = None
-
     @property
     def shape(self) -> tuple[int, ...]:
         """Element counts per axis."""
@@ -553,15 +537,15 @@ def _signed_measure(nodes: _F64, elements: _I64, kind: str, dim: int) -> _F64:
 # meshio cell-type name -> topokit element kind
 _MESHIO_CELL_KIND: dict[str, str] = {"triangle": "tri3", "tetra": "tet4", "tetra10": "tet10"}
 
-MESH_HINT = "reading external mesh files needs the [mesh] extra: pip install topokit[mesh]"
-
 
 def _require_meshio() -> ModuleType:
     """Import meshio or raise with the ``[mesh]`` install hint."""
     try:
         import meshio
     except ImportError as exc:
-        raise ImportError(MESH_HINT) from exc
+        raise ImportError(
+            "reading external mesh files needs the [mesh] extra: pip install topokit[mesh]"
+        ) from exc
     return cast(ModuleType, meshio)
 
 
@@ -739,24 +723,6 @@ class UnstructuredMesh:
             f"UnstructuredMesh(kind={self._kind!r}, {self.n_elements} elements, "
             f"{self.n_nodes} nodes{suffix})"
         )
-
-    def __getstate__(self) -> dict[str, Any]:
-        """Pickle only the defining state; caches rebuild on demand."""
-        return {
-            "_kind": self._kind,
-            "_dim": self._dim,
-            "_nodes": self._nodes,
-            "_elements": self._elements,
-            "_solid": self._solid,
-            "_void": self._void,
-            "_groups": self._groups,
-        }
-
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        self.__dict__.update(state)
-        for arr in (self._nodes, self._elements, self._solid, self._void, *self._groups.values()):
-            arr.flags.writeable = False  # numpy does not preserve the flag
-        self._boundary_faces = None
 
     def _validated_groups(self, groups: dict[str, npt.ArrayLike] | None) -> dict[str, _I64]:
         if groups is None:

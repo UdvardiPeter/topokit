@@ -221,21 +221,6 @@ def test_box_accepts_numpy_scalar_element_size() -> None:
     assert g.shape == (2, 2)
 
 
-def test_pickle_is_lean_and_preserves_immutability() -> None:
-    import pickle
-
-    g = StructuredGrid(shape=(20, 20, 20), spacing=(1.0, 1.0, 1.0))
-    _ = g.element_nodes  # populate caches
-    _ = g.boundary_faces()
-    blob = pickle.dumps(g)
-    assert len(blob) < 100_000  # caches are not serialized
-    g2 = pickle.loads(blob)
-    assert not g2.void.flags.writeable
-    assert not g2.solid.flags.writeable
-    np.testing.assert_array_equal(g2.element_nodes, g.element_nodes)
-    assert g2.boundary_faces().n_faces == g.boundary_faces().n_faces
-
-
 def test_constructor_accepts_plain_lists_as_masks() -> None:
     g = StructuredGrid(shape=(2, 1), spacing=(1.0, 1.0), void=[False, True])
     np.testing.assert_array_equal(g.void, [False, True])
@@ -465,36 +450,6 @@ def test_unstructured_groups_are_stored_and_read_only() -> None:
     np.testing.assert_array_equal(m.groups["top"], [1])
     with pytest.raises(ValueError, match="read-only"):
         m.groups["top"][0] = 0
-
-
-def test_unstructured_pickle_is_lean_and_preserves_immutability() -> None:
-    import pickle
-
-    m = UnstructuredMesh(
-        _SQUARE_NODES,
-        _SQUARE_ELEMENTS,
-        "tri3",
-        void=[True, False],
-        groups={"top": [1]},
-    )
-    _ = m.element_centroids  # populate caches
-    _ = m.boundary_faces()
-    blob = pickle.dumps(m)
-    m2 = pickle.loads(blob)
-
-    assert "element_centroids" not in m2.__dict__  # caches are not serialized
-    assert "design" not in m2.__dict__
-    np.testing.assert_array_equal(m2.nodes, m.nodes)
-    np.testing.assert_array_equal(m2.element_nodes, m.element_nodes)
-    np.testing.assert_array_equal(m2.void, m.void)
-    np.testing.assert_array_equal(m2.solid, m.solid)
-    np.testing.assert_array_equal(m2.groups["top"], m.groups["top"])
-    assert m2.boundary_faces().n_faces == m.boundary_faces().n_faces
-
-    for arr in (m2.nodes, m2.element_nodes, m2.void, m2.solid, m2.groups["top"]):
-        assert not arr.flags.writeable
-        with pytest.raises(ValueError, match="read-only"):
-            arr[0] = 0
 
 
 def test_duplicated_elements_leave_no_boundary_and_say_so() -> None:

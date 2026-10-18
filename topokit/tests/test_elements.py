@@ -18,7 +18,6 @@ import pytest
 from topokit.fem import FemError, Material, _d_matrix
 from topokit.fem._elements import (
     NDOF,
-    NODES_PER_FACE,
     body_weights,
     centroid_b_stack,
     face_weights,
@@ -69,7 +68,6 @@ def _d(dim: int) -> np.ndarray:
 
 def test_ndof_and_nodes_per_face_tables() -> None:
     assert NDOF == {"tri3": 6, "tet4": 12, "tet10": 30}
-    assert NODES_PER_FACE == {"tri3": 2, "tet4": 3, "tet10": 6}
 
 
 @pytest.mark.parametrize("kind", _KINDS)
@@ -259,7 +257,7 @@ def test_tet10_inverted_element_raises() -> None:
 @pytest.mark.parametrize("kind", _KINDS)
 def test_face_weights_sum_to_one(kind: str) -> None:
     w = face_weights(kind)
-    assert w.shape == (NODES_PER_FACE[kind],)
+    assert w.shape == ({"tri3": 2, "tet4": 3, "tet10": 6}[kind],)
     assert w.sum() == pytest.approx(1.0)
 
 
