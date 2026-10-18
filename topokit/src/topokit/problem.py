@@ -25,7 +25,7 @@ import time
 import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.typing as npt
@@ -46,6 +46,10 @@ from topokit.optimizers import OC, Optimizer
 from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside
 from topokit.responses import Compliance, Constraint, Response, Solution
 from topokit.solvers import LinearSolver, auto_solver
+
+if TYPE_CHECKING:  # the viz return types, for callers who type-check
+    from matplotlib.figure import Figure
+    from pyvista import Plotter
 
 _F64 = npt.NDArray[np.float64]
 
@@ -382,19 +386,19 @@ class Result:
     timing: float
     kkt: float
 
-    def view(self, **kwargs: Any) -> object:
+    def view(self, **kwargs: Any) -> Figure | Plotter:
         """Render the final design (2D heatmap / 3D iso-surface). Needs ``[viz]``."""
         from topokit.viz import view
 
         return view(self, **kwargs)
 
-    def plot_convergence(self, **kwargs: Any) -> object:
+    def plot_convergence(self, **kwargs: Any) -> Figure:
         """Plot objective/constraint/Δx curves. Needs ``[viz]``."""
         from topokit.viz import plot_convergence
 
         return plot_convergence(self, **kwargs)
 
-    def view_slices(self, **kwargs: Any) -> object:
+    def view_slices(self, **kwargs: Any) -> Figure:
         """Render 3D density cross-sections. Needs ``[viz]``."""
         from topokit.viz import view_slices
 
