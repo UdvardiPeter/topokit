@@ -31,6 +31,18 @@ from topokit.mesh import Mesh
 if TYPE_CHECKING:
     from topokit.fem import PhysicsModel
 
+__all__ = [
+    "Compliance",
+    "Constraint",
+    "FieldBasis",
+    "Response",
+    "ResponseBase",
+    "ResponseError",
+    "Solution",
+    "Volume",
+    "von_mises",
+]
+
 _F64 = npt.NDArray[np.float64]
 
 # Which chain field a response differentiates against; the orchestration layer

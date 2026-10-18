@@ -149,23 +149,24 @@ __all__ = [
 
 # Convention: the backends group stores instances; component groups
 # (physics, optimizers, solvers, ...) store classes.
-registry.register("backends", "numpy", default_backend(), source="topokit.backend")
-registry.register("physics", "linear_elasticity", LinearElasticity, source="topokit.fem")
+registry.register("backends", "numpy", default_backend())
+registry.register("physics", "linear_elasticity", LinearElasticity)
 registry.register(
     "physics",
     "unstructured_elasticity",
     UnstructuredElasticity,
-    source="topokit.fem",
 )
-registry.register("solvers", "direct", Direct, source="topokit.solvers")
-registry.register("solvers", "amg_cg", AmgCG, source="topokit.solvers")
-registry.register("chain_links", "density_filter", DensityFilter, source="topokit.parametrization")
+registry.register("solvers", "direct", Direct)
+registry.register("solvers", "amg_cg", AmgCG)
+registry.register("chain_links", "density_filter", DensityFilter)
 registry.register(
-    "chain_links", "radial_density_filter", RadialDensityFilter, source="topokit.parametrization"
+    "chain_links",
+    "radial_density_filter",
+    RadialDensityFilter,
 )
-registry.register("chain_links", "heaviside", Heaviside, source="topokit.parametrization")
-registry.register("chain_links", "simp", SIMP, source="topokit.parametrization")
-registry.register("responses", "compliance", Compliance, source="topokit.responses")
-registry.register("responses", "volume", Volume, source="topokit.responses")
-registry.register("optimizers", "oc", OC, source="topokit.optimizers")
-registry.register("optimizers", "mma", MMA, source="topokit.optimizers")
+registry.register("chain_links", "heaviside", Heaviside)
+registry.register("chain_links", "simp", SIMP)
+registry.register("responses", "compliance", Compliance)
+registry.register("responses", "volume", Volume)
+registry.register("optimizers", "oc", OC)
+registry.register("optimizers", "mma", MMA)

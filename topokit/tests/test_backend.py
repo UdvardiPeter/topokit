@@ -140,40 +140,16 @@ def test_use_backend_rejects_non_backend_object() -> None:
 def test_use_backend_failing_entry_point_does_not_block_other_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A broken plugin entry point in the ``backends`` group must not stop
-    :func:`use_backend` from resolving other, healthy names.
-
-    ``use_backend`` always consults the process-global registry, and that
-    registry has already scanned the ``backends`` group by the time this
-    test runs (earlier tests in this module resolve ``"numpy"`` through
-    it) -- entry-point scanning happens once per group, so re-patching
-    ``importlib.metadata.entry_points`` here would have no effect on it.
-    To exercise the actual codepath ``use_backend`` relies on, inject one
-    broken *pending* entry point directly into the global registry's
-    internal state (``monkeypatch.setitem`` restores it afterwards) rather
-    than building a throwaway ``Registry``.
-    """
-    import typing
+    # a broken plugin in the backends group must not stop a healthy name resolving
     from importlib.metadata import EntryPoint
 
     from topokit.backend import active_backend, default_backend, use_backend
-    from topokit.registry import registry as global_registry
+    from topokit.registry import Registry
 
-    class FailingEP:
-        name = "failing"
-        value = "fake.mod:failing"
+    broken = EntryPoint(name="failing", value="topokit_nope:BACKEND", group="topokit.backends")
+    monkeypatch.setattr(Registry, "_entry_points", staticmethod(lambda group: (broken,)))
 
-        def load(self) -> object:
-            raise ImportError("needs the [nope] extra")
-
-    global_registry._scan_entry_points("backends")  # ensure the group is scanned
-    monkeypatch.setitem(
-        global_registry._pending["backends"],
-        "failing",
-        typing.cast(EntryPoint, FailingEP()),
-    )
-
-    with pytest.raises(ImportError, match=r"\[nope\] extra"), use_backend("failing"):
+    with pytest.raises(ModuleNotFoundError), use_backend("failing"):
         pass
 
     with use_backend("numpy"):
