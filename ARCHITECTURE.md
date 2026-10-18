@@ -37,11 +37,12 @@ L3 modules are mutually independent. Core dependencies are only NumPy and SciPy.
 
 - **Parametrization chain.** Everything between raw optimizer variables and the
   field the physics consumes is a chain of links, each with `apply` and
-  `pullback` (vector-Jacobian product). Filters, projections, symmetry maps,
-  and material interpolation are all links.
-- **Plugin registry.** `topokit.registry` resolves components by group and name
-  (`registry.get("optimizers", "mma")`). Third parties register via entry
-  points in `topokit.<group>` namespaces.
+  `pullback` (vector-Jacobian product). Filters, projections and material
+  interpolation are all links.
+- **Component lookup.** `topokit.registry` resolves a component by group and
+  name (`registry.get("optimizers", "mma")`), falling back to the
+  `topokit.<group>` entry-point namespace. Writing an extension needs no
+  registration: pass your instance where TopoKit expects one.
 - **Events.** The run loop publishes typed events (`IterationFinished`,
   `FieldSnapshot`, ...). Visualization, the daemon, and loggers are
   subscribers. Subscriber crashes are only logged.
