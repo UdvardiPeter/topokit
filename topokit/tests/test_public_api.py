@@ -34,7 +34,6 @@ USER_FACING = [
     "Predicate",
     # parametrization
     "DensityFilter",
-    "RadialDensityFilter",
     "Heaviside",
     "SIMP",
     # responses
