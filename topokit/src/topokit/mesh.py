@@ -589,17 +589,35 @@ _FACE_CORNER_PATTERNS: dict[str, tuple[tuple[int, ...], ...]] = {
     "tet10": ((0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)),
 }
 
+# VTK_QUADRATIC_TETRA midside column for the edge between two corner-local
+# indices: symmetric, with -1 on the diagonal where there is no edge. Edge
+# order (0,1),(1,2),(2,0),(0,3),(1,3),(2,3) maps to columns 4..9.
+_TET10_MIDSIDE_COLUMN: _I64 = np.array(
+    [
+        [-1, 4, 6, 7],
+        [4, -1, 5, 8],
+        [6, 5, -1, 9],
+        [7, 8, 9, -1],
+    ],
+    dtype=np.int64,
+)
 
-# VTK_QUADRATIC_TETRA midside column, keyed by the unordered pair of
-# corner-local indices whose edge midpoint it sits on.
-_TET10_MIDSIDE_COLUMN: dict[frozenset[int], int] = {
-    frozenset((0, 1)): 4,
-    frozenset((1, 2)): 5,
-    frozenset((2, 0)): 6,
-    frozenset((0, 3)): 7,
-    frozenset((1, 3)): 8,
-    frozenset((2, 3)): 9,
-}
+
+def _facet_normals_areas(coords: _F64) -> tuple[_F64, _F64]:
+    """Measure straight facets ``(n, c, dim)``: unit normals, by winding, and areas.
+
+    2D: edges (2 corners); the raw normal is a 90-degree rotation of the edge
+    vector, so its length is the edge length. 3D: triangles (3 corners); the
+    raw normal is the corner cross product, with area half its length.
+    """
+    if coords.shape[1] == 2:
+        edge = coords[:, 1] - coords[:, 0]
+        raw = np.stack([edge[:, 1], -edge[:, 0]], axis=1)
+        area = np.linalg.norm(edge, axis=1)
+    else:
+        raw = np.cross(coords[:, 1] - coords[:, 0], coords[:, 2] - coords[:, 0])
+        area = 0.5 * np.linalg.norm(raw, axis=1)
+    return raw / np.linalg.norm(raw, axis=1)[:, None], np.asarray(area, dtype=np.float64)
 
 
 def _signed_measure(nodes: _F64, elements: _I64, kind: str, dim: int) -> _F64:
@@ -952,37 +970,42 @@ class UnstructuredMesh(MeshBase):
         return out
 
     def _compute_boundary_faces(self) -> BoundaryFaces:
-        patterns = _FACE_CORNER_PATTERNS[self._kind]
+        """Pair the element facets by sorted corner ids; the unpaired ones are boundary.
+
+        Face ids follow the order `numpy.unique` sorts the corner-id rows in,
+        which is the tuple-sort order the stability guarantee is stated
+        against. Corner nodes are reordered so the normal points away from
+        the owner; tet10 faces carry the 3 midside nodes of their corner
+        edges after the 3 corners.
+        """
+        patterns = np.array(_FACE_CORNER_PATTERNS[self._kind], dtype=np.int64)
+        n_patterns, n_corner = patterns.shape
         active_ids = np.nonzero(self.active_elements)[0]
-        occurrences: dict[tuple[int, ...], list[tuple[int, tuple[int, ...]]]] = {}
-        for e in active_ids.tolist():
-            conn = self._elements[e]
-            for pattern in patterns:
-                corners = tuple(int(conn[i]) for i in pattern)
-                key = tuple(sorted(corners))
-                occurrences.setdefault(key, []).append((e, pattern))
+        conn = self._elements[active_ids]
+        # facet row f holds the corner ids of active element f // n_patterns
+        facets = conn[:, patterns].reshape(-1, n_corner)
+        unique, inverse, counts = np.unique(
+            np.sort(facets, axis=1), axis=0, return_inverse=True, return_counts=True
+        )
+        inverse = inverse.reshape(-1)
 
         # A facet belongs to one element (boundary) or two (interior). More
         # means the connectivity is wrong -- a duplicated element, or three
         # elements meeting at one face -- and the facet pairing below would
         # quietly call it interior. Free to check here: the counts are built.
-        crowded = next(
-            ((key, [e for e, _ in occ]) for key, occ in occurrences.items() if len(occ) > 2),
-            None,
-        )
-        if crowded is not None:
-            key, owners = crowded
+        crowded = np.nonzero(counts > 2)[0]
+        if crowded.size:
+            first = int(crowded[0])
+            owners = active_ids[np.nonzero(inverse == first)[0] // n_patterns]
             raise MeshError(
-                f"facet with corner nodes {list(key)} is shared by {len(owners)} elements "
-                f"(ids {owners[:4]}): a facet belongs to at most two. Duplicated or "
-                "non-manifold elements also assemble their stiffness and volume twice."
+                f"facet with corner nodes {unique[first].tolist()} is shared by "
+                f"{int(counts[first])} elements (ids {owners[:4].tolist()}): a facet belongs "
+                "to at most two. Duplicated or non-manifold elements also assemble their "
+                "stiffness and volume twice."
             )
 
-        boundary = sorted(
-            ((key, occ[0][0], occ[0][1]) for key, occ in occurrences.items() if len(occ) == 1),
-            key=lambda item: item[0],
-        )
-        if not boundary:
+        single = np.nonzero(counts == 1)[0]
+        if single.size == 0:
             # Every facet paired off, which no finite mesh can manage: the
             # usual cause is a mesh built entirely of duplicated elements.
             raise MeshError(
@@ -990,62 +1013,36 @@ class UnstructuredMesh(MeshBase):
                 "which a finite mesh cannot be. Check for duplicated elements -- they also "
                 "assemble their stiffness and volume twice."
             )
+        # sorting the facet rows by their facet id groups each id's rows
+        # together in id order, so one offset per id picks its only row out
+        grouped = np.argsort(inverse, kind="stable")
+        starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
+        rows = grouped[starts[single]]
 
-        n_corner = len(patterns[0])
-        n_face_nodes = n_corner + (3 if self._kind == "tet10" else 0)
-        n_faces = len(boundary)
-        owner = np.empty(n_faces, dtype=np.int64)
-        normal = np.empty((n_faces, self.dim), dtype=np.float64)
-        area = np.empty(n_faces, dtype=np.float64)
-        centroid = np.empty((n_faces, self.dim), dtype=np.float64)
-        face_nodes = np.empty((n_faces, n_face_nodes), dtype=np.int64)
+        owner = active_ids[rows // n_patterns]
+        local = patterns[rows % n_patterns]
+        corners = facets[rows]
+        normal, _ = _facet_normals_areas(self._nodes[corners])
+        offset = self._nodes[corners].mean(axis=1) - self.element_centroids[owner]
+        inward = np.einsum("ij,ij->i", normal, offset) < 0.0
+        # reversing a facet's corner order flips its normal, so the inward
+        # ones are reversed and the final orientation measured once
+        corners = np.where(inward[:, None], corners[:, ::-1], corners)
+        local = np.where(inward[:, None], local[:, ::-1], local)
+        coords = self._nodes[corners]
+        normal, area = _facet_normals_areas(coords)
+        centroid = coords.mean(axis=1)
 
-        for row, (_key, e, pattern) in enumerate(boundary):
-            conn = self._elements[e]
-            local = list(pattern)
-            global_ids = [int(conn[i]) for i in local]
-            coords = self._nodes[global_ids]
-            face_centroid = coords.mean(axis=0)
-            unit, face_area = self._face_normal_area(coords)
-            if np.dot(unit, face_centroid - self.element_centroids[e]) < 0.0:
-                local.reverse()
-                global_ids.reverse()
-                coords = self._nodes[global_ids]
-                face_centroid = coords.mean(axis=0)
-                unit, face_area = self._face_normal_area(coords)
-
-            owner[row] = e
-            normal[row] = unit
-            area[row] = face_area
-            centroid[row] = face_centroid
-            if self._kind == "tet10":
-                pairs = zip(local, local[1:] + local[:1], strict=True)
-                midsides = [int(conn[_TET10_MIDSIDE_COLUMN[frozenset(p)]]) for p in pairs]
-                face_nodes[row] = global_ids + midsides
-            else:
-                face_nodes[row] = global_ids
+        if self._kind == "tet10":
+            # the midside column of each corner edge, edges taken cyclically
+            columns = _TET10_MIDSIDE_COLUMN[local, np.roll(local, -1, axis=1)]
+            midsides = np.take_along_axis(self._elements[owner], columns, axis=1)
+            face_nodes = np.concatenate([corners, midsides], axis=1)
+        else:
+            face_nodes = corners
 
         for arr in (owner, normal, area, centroid, face_nodes):
             arr.flags.writeable = False
         return BoundaryFaces(
             owner=owner, normal=normal, area=area, centroid=centroid, nodes=face_nodes
         )
-
-    @staticmethod
-    def _face_normal_area(coords: _F64) -> tuple[_F64, float]:
-        """Unnormalized-then-unit normal and area of a straight facet.
-
-        2D: an edge (2 points); the raw normal is a 90-degree rotation of
-        the edge vector, so its length equals the edge length. 3D: a
-        triangle (3 points); the raw normal is the corner cross product,
-        with area half its length.
-        """
-        if coords.shape[0] == 2:
-            edge = coords[1] - coords[0]
-            raw = np.array([edge[1], -edge[0]], dtype=np.float64)
-            face_area = float(np.linalg.norm(edge))
-        else:
-            raw = np.cross(coords[1] - coords[0], coords[2] - coords[0])
-            face_area = 0.5 * float(np.linalg.norm(raw))
-        unit = raw / float(np.linalg.norm(raw))
-        return unit, face_area

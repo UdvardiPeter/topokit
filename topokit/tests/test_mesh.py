@@ -476,3 +476,30 @@ def test_a_sound_mesh_still_reports_its_boundary() -> None:
     elements = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
     faces = UnstructuredMesh(nodes, elements, "tri3").boundary_faces()
     assert faces.n_faces == 4  # the square perimeter, the shared diagonal excluded
+
+
+def _tri3_grid(nx: int, ny: int) -> tuple[np.ndarray, np.ndarray]:
+    gx, gy = np.meshgrid(np.arange(nx + 1), np.arange(ny + 1), indexing="ij")
+    nodes = np.stack([gx.ravel(order="F"), gy.ravel(order="F")], axis=1).astype(float)
+    cells = []
+    for i in range(nx):
+        for j in range(ny):
+            n0 = i + (nx + 1) * j
+            cells += [[n0, n0 + 1, n0 + nx + 2], [n0, n0 + nx + 2, n0 + nx + 1]]
+    return nodes, np.array(cells, dtype=np.int64)
+
+
+@pytest.mark.parametrize("corners", [2, 3])
+def test_face_ids_follow_the_sorted_corner_tuple_order(corners: int) -> None:
+    # The documented stability guarantee: a face id is the position of the
+    # face's sorted corner-node tuple among all of them. The pairing uses
+    # np.unique(axis=0), whose row order is exactly Python's tuple sort, so
+    # the guarantee holds without the mesh sorting anything itself.
+    if corners == 2:
+        nodes, elements = _tri3_grid(4, 3)
+        mesh = UnstructuredMesh(nodes, elements, "tri3")
+    else:
+        mesh = UnstructuredMesh(_CORNER_TET10_NODES, _CORNER_TET10_ELEMENTS, "tet10")
+    keys = [tuple(sorted(row[:corners])) for row in mesh.boundary_faces().nodes.tolist()]
+    assert keys == sorted(keys)
+    assert len(set(keys)) == len(keys)
