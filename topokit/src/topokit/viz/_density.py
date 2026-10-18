@@ -21,6 +21,16 @@ class VizError(TopoKitError, ValueError):
     """A view was asked for something it cannot render (e.g. slices of a 2D field)."""
 
 
+class EmptySceneError(VizError):
+    """A 3D view would be empty: nothing in the field reaches ``iso``.
+
+    Its own type because it is the one view failure a *caller* may expect and
+    want to ride out -- a live view early in a run, before the design has
+    sharpened -- rather than a mistake to fix. Still a `VizError`, so code
+    catching that is unaffected.
+    """
+
+
 def _resolve(obj: Any) -> tuple[np.ndarray, Any]:
     """Extract ``(values, mesh)`` from a Result, DesignField, or the field itself."""
     design = getattr(obj, "design", obj)  # Result.design, else obj is a DesignField
@@ -39,13 +49,13 @@ def _image_data(values: np.ndarray, mesh: Any) -> Any:
 def _isosurface(values: np.ndarray, mesh: Any, iso: float) -> Any:
     """Density iso-surface at ``iso`` (cell data → point data → contour).
 
-    Raises ``VizError`` when the contour comes back empty: nothing would be
-    drawn, and PyVista's own empty-mesh error never mentions ``iso``. The check
-    lives here so every caller gets it — ``view`` and ``LiveView`` alike.
+    Raises `EmptySceneError` when the contour comes back empty: nothing would
+    be drawn, and PyVista's own empty-mesh error never mentions ``iso``. The
+    check lives here so every caller gets it — ``view`` and ``LiveView`` alike.
     """
     surface = _image_data(values, mesh).cell_data_to_point_data().contour([iso], scalars="rho")
     if surface.n_points == 0:
-        raise VizError(
+        raise EmptySceneError(
             f"the iso-surface at iso={iso} is empty; the density field does not cross it "
             f"(field range [{values.min():.3g}, {values.max():.3g}]) — adjust iso"
         )
@@ -99,8 +109,9 @@ def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Pl
     unstructured meshes the 3D view shows the cells at or above ``iso`` rather than
     a contoured surface.
 
-    Raises ``VizError`` when the 3D scene would be empty: no part of the field
-    crosses ``iso`` on a grid, or no cell reaches it on an unstructured mesh.
+    Raises `EmptySceneError` when the 3D scene would be empty: no part of the
+    field crosses ``iso`` on a grid, or no cell reaches it on an unstructured
+    mesh.
     """
     values, mesh = _resolve(obj)
     if mesh.dim == 2:
@@ -130,7 +141,7 @@ def view(obj: Any, *, iso: float = 0.5, off_screen: bool = False) -> Figure | Pl
     else:
         drawable = _unstructured_grid(values, mesh).threshold(iso, scalars="rho")
         if drawable.n_cells == 0:
-            raise VizError(
+            raise EmptySceneError(
                 f"no cells at or above iso={iso}; the field maximum is "
                 f"{values.max():.3g} — lower iso"
             )

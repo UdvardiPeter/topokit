@@ -25,7 +25,14 @@ Display notes:
 from __future__ import annotations
 
 from topokit.viz._convergence import plot_convergence
-from topokit.viz._density import VizError, view, view_slices
+from topokit.viz._density import EmptySceneError, VizError, view, view_slices
 from topokit.viz._live import LiveView
 
-__all__ = ["LiveView", "VizError", "plot_convergence", "view", "view_slices"]
+__all__ = [
+    "EmptySceneError",
+    "LiveView",
+    "VizError",
+    "plot_convergence",
+    "view",
+    "view_slices",
+]
