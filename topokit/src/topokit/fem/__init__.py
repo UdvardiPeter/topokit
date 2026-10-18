@@ -78,9 +78,6 @@ class Material:
 # supplier data before using for real parts.
 STEEL = Material(E=210000.0, nu=0.30, rho=7.85e-9, name="steel")
 ALUMINUM_6061 = Material(E=68900.0, nu=0.33, rho=2.70e-9, name="aluminum-6061")
-ABS = Material(E=2300.0, nu=0.35, rho=1.05e-9, name="abs")
-PA12 = Material(E=1700.0, nu=0.40, rho=1.01e-9, name="pa12")
-RESIN_SLA = Material(E=2800.0, nu=0.35, rho=1.15e-9, name="resin-sla")
 
 
 def _freeze(obj: object, **fields: object) -> None:

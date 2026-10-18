@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Geometric selectors, the single mechanism for "where".
 
-Loads, supports, regions, and CAD face picks all resolve through selectors.
+Loads, supports and regions all resolve through selectors.
 A selector answers ``nodes(mesh)``, ``elements(mesh)`` and ``faces(mesh)``
 as sorted unique int64 id arrays; face ids index into
 ``mesh.boundary_faces()``.
@@ -258,7 +258,7 @@ class PlaneSlab(SelectorBase):
 class Predicate(SelectorBase):
     """Custom vectorized membership test ``fn(coords (n, dim)) -> bool (n,)``.
 
-    Not expressible in the declarative schema. A lambda makes the selector
+    Not expressible declaratively. A lambda makes the selector
     unpicklable; use a module-level function if the study crosses processes.
     """
 
@@ -320,32 +320,6 @@ class OnBoundary(SelectorBase):
     def faces(self, mesh: Mesh) -> _I64:
         """All boundary-face ids."""
         return np.arange(mesh.boundary_faces().n_faces, dtype=np.int64)
-
-
-@dataclass(frozen=True)
-class FaceSetSelector(SelectorBase):
-    """Explicit boundary-face ids; the target of the CAD face bridge."""
-
-    face_ids: tuple[int, ...]
-
-    def __post_init__(self) -> None:
-        _freeze(self, face_ids=tuple(int(x) for x in self.face_ids))
-
-    def faces(self, mesh: Mesh) -> _I64:
-        """Return the validated face ids, sorted unique."""
-        n = mesh.boundary_faces().n_faces
-        ids = np.unique(np.asarray(self.face_ids, dtype=np.int64))
-        if ids.size and (ids[0] < 0 or ids[-1] >= n):
-            raise SelectionError(f"face id out of range [0, {n}): {self.face_ids}")
-        return ids
-
-    def nodes(self, mesh: Mesh) -> _I64:
-        """Return the unique nodes of the selected faces."""
-        return np.unique(mesh.boundary_faces().nodes[self.faces(mesh)]).astype(np.int64)
-
-    def elements(self, mesh: Mesh) -> _I64:
-        """Return the unique owner elements of the selected faces."""
-        return np.unique(mesh.boundary_faces().owner[self.faces(mesh)]).astype(np.int64)
 
 
 @dataclass(frozen=True)

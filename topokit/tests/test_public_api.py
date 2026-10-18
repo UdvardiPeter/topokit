@@ -21,9 +21,6 @@ USER_FACING = [
     "Material",
     "STEEL",
     "ALUMINUM_6061",
-    "ABS",
-    "PA12",
-    "RESIN_SLA",
     "PointLoad",
     "SurfaceTraction",
     "BodyForce",
@@ -35,7 +32,6 @@ USER_FACING = [
     "NearPoint",
     "OnBoundary",
     "Predicate",
-    "FaceSetSelector",
     # parametrization
     "SymmetryMap",
     "DensityFilter",

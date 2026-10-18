@@ -13,10 +13,7 @@ from topokit.backend import (
 from topokit.events import EventBus
 from topokit.exceptions import TopoKitError
 from topokit.fem import (
-    ABS,
     ALUMINUM_6061,
-    PA12,
-    RESIN_SLA,
     STEEL,
     BodyForce,
     FemError,
@@ -64,7 +61,6 @@ from topokit.responses import (
 from topokit.selection import (
     Box,
     Cylinder,
-    FaceSetSelector,
     NearPoint,
     OnBoundary,
     PlaneSlab,
@@ -80,12 +76,9 @@ from topokit.testing import GradientMismatchError
 __version__ = "0.0.1.dev0"
 
 __all__ = [
-    "ABS",
     "ALUMINUM_6061",
     "MMA",
     "OC",
-    "PA12",
-    "RESIN_SLA",
     "SIMP",
     "STEEL",
     "AmgCG",
@@ -101,7 +94,6 @@ __all__ = [
     "Direct",
     "ElementField",
     "EventBus",
-    "FaceSetSelector",
     "FemError",
     "FieldError",
     "FieldSpec",

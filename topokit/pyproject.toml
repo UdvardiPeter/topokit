@@ -111,9 +111,9 @@ layers = [
   "topokit.problem",
   "topokit.responses",
   "topokit.fem : topokit.solvers : topokit.parametrization : topokit.optimizers",
-  "topokit.selection : topokit.jax",
+  "topokit.selection : topokit.jax : topokit.fields",
   "topokit.mesh",
-  "topokit.backend : topokit.events : topokit.fields : topokit.testing : topokit.checkpoint",
+  "topokit.backend : topokit.events : topokit.testing : topokit.checkpoint",
   "topokit.registry",
   "topokit.exceptions",
 ]

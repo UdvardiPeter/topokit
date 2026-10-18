@@ -9,7 +9,6 @@ from topokit.mesh import StructuredGrid
 from topokit.selection import (
     Box,
     Cylinder,
-    FaceSetSelector,
     NearPoint,
     OnBoundary,
     PlaneSlab,
@@ -76,23 +75,6 @@ def test_on_boundary_with_void_interface() -> None:
 def test_predicate() -> None:
     sel = Predicate(lambda c: c[:, 0] > 1.4)
     np.testing.assert_array_equal(sel.elements(G22), [1, 3])
-
-
-def test_face_set_selector() -> None:
-    g = StructuredGrid(shape=(1, 1), spacing=(1.0, 1.0))
-    f = g.boundary_faces()
-    minus_x = int(np.flatnonzero(f.normal[:, 0] < -0.5)[0])
-    minus_y = int(np.flatnonzero(f.normal[:, 1] < -0.5)[0])
-    sel = FaceSetSelector((minus_x, minus_y))
-    np.testing.assert_array_equal(sel.faces(g), sorted([minus_x, minus_y]))
-    np.testing.assert_array_equal(sel.nodes(g), [0, 1, 2])
-    np.testing.assert_array_equal(sel.elements(g), [0])
-
-
-def test_face_set_selector_out_of_range() -> None:
-    g = StructuredGrid(shape=(1, 1), spacing=(1.0, 1.0))
-    with pytest.raises(SelectionError, match="face id"):
-        FaceSetSelector((9,)).faces(g)
 
 
 def test_combinators_on_elements() -> None:
@@ -163,8 +145,6 @@ def test_list_arguments_coerce_to_canonical_tuples() -> None:
     assert a == b
     assert hash(a) == hash(b)
     np.testing.assert_array_equal(a.elements(G22), b.elements(G22))
-    f = FaceSetSelector(np.array([0, 1]))  # type: ignore[arg-type]
-    assert f.face_ids == (0, 1)
 
 
 def test_selectors_pickle() -> None:

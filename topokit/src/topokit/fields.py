@@ -3,40 +3,20 @@
 """Typed field containers binding arrays to their mesh.
 
 Construction validates shape and coerces to float64. ``save`` and ``load``
-round-trip through npz. The mesh is referenced through the structural
-``MeshLike`` protocol.
+round-trip through npz. The mesh is referenced through the ``Mesh`` protocol.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Self, runtime_checkable
+from typing import Self
 
 import numpy as np
 import numpy.typing as npt
 
 from topokit.exceptions import TopoKitError
-
-
-@runtime_checkable
-class MeshLike(Protocol):
-    """The minimal mesh interface fields need."""
-
-    @property
-    def n_nodes(self) -> int:
-        """Number of mesh nodes."""
-        ...
-
-    @property
-    def n_elements(self) -> int:
-        """Number of mesh elements."""
-        ...
-
-    @property
-    def dim(self) -> int:
-        """Spatial dimension, 2 or 3."""
-        ...
+from topokit.mesh import Mesh
 
 
 class FieldError(TopoKitError, ValueError):
@@ -57,7 +37,7 @@ class FieldSpec:
 class _Field:
     """Shared container behavior. Subclasses define the expected shape."""
 
-    def __init__(self, values: npt.ArrayLike, mesh: MeshLike, *, name: str) -> None:
+    def __init__(self, values: npt.ArrayLike, mesh: Mesh, *, name: str) -> None:
         arr = np.array(values, dtype=np.float64, copy=True)
         expected = self._expected_shape(mesh)
         if arr.shape != expected:
@@ -70,7 +50,7 @@ class _Field:
         self.mesh = mesh
         self.name = name
 
-    def _expected_shape(self, mesh: MeshLike) -> tuple[int, ...]:
+    def _expected_shape(self, mesh: Mesh) -> tuple[int, ...]:
         raise NotImplementedError
 
     def save(self, path: str | Path) -> None:
@@ -84,7 +64,7 @@ class _Field:
         )
 
     @classmethod
-    def load(cls, path: str | Path, mesh: MeshLike) -> Self:
+    def load(cls, path: str | Path, mesh: Mesh) -> Self:
         """Read a field written by :meth:`save`, validating it matches ``mesh``."""
         with np.load(path) as data:
             saved_el = int(data["n_elements"])
@@ -100,19 +80,19 @@ class _Field:
 class DesignField(_Field):
     """Element-wise design density, shape ``(n_elements,)``."""
 
-    def _expected_shape(self, mesh: MeshLike) -> tuple[int, ...]:
+    def _expected_shape(self, mesh: Mesh) -> tuple[int, ...]:
         return (mesh.n_elements,)
 
 
 class ElementField(_Field):
     """Element-wise scalar field such as von Mises stress, shape ``(n_elements,)``."""
 
-    def _expected_shape(self, mesh: MeshLike) -> tuple[int, ...]:
+    def _expected_shape(self, mesh: Mesh) -> tuple[int, ...]:
         return (mesh.n_elements,)
 
 
 class NodeField(_Field):
     """Nodal vector field such as displacement, shape ``(n_nodes, dim)``."""
 
-    def _expected_shape(self, mesh: MeshLike) -> tuple[int, ...]:
+    def _expected_shape(self, mesh: Mesh) -> tuple[int, ...]:
         return (mesh.n_nodes, mesh.dim)
