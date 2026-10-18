@@ -34,9 +34,14 @@ convention = "numpy"
 [tool.mypy]
 strict = true
 files = ["src", "tests", "scripts"]
-# Own cache dir: Nx runs benchmarks:typecheck in parallel with topokit:typecheck,
-# and a shared cache_dir races (mypy INTERNAL ERROR). Keep them separate.
+# Own cache dir: a shared one raced and tripped a mypy INTERNAL ERROR.
 cache_dir = ".mypy_cache"
+
+[[tool.mypy.overrides]]
+# The gallery script's only dependency lives behind the gallery extra, which a
+# lean dev install does not have. Typecheck has to pass there.
+module = "pyvista.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
