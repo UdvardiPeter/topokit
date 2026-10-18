@@ -2,7 +2,7 @@
 
 TopoKit is a layered library. Each module sits behind a small protocol and can be
 replaced without touching the rest. Layer boundaries are enforced in CI by
-import-linter; the `boundaries` target fails on any violation.
+import-linter; `uv run --directory topokit lint-imports` fails on any violation.
 
 ## Layers
 
