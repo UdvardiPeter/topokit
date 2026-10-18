@@ -346,7 +346,10 @@ def _rigid_body_modes(mesh: Mesh, free_index: _I64, dim: int) -> _F64:
     (``-1`` at fixed/inactive condensed DOFs). Shared by every physics
     model's ``near_nullspace``.
     """
-    coords = mesh.nodes[mesh.active_nodes] - mesh.nodes[mesh.active_nodes].mean(axis=0)
+    # gather once: the fancy index copies every active node coordinate, and
+    # at a million elements that is a 20 MB temporary to pay twice
+    active = mesh.nodes[mesh.active_nodes]
+    coords = active - active.mean(axis=0)
     n_modes = 3 if dim == 2 else 6
     full = np.zeros((coords.shape[0] * dim, n_modes))
     for comp in range(dim):

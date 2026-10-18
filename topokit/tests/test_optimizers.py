@@ -286,3 +286,10 @@ def test_oc_reports_kkt_decreasing() -> None:
     assert last is not None and first is not None
     assert np.isfinite(last)
     assert last < first
+
+
+def test_oc_rejects_a_non_positive_bisection_tol() -> None:
+    # move and eta were validated, this one was not; zero makes the multiplier
+    # bisection run its full 200 iterations for nothing
+    with pytest.raises(OptimizerError, match="bisection_tol must be > 0"):
+        OC(bisection_tol=0.0)

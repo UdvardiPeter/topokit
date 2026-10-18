@@ -45,6 +45,8 @@ class OC:
             raise OptimizerError(f"move must be in (0, 1], got {self.move}")
         if self.eta <= 0.0:
             raise OptimizerError(f"eta must be > 0, got {self.eta}")
+        if self.bisection_tol <= 0.0:
+            raise OptimizerError(f"bisection_tol must be > 0, got {self.bisection_tol}")
         self._lower: _F64 | None = None
         self._upper: _F64 | None = None
 
