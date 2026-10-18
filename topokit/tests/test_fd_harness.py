@@ -8,8 +8,6 @@ import pytest
 
 from topokit.testing import GradientMismatchError, assert_gradient_matches
 
-pytestmark = pytest.mark.fd
-
 RNG = np.random.default_rng(seed=20260609)
 
 

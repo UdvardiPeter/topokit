@@ -96,9 +96,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = [
-  "fd: Tier-2 finite-difference sensitivity verification tests",
-]
 
 [tool.importlinter]
 root_package = "topokit"

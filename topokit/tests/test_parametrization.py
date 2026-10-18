@@ -342,7 +342,6 @@ def test_heaviside_continuation_endpoint_fd() -> None:
     )
 
 
-@pytest.mark.fd
 def test_evaluate_pullback_fd() -> None:
     bound = (DensityFilter(radius=1.6) | Heaviside(beta=3.0) | SIMP()).bind(G42)
     rng = np.random.default_rng(13)
