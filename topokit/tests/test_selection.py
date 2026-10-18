@@ -33,6 +33,25 @@ def test_box_nodes_with_default_tol() -> None:
     np.testing.assert_array_equal(Box((0.0, 0.0), (0.0, 2.0)).nodes(G22), [0, 3, 6])
 
 
+def test_containment_selectors_are_exact_by_default() -> None:
+    # the box and the disk span no node, so exact containment selects nothing;
+    # an element-scale tolerance reaches half an element past every face
+    assert Box((1.2, 0.0), (1.8, 2.0)).nodes(G22).size == 0
+    np.testing.assert_array_equal(
+        Box((1.2, 0.0), (1.8, 2.0), tol=0.5).nodes(G22), [1, 2, 4, 5, 7, 8]
+    )
+    assert Sphere((1.5, 1.5), 0.2).nodes(G22).size == 0
+    np.testing.assert_array_equal(Sphere((1.5, 1.5), 0.2, tol=0.6).nodes(G22), [4, 5, 7, 8])
+
+
+def test_plane_slab_keeps_the_element_scale_default() -> None:
+    # a zero-thickness plane would select nothing, so PlaneSlab is the one
+    # selector whose default tolerance is still default_tolerance(mesh)
+    np.testing.assert_array_equal(
+        PlaneSlab(point=(1.0, 0.0), normal=(1.0, 0.0)).nodes(G22), [1, 4, 7]
+    )
+
+
 def test_box_elements() -> None:
     np.testing.assert_array_equal(Box((0.0, 0.0), (0.9, 2.0)).elements(G22), [0, 2])
 

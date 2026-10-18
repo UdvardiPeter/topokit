@@ -16,8 +16,8 @@ The reference designs *are* the 88-line method's designs: TopoKit's Q4
 plane-stress element stiffness (eigenvalues), modified SIMP (`E = Emin +
 x^p (E0 - Emin)`), compliance functional, and boundary conditions match the
 88-line (Andreassen et al. 2011) exactly; `OC` is the clean-room 88-line
-optimality-criteria update, validated against scipy on convex problems; and `RadialDensityFilter`
-reproduces the 88-line density filter (`ft = 2`). So a faithful single-stage
+optimality-criteria update, validated against scipy on convex problems; and `DensityFilter`'s
+radial kernel reproduces the 88-line density filter (`ft = 2`). So a faithful single-stage
 run reproduces the 88-line, and the frozen `.npz` pins that result against
 drift.
 
@@ -46,15 +46,15 @@ nodes, the split doubles the design variables, and its fixed diagonal biases
 the design. The gap and the tolerance derived from it are recorded in that
 test.
 
-The four unstructured references (`cantilever_tri_60x20_{oc,mma}`,
-`cantilever_tet4_16x8x8_oc`, `cantilever_tet10_10x5x5_oc`) were frozen on
-macOS arm64 — recorded in the files — not on the Linux platform CI runs on, so
-they spend part of the suite's cross-platform margin instead of leaving all of
-it for genuine numerical change. The tolerances are coarse enough to absorb
-that: the OC iteration is contractive, so a 1e-10 perturbation moves the final
-field by 1e-10 against a `1e-2` gate. The tri3 pair is validated
-cross-platform by the per-PR gate, the tet pair only by the nightly. Refreeze
-them on Linux at the next deliberate baseline reset.
+Every reference carrying a `platform` key — all nine OC references and
+`cantilever_tri_60x20_mma` — was frozen on macOS arm64, not on the Linux
+platform CI runs on, so they spend part of the suite's cross-platform margin
+instead of leaving all of it for genuine numerical change. The tolerances are
+coarse enough to absorb that: the OC iteration is contractive, so a 1e-10
+perturbation moves the final field by 1e-10 against a `1e-2` gate. The 2D
+cases are validated cross-platform by the per-PR gate, the 3D and tet cases
+only by the nightly. Refreeze them on Linux at the next deliberate baseline
+reset.
 
 ## Regenerating references
 
@@ -71,9 +71,9 @@ instead of reporting success over an unchanged tree.
 Each reference holds the frozen `density`, `compliance`, `volume` and
 `iterations`, plus the provenance to read them against: `element_kind`,
 `n_elements`, `optimizer`, `penal`, `max_iter`, `tol`, the `platform` it was
-frozen on and the `topokit` version. Only the unstructured references carry
-the provenance keys so far — the earlier baselines predate them and pick them
-up on their next regeneration.
+frozen on and the `topokit` version. All nine OC references and the tri3
+MMA one carry the keys; the five remaining MMA references predate them and
+pick them up on their next regeneration.
 
 ## Nightly full suite
 

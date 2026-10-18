@@ -22,6 +22,15 @@ class GradientMismatchError(TopoKitError, AssertionError):
     """An analytic gradient disagrees with central differences."""
 
 
+# scipy.differentiate.jacobian was measured against all 20 call sites of
+# assert_gradient_matches and is not used here. At its default initial_step=0.5
+# every one of the 17 real pullbacks raises: a chain input is a density in
+# [0, 1] and half a unit leaves the domain. At initial_step=0.1, the step that
+# measured best, it is ~250x more accurate for 1.6x the evaluations, but
+# test_heaviside_continuation_endpoint_fd (a saturated Heaviside at beta=32)
+# still reports status -2, max iterations, and smaller steps trip more call
+# sites, not fewer. A gradient check that reports non-convergence on a
+# pullback the sweep verifies to 2e-08 is not a better check.
 def _central_difference(f: Callable[[_F64], float], x: _F64, h: float) -> _F64:
     """Dense central-difference gradient of ``f`` at ``x`` with step ``h``."""
     g = np.empty_like(x)

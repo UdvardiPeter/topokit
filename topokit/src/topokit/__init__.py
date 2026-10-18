@@ -34,7 +34,6 @@ from topokit.parametrization import (
     Heaviside,
     LinkSpec,
     ParametrizationError,
-    RadialDensityFilter,
 )
 from topokit.problem import (
     IterationState,
@@ -117,7 +116,6 @@ __all__ = [
     "Predicate",
     "Problem",
     "ProblemError",
-    "RadialDensityFilter",
     "RegistryError",
     "Response",
     "ResponseBase",
@@ -159,11 +157,6 @@ registry.register(
 registry.register("solvers", "direct", Direct)
 registry.register("solvers", "amg_cg", AmgCG)
 registry.register("chain_links", "density_filter", DensityFilter)
-registry.register(
-    "chain_links",
-    "radial_density_filter",
-    RadialDensityFilter,
-)
 registry.register("chain_links", "heaviside", Heaviside)
 registry.register("chain_links", "simp", SIMP)
 registry.register("responses", "compliance", Compliance)
