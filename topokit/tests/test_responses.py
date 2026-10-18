@@ -396,3 +396,40 @@ def test_constraint_negative_bound_keeps_sign() -> None:
     # positive bounds keep the established normalization
     assert Constraint(_Fixed(0.6), 0.3, "<=").value(sol) == pytest.approx(1.0)
     assert Constraint(_Fixed(0.6), 0.3, ">=").value(sol) == pytest.approx(-1.0)
+
+
+def test_volume_empty_region_raises_for_the_gradient_too() -> None:
+    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), solid=np.ones(4, dtype=bool))
+    sol = Solution(
+        model=None,
+        mesh=g,
+        displacements=np.zeros((1, 1)),
+        interpolated=np.ones(4),
+        density=np.ones(4),
+    )
+    # an all-zero gradient would read as "independent of the design" instead
+    with pytest.raises(ResponseError, match="no elements"):
+        Volume(region="design").grad_field(sol)
+
+
+def test_von_mises_selects_the_load_case() -> None:
+    g = StructuredGrid.box(size=(4.0, 4.0), shape=(4, 4))
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    model = LinearElasticity(
+        g,
+        STEEL,
+        supports=[(left, "all")],
+        loads=[
+            [PointLoad(NearPoint((4.0, 4.0)), (0.0, -1.0))],
+            [PointLoad(NearPoint((4.0, 0.0)), (1.0, 0.0))],
+        ],
+    )
+    chain = SIMP(p=1.0, scale_min=1e-6).bind(g)
+    sol = _solution(model, g, chain, np.full(chain.n_vars, 1.0))
+    assert sol.displacements.shape[1] == 2
+    first = von_mises(sol).values
+    second = von_mises(sol, case=1).values
+    assert not np.allclose(first, second)  # the default reports case 0, not a blend
+    np.testing.assert_allclose(von_mises(sol, case=-1).values, second)
+    with pytest.raises(ResponseError, match="out of range"):
+        von_mises(sol, case=2)

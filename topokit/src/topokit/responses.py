@@ -157,23 +157,32 @@ class Volume(ResponseBase):
             return np.ones(mesh.n_elements, dtype=bool)
         raise ResponseError(f"unknown region {self.region!r}")
 
-    def value(self, solution: Solution) -> float:
-        """Region volume fraction."""
-        mesh = solution.mesh
+    def _region(self, mesh: Mesh) -> tuple[npt.NDArray[np.bool_], _F64, float]:
+        """Region mask, element volumes and the region total; raises if empty.
+
+        Both the value and its gradient divide by the total, so they share the
+        guard: an empty region would otherwise leave the gradient a silent
+        array of zeros, which an optimizer reads as "this constraint does not
+        depend on the design".
+        """
         region = self._mask(mesh)
         v = mesh.element_volumes
         total = float(v[region].sum())
         if total == 0.0:
             raise ResponseError(f"volume region {self.region!r} contains no elements")
+        return region, v, total
+
+    def value(self, solution: Solution) -> float:
+        """Region volume fraction."""
+        region, v, total = self._region(solution.mesh)
         return float((solution.density[region] * v[region]).sum() / total)
 
     def grad_field(self, solution: Solution) -> _F64:
         """``dV/d(rho)`` = element volume fraction on the region, zero elsewhere."""
         mesh = solution.mesh
-        region = self._mask(mesh)
-        v = mesh.element_volumes
+        region, v, total = self._region(mesh)
         g = np.zeros(mesh.n_elements)
-        g[region] = v[region] / v[region].sum()
+        g[region] = v[region] / total
         return g
 
     @classmethod
@@ -231,10 +240,18 @@ class Constraint:
         return self._scale() * self.response.grad_field(solution)
 
 
-def von_mises(solution: Solution, name: str = "von_mises") -> ElementField:
-    """Per-element von Mises stress as a display field (zero at void)."""
+def von_mises(solution: Solution, name: str = "von_mises", *, case: int = 0) -> ElementField:
+    """Per-element von Mises stress of one load case, as a display field (zero at void).
+
+    A multi-load solution carries one displacement column per case; ``case``
+    picks which one to report (the first by default, negatives index from the
+    end). Stress is display-only in v1 -- there is no stress constraint yet.
+    """
     model = _require_model(solution)
-    values = model.element_stress(solution.displacements[:, 0], solution.interpolated)
+    n_cases = int(solution.displacements.shape[1])
+    if not -n_cases <= case < n_cases:
+        raise ResponseError(f"load case {case} out of range for {n_cases} case(s)")
+    values = model.element_stress(solution.displacements[:, case], solution.interpolated)
     return ElementField(values, solution.mesh, name=name)
 
 
