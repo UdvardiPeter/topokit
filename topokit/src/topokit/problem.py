@@ -401,14 +401,23 @@ class Result:
         return view_slices(self, **kwargs)
 
 
+DEFAULT_MAX_ITER = 200
+DEFAULT_TOL = 0.01
+
+
 @dataclass
 class Study:
-    """Runs the optimization loop for a :class:`Problem`."""
+    """Runs the optimization loop for a :class:`Problem`.
+
+    ``max_iter`` and ``tol`` are the per-stage cap and convergence tolerance
+    of the default continuation schedule. A ``schedule`` carries its own, so
+    passing both is rejected rather than silently resolved.
+    """
 
     problem: Problem
     schedule: Schedule | None = None
-    max_iter: int = 200
-    tol: float = 0.01
+    max_iter: int = DEFAULT_MAX_ITER
+    tol: float = DEFAULT_TOL
     x0: _F64 | None = None
     snapshot_every: int = 5
     checkpoint_path: str | None = None
@@ -426,6 +435,25 @@ class Study:
         if self.schedule is None:
             # continuation is on by default; max_iter/tol feed the per-stage caps
             self.schedule = Schedule.default(max_iter=self.max_iter, tol=self.tol)
+        else:
+            # Every stage carries its own cap and tol, so these would do
+            # nothing: a Study(schedule=Schedule.single(max_iter=40),
+            # max_iter=3) used to run 40 iterations without a word. Knowable
+            # at construction, so it fails here like the rest of the assembly.
+            shadowed = [
+                f"{name}={value!r}"
+                for name, value, default in (
+                    ("max_iter", self.max_iter, DEFAULT_MAX_ITER),
+                    ("tol", self.tol, DEFAULT_TOL),
+                )
+                if value != default
+            ]
+            if shadowed:
+                raise ProblemError(
+                    f"{' and '.join(shadowed)} would be ignored: the given schedule carries "
+                    "a cap and tolerance per stage. Set them on the schedule instead, e.g. "
+                    "Schedule.single(max_iter=..., tol=...) or Schedule.default(max_iter=...)"
+                )
         if self.x0 is not None:
             x0 = np.asarray(self.x0, dtype=np.float64)
             if x0.shape != (self.problem.chain.n_vars,):
