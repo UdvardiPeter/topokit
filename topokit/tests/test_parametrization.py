@@ -17,7 +17,6 @@ from topokit.parametrization import (
     Heaviside,
     ParametrizationError,
     RadialDensityFilter,
-    SensitivityFilter,
     SymmetryMap,
 )
 from topokit.testing import assert_gradient_matches
@@ -46,11 +45,6 @@ def test_terminal_must_be_last_and_unique() -> None:
 def test_symmetry_only_first() -> None:
     with pytest.raises(ParametrizationError, match="first"):
         (DensityFilter(radius=1.5) | SymmetryMap(planes=("x",)) | SIMP()).bind(G42)
-
-
-def test_both_filters_warn() -> None:
-    with pytest.warns(UserWarning, match="SensitivityFilter"):
-        (DensityFilter(radius=1.5) | SensitivityFilter(radius=1.5) | SIMP()).bind(G42)
 
 
 def test_out_field_and_sizes() -> None:
@@ -166,12 +160,6 @@ def test_symmetry_requires_symmetric_masks() -> None:
         (SymmetryMap(planes=("x",)) | SIMP()).bind(g)
 
 
-def test_sensitivity_filter_identity_apply() -> None:
-    bound = (SensitivityFilter(radius=1.5) | SIMP(p=1.0, scale_min=0.0)).bind(G42)
-    rho = np.linspace(0.1, 0.8, 8)
-    np.testing.assert_allclose(bound.apply(rho), rho, rtol=1e-12)
-
-
 def test_chain_validates_input() -> None:
     bound = SIMP().bind(G42)
     with pytest.raises(ParametrizationError, match="shape"):
@@ -205,16 +193,13 @@ def test_full_chain_fd_anisotropic_masked() -> None:
     assert_gradient_matches(f, grad, x)
 
 
-def test_registry_links_fd_verified_or_exempt() -> None:
+def test_registry_links_are_fd_verified() -> None:
     from topokit.registry import registry
 
     g = StructuredGrid(shape=(4, 2), spacing=(0.7, 0.45))
     rng = np.random.default_rng(seed=7)
     for name in registry.names("chain_links"):
         cls = registry.get("chain_links", name)
-        if cls.fd_exempt is not None:
-            assert isinstance(cls.fd_exempt, str) and cls.fd_exempt
-            continue
         link = cls.fd_example(g)
         chain = Chain((link,)) if link.is_terminal else Chain((link, SIMP()))
         bound = chain.bind(g)
@@ -370,11 +355,6 @@ def test_simp_requires_p_at_least_one() -> None:
     with pytest.raises(ParametrizationError, match="p must be >= 1"):
         SIMP(p=0.0)
     SIMP(p=1.0)  # linear is allowed
-
-
-def test_radial_filter_with_sensitivity_filter_warns() -> None:
-    with pytest.warns(UserWarning, match="SensitivityFilter"):
-        (RadialDensityFilter(radius=1.5) | SensitivityFilter(radius=1.5) | SIMP()).bind(G42)
 
 
 def test_filter_kernel_resolves_at_call_time() -> None:
@@ -645,33 +625,13 @@ def test_matrix_filter_matches_radial_filter_on_a_grid() -> None:
     )
 
 
-def test_matrix_sensitivity_filter_matches_grid_version() -> None:
-    from topokit.parametrization import _BoundMatrixSensitivityFilter, _BoundSensitivityFilter
-
-    g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
-    # SensitivityFilter's grid version wraps the SEPARABLE filter, whose kernel
-    # differs from the radial matrix kernel, so compare structure, not values:
-    # identity forward, masked and finite pullback.
-    m = _BoundMatrixSensitivityFilter(_stub_from_grid(g), radius=1.5)
-    rng = np.random.default_rng(7)
-    x = rng.uniform(0.1, 0.9, g.n_elements)
-    grad = rng.standard_normal(g.n_elements)
-    np.testing.assert_array_equal(m.apply(x), x)
-    out = m.pullback(x, grad)
-    assert out.shape == (g.n_elements,)
-    assert np.isfinite(out).all()
-    g2 = _BoundSensitivityFilter(g, 1.5).pullback(x, grad)
-    assert np.isfinite(g2).all()  # both paths defined on the same inputs
-
-
 def test_filters_dispatch_to_matrix_on_non_grid_meshes() -> None:
-    from topokit.parametrization import _BoundMatrixFilter, _BoundMatrixSensitivityFilter
+    from topokit.parametrization import _BoundMatrixFilter
 
     g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
     stub = _stub_from_grid(g)
     assert isinstance(DensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
     assert isinstance(RadialDensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
-    assert isinstance(SensitivityFilter(radius=1.5).build(stub), _BoundMatrixSensitivityFilter)
 
 
 def test_symmetry_map_rejects_non_grid_meshes() -> None:

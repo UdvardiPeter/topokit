@@ -51,8 +51,6 @@ def _solution(model: LinearElasticity, g: StructuredGrid, chain: Any, x: np.ndar
 def test_response_protocol_metadata() -> None:
     assert Compliance.field_basis == "interpolated"
     assert Volume.field_basis == "density"
-    assert Compliance.n_extra_adjoints == 0
-    assert Volume.n_extra_adjoints == 0
 
 
 def test_compliance_value_equals_load_work() -> None:
@@ -199,8 +197,6 @@ def test_responses_registry_fd_meta() -> None:
     x = rng.uniform(0.3, 0.9, size=chain.n_vars)
     for name in registry.names("responses"):
         cls = registry.get("responses", name)
-        if getattr(cls, "fd_exempt", None) is not None:
-            continue
         resp = cls.fd_example()
         pull = chain.pullback if cls.field_basis == "interpolated" else chain.pullback_density
 
@@ -366,7 +362,6 @@ class _Fixed:
     # stub response with a fixed value, for constraint-normalization tests
     name: ClassVar[str] = "fixed"
     field_basis: ClassVar[FieldBasis] = "density"
-    n_extra_adjoints: ClassVar[int] = 0
 
     def __init__(self, v: float) -> None:
         self.v = v

@@ -35,7 +35,6 @@ from topokit.parametrization import (
     LinkSpec,
     ParametrizationError,
     RadialDensityFilter,
-    SensitivityFilter,
     SymmetryMap,
 )
 from topokit.problem import (
@@ -129,7 +128,6 @@ __all__ = [
     "SelectionError",
     "Selector",
     "SelectorBase",
-    "SensitivityFilter",
     "Solution",
     "SolverError",
     "SparseMatrix",
@@ -170,9 +168,6 @@ registry.register(
 )
 registry.register("chain_links", "heaviside", Heaviside, source="topokit.parametrization")
 registry.register("chain_links", "simp", SIMP, source="topokit.parametrization")
-registry.register(
-    "chain_links", "sensitivity_filter", SensitivityFilter, source="topokit.parametrization"
-)
 registry.register("responses", "compliance", Compliance, source="topokit.responses")
 registry.register("responses", "volume", Volume, source="topokit.responses")
 registry.register("optimizers", "oc", OC, source="topokit.optimizers")

@@ -34,7 +34,6 @@ class XCentroid(ResponseBase):
 
     name: ClassVar[str] = "x_centroid"
     field_basis: ClassVar[str] = "density"
-    n_extra_adjoints: ClassVar[int] = 0
 
     def value(self, solution):
         mesh = solution.mesh

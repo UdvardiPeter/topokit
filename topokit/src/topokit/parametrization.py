@@ -28,8 +28,7 @@ model declares. Pinning has zero pullback at pinned positions, so the
 chain rule stays exact.
 
 Every link's pullback is finite-difference verified through the registry
-meta-test; links whose pullback is deliberately not a VJP (the classic
-sensitivity filter) declare ``fd_exempt`` with a reason.
+meta-test.
 """
 
 from __future__ import annotations
@@ -151,7 +150,6 @@ def _warn_if_unfiltered(radius: float, where: str) -> None:
 class LinkSpec:
     """Base for chain links; compose with ``|``."""
 
-    fd_exempt: ClassVar[str | None] = None
     is_terminal: ClassVar[bool] = False
     is_reduced_input: ClassVar[bool] = False
 
@@ -219,13 +217,6 @@ class Chain:
         for link in links[1:]:
             if link.is_reduced_input:
                 raise ParametrizationError(f"{type(link).__name__} must be the first link")
-        kinds = {type(link).__name__ for link in links}
-        if kinds & {"DensityFilter", "RadialDensityFilter"} and "SensitivityFilter" in kinds:
-            warnings.warn(
-                "combining a density filter with SensitivityFilter mixes a real filter "
-                "with a gradient heuristic; use one of them",
-                stacklevel=2,
-            )
         reduced = links[0].build(mesh) if links[0].is_reduced_input else None
         middle_specs = links[1:-1] if reduced is not None else links[:-1]
         middle = [link.build(mesh) for link in middle_specs]
@@ -709,21 +700,6 @@ class _BoundMatrixFilter(BoundLink):
         return np.asarray(self._w.T @ scaled).ravel() * self._active
 
 
-class _BoundMatrixSensitivityFilter(BoundLink):
-    def __init__(self, mesh: Mesh, radius: float) -> None:
-        self._inner = _BoundMatrixFilter(mesh, radius)
-        self.mesh = mesh
-
-    def apply(self, x: _F64) -> _F64:
-        return x
-
-    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
-        inner = self._inner
-        num = np.asarray(inner._w @ (x * grad_out * inner._active)).ravel()
-        weighted = num / (inner._denom * np.maximum(x, 1e-3))
-        return np.where(inner._active_mask, weighted, 0.0)
-
-
 @dataclass(frozen=True)
 class Heaviside(LinkSpec):
     """Smooth tanh projection sharpening intermediate densities."""
@@ -800,54 +776,3 @@ class _BoundSIMP(BoundLink):
 
     def pullback(self, x: _F64, grad_out: _F64) -> _F64:
         return np.asarray(grad_out * self.p * x ** (self.p - 1.0) * (1.0 - self.scale_min))
-
-
-@dataclass(frozen=True)
-class SensitivityFilter(LinkSpec):
-    """Sigmund's classic sensitivity filter.
-
-    Identity in the forward direction; the pullback smooths gradients with
-    density weighting. It is a gradient heuristic, deliberately not the
-    VJP of any map, hence ``fd_exempt``. Density filtering plus projection
-    is the recommended modern alternative.
-
-    On a non-grid mesh the smoothing kernel is the same sparse-matrix radial
-    weighting the density filters fall back to; ``radius`` is a physical
-    length on every mesh type.
-    """
-
-    radius: float = 1.5
-    fd_exempt: ClassVar[str | None] = (
-        "gradient heuristic by definition; its pullback is not the VJP of apply"
-    )
-
-    def __post_init__(self) -> None:
-        if self.radius <= 0.0:
-            raise ParametrizationError(f"radius must be > 0, got {self.radius}")
-
-    def build(self, mesh: Mesh) -> BoundLink:
-        """Bind, reusing the density-filter kernels."""
-        if isinstance(mesh, StructuredGrid):
-            return _BoundSensitivityFilter(mesh, self.radius)
-        return _BoundMatrixSensitivityFilter(mesh, self.radius)
-
-    @classmethod
-    def fd_example(cls, mesh: Mesh) -> SensitivityFilter:
-        """Unused; the link is fd_exempt."""
-        return cls()
-
-
-class _BoundSensitivityFilter(BoundLink):
-    def __init__(self, mesh: StructuredGrid, radius: float) -> None:
-        self._inner = _BoundDensityFilter(mesh, radius)
-        self.mesh = mesh
-
-    def apply(self, x: _F64) -> _F64:
-        return x
-
-    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
-        mesh = self.mesh
-        inner = self._inner
-        num = inner._kern()(mesh.to_grid(x * grad_out * inner._active), inner._weights)
-        weighted = mesh.to_flat(num) / (inner._denom * np.maximum(x, 1e-3))
-        return np.where(mesh.active_elements, weighted, 0.0)

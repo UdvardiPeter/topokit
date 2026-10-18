@@ -38,7 +38,6 @@ USER_FACING = [
     "RadialDensityFilter",
     "Heaviside",
     "SIMP",
-    "SensitivityFilter",
     # responses
     "Compliance",
     "Volume",

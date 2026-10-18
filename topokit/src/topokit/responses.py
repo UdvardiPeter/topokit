@@ -10,8 +10,7 @@ routes each gradient through the matching chain pullback.
 
 ``Compliance`` is self-adjoint (its gradient is the negated element strain
 energies, no extra solve) and ``Volume`` is explicit, so neither needs an
-adjoint solve in v1. ``n_extra_adjoints`` declares the count for the
-machinery that lands with stress constraints (v1.x).
+adjoint solve in v1.
 
 Comparisons build constraints: ``Volume() <= 0.3`` returns a `Constraint`
 normalized to ``g <= 0`` form for the optimizer.
@@ -84,7 +83,6 @@ class Response(Protocol):
 
     name: ClassVar[str]
     field_basis: ClassVar[FieldBasis]
-    n_extra_adjoints: ClassVar[int]
 
     def value(self, solution: Solution) -> float:
         """Return the scalar value."""
@@ -120,7 +118,6 @@ class Compliance(ResponseBase):
     weights: tuple[float, ...] | None = None
     name: ClassVar[str] = "compliance"
     field_basis: ClassVar[FieldBasis] = "interpolated"
-    n_extra_adjoints: ClassVar[int] = 0
 
     def _case_weights(self, n_cases: int) -> _F64:
         if self.weights is None:
@@ -170,7 +167,6 @@ class Volume(ResponseBase):
     region: str = "design"
     name: ClassVar[str] = "volume"
     field_basis: ClassVar[FieldBasis] = "density"
-    n_extra_adjoints: ClassVar[int] = 0
 
     def _mask(self, mesh: Mesh) -> npt.NDArray[np.bool_]:
         if self.region == "design":
