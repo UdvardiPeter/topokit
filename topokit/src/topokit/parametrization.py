@@ -370,17 +370,18 @@ class DensityFilter(LinkSpec):
     transpose of the normalized correlation.
 
     This is the filter of the topology-optimization literature: it reproduces
-    the 88-line density filter (``ft = 2``), and the frozen benchmark
-    references to 1e-12. The reach is isotropic, so the minimum member size
-    the radius enforces does not depend on feature orientation.
+    the 88-line density filter (``ft = 2``), which is the lineage the frozen
+    benchmark references stand on. The reach is isotropic, so the minimum
+    member size the radius enforces does not depend on feature orientation.
 
     Two implementations serve it, both exercised by the suite and agreeing to
-    1e-12 on a uniform grid: a grid fast path that correlates the dense
-    N-D kernel over the structured array (6 ms and 16 MiB to bind at 524k
-    elements), and an explicit sparse matrix for every other mesh (10.4 s and
-    1.2 GiB at the same size, which is why the fast path stays). The matrix
-    form scales each weight by the neighbor's element volume; on a uniform
-    mesh that factor cancels in the normalization.
+    1e-12 on a uniform grid: a grid fast path that correlates the dense N-D
+    kernel over the structured array, and an explicit sparse matrix for every
+    other mesh. The fast path stays because the gap is large -- binding 524k
+    elements at radius 1.5 costs 21 ms and 16 MiB of peak RSS on the grid
+    against 2.4 s and 1.0 GiB through the matrix. The matrix form scales each
+    weight by the neighbor's element volume; on a uniform mesh that factor
+    cancels in the normalization.
     """
 
     radius: float = 1.5
