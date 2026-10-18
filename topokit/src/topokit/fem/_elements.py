@@ -12,14 +12,14 @@ standard 4-point degree-2 tetrahedron rule, evaluating the isoparametric
 Jacobian from the full 10-node map at each Gauss point so curved (non
 straight-edge) elements are handled correctly.
 
-Engineering-strain row order is ``(xx, yy, xy)`` in 2D and
-``(xx, yy, zz, xy, yz, zx)`` in 3D, matching ``fem._d_matrix``; ``b_stack``
-builds the grid model's B matrix too. DOFs are
-node-major (``[u0, v0, (w0), u1, v1, (w1), ...]``). Getting the row order
-wrong produces a stiffness matrix that still passes energy-only checks for
-isotropic materials (D's normal-strain and shear blocks are individually
-permutation-symmetric) but yields wrong per-component stress -- callers
-needing stress must use this exact convention.
+Engineering-strain row order is ``(xx, yy, xy)`` in 2D and ``(xx, yy, zz, xy,
+yz, zx)`` in 3D, matching ``fem._d_matrix``; ``b_stack`` builds the grid
+model's B matrix too. DOFs are node-major (``[u0, v0, (w0), u1, v1, (w1),
+...]``). Getting the row order wrong produces a stiffness matrix that still
+passes energy-only checks for isotropic materials (D's normal-strain and
+shear blocks are individually permutation-symmetric) but yields wrong
+per-component stress -- callers needing stress must use this exact
+convention.
 """
 
 from __future__ import annotations
