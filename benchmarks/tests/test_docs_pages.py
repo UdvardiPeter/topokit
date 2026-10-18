@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
-"""Runnable docs stay runnable: Home, tutorial, and extend pages execute as written."""
+"""Runnable docs stay runnable: Home, tutorial, and extend pages execute as written.
+
+The gate belongs to the docs project, whose ``docs-pages`` target runs this
+file from here: a page edit or a library change both reach it through that
+project's dependency on ``topokit``. The nightly also covers it through the
+``regression_full`` tier.
+"""
 
 import re
 from pathlib import Path

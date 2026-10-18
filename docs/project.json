@@ -5,11 +5,25 @@
   "targets": {
     "docs-build": {
       "executor": "nx:run-commands",
-      "options": { "command": "uv run --group docs mkdocs build --strict" }
+      "options": {
+        "command": "uv run --group docs mkdocs build --strict"
+      }
     },
     "docs-serve": {
       "executor": "nx:run-commands",
-      "options": { "command": "uv run --group docs mkdocs serve" }
+      "options": {
+        "command": "uv run --group docs mkdocs serve"
+      }
+    },
+    "docs-pages": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "benchmarks",
+        "command": "uv run pytest -q tests/test_docs_pages.py"
+      }
     }
-  }
+  },
+  "implicitDependencies": [
+    "topokit"
+  ]
 }
