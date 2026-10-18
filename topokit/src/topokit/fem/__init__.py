@@ -47,7 +47,7 @@ from topokit.backend import SparseMatrix, active_backend, get_kernel, register_k
 from topokit.exceptions import FemError
 from topokit.fem import _elements
 from topokit.fields import FieldSpec, NodeField
-from topokit.mesh import Mesh, StructuredGrid, UnstructuredMesh
+from topokit.mesh import Mesh, StructuredGrid
 from topokit.selection import Selector
 
 __all__ = [
@@ -769,8 +769,13 @@ class LinearElasticity(ElasticityBase[StructuredGrid]):
         return self._ke
 
 
-class UnstructuredElasticity(ElasticityBase[UnstructuredMesh]):
-    """Linear static elasticity on a simplex mesh (tri3, tet4, or tet10)."""
+class UnstructuredElasticity(ElasticityBase[Mesh]):
+    """Linear static elasticity on a simplex mesh (tri3, tet4, or tet10).
+
+    Written against the `Mesh` protocol, not `UnstructuredMesh`, so a
+    third-party mesh whose ``element_kind`` is one of the simplex kinds
+    works unchanged; any other kind is rejected at construction.
+    """
 
     def _build_elements(self, conn: _I64) -> tuple[_F64, _F64, _F64, _F64]:
         """Build a per-element stack: simplex elements differ in shape and size.
