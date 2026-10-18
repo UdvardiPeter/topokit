@@ -27,7 +27,13 @@ from topokit.fem import (
 from topokit.fields import FieldSpec
 from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, Optimizer
-from topokit.parametrization import SIMP, DensityFilter, Heaviside, SymmetryMap
+from topokit.parametrization import (
+    SIMP,
+    DensityFilter,
+    Heaviside,
+    ParametrizationError,
+    SymmetryMap,
+)
 from topokit.problem import Problem, ProblemError, Schedule, Stage, Study
 from topokit.responses import Compliance, Constraint, Volume
 from topokit.selection import Box, NearPoint, PlaneSlab
@@ -476,7 +482,9 @@ def _unstructured_tet10_problem(
     )
     return Problem(
         model,
-        DensityFilter(radius=1.5) | SIMP(p=3.0),
+        # no density filter: the mesh is a single element, so a filter is the
+        # identity (and now says so); these tests are about the fingerprint
+        SIMP(p=3.0),
         objective=Compliance(),
         constraints=[Volume() <= 0.4],
         optimizer=optimizer or OC(move=0.2),
@@ -976,3 +984,39 @@ def test_conforms_method_lists_track_the_protocols() -> None:
     assert set(_RESPONSE_METHODS) == methods_of(Response)
     assert set(_OPTIMIZER_METHODS) == methods_of(Optimizer)
     assert set(_SOLVER_METHODS) == methods_of(LinearSolver)
+
+
+def test_schedule_rejects_a_max_iter_it_would_shadow() -> None:
+    # Schedule.single carries max_iter=40; the Study argument would be ignored
+    with pytest.raises(ProblemError, match="max_iter=3 would be ignored"):
+        Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=40), max_iter=3)
+
+
+def test_schedule_rejects_a_shadowed_tol_and_names_both() -> None:
+    with pytest.raises(ProblemError, match=r"max_iter=3 and tol=0\.5 would be ignored"):
+        Study(_problem(), schedule=Schedule.single(p=3.0), max_iter=3, tol=0.5)
+
+
+def test_schedule_accepts_the_untouched_defaults() -> None:
+    # the common case: a schedule and no cap arguments at all
+    study = Study(_problem(), schedule=Schedule.single(p=3.0, max_iter=2, tol=0.0))
+    assert study.run().iterations == 2
+
+
+def test_problem_accepts_a_lone_terminal_link() -> None:
+    # LinkSpec.bind builds a one-link chain, so SIMP on its own is a valid
+    # parametrization; the annotation used to demand a Chain while the runtime
+    # already accepted this
+    model = _cantilever()
+    problem = Problem(
+        model,
+        SIMP(p=3.0),
+        objective=Compliance(),
+        constraints=[Volume() <= 0.4],
+    )
+    assert problem.chain.n_vars == model.mesh.n_elements
+
+
+def test_problem_rejects_a_lone_non_terminal_link() -> None:
+    with pytest.raises(ParametrizationError, match="terminal"):
+        Problem(_cantilever(), DensityFilter(radius=1.5), objective=Compliance())

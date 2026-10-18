@@ -43,7 +43,7 @@ from topokit.fem import PhysicsModel
 from topokit.fields import DesignField
 from topokit.mesh import Mesh, StructuredGrid
 from topokit.optimizers import OC, Optimizer
-from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside
+from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside, LinkSpec
 from topokit.responses import Compliance, Constraint, Response, Solution
 from topokit.solvers import LinearSolver, auto_solver
 
@@ -87,7 +87,13 @@ _OPTIMIZER_METHODS = ("setup", "step", "state", "load_state")
 _SOLVER_METHODS = ("prepare", "solve")
 
 
-def _bind_chain(chain: Chain | BoundChain, model: PhysicsModel) -> BoundChain:
+def _bind_chain(chain: LinkSpec | Chain | BoundChain, model: PhysicsModel) -> BoundChain:
+    """Bind whatever the caller passed: a bound chain, a spec, or a lone link.
+
+    ``LinkSpec.bind`` makes a one-link chain, so a terminal link on its own is
+    a valid parametrization (SIMP with no filter, say). A non-terminal lone
+    link still fails in ``Chain.bind`` with the terminal-link error.
+    """
     if isinstance(chain, BoundChain):
         return chain
     return chain.bind(model.mesh)
@@ -181,7 +187,7 @@ class Problem:
     def __init__(
         self,
         model: PhysicsModel,
-        chain: Chain | BoundChain,
+        chain: LinkSpec | Chain | BoundChain,
         objective: Response,
         constraints: list[Constraint] | tuple[Constraint, ...] = (),
         optimizer: Optimizer | None = None,
