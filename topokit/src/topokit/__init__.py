@@ -16,6 +16,7 @@ from topokit.fem import (
     ALUMINUM_6061,
     STEEL,
     BodyForce,
+    ElasticityBase,
     FemError,
     LinearElasticity,
     Material,
@@ -25,7 +26,7 @@ from topokit.fem import (
     UnstructuredElasticity,
 )
 from topokit.fields import DesignField, ElementField, FieldError, FieldSpec, NodeField
-from topokit.mesh import Mesh, MeshError, StructuredGrid, UnstructuredMesh
+from topokit.mesh import Mesh, MeshBase, MeshError, StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC, Optimizer, OptimizerError, StepResult
 from topokit.parametrization import (
     SIMP,
@@ -89,6 +90,7 @@ __all__ = [
     "DensityFilter",
     "DesignField",
     "Direct",
+    "ElasticityBase",
     "ElementField",
     "EventBus",
     "FemError",
@@ -103,6 +105,7 @@ __all__ = [
     "LinkSpec",
     "Material",
     "Mesh",
+    "MeshBase",
     "MeshError",
     "NearPoint",
     "NodeField",

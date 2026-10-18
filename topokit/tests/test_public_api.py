@@ -69,6 +69,8 @@ USER_FACING = [
     "Response",
     "Selector",
     "SelectorBase",
+    "MeshBase",
+    "ElasticityBase",
     "SparseMatrix",
     # the field containers the public API hands back
     "DesignField",
