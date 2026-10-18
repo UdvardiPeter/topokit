@@ -7,7 +7,7 @@ consumes is a chain of links, each a frozen spec with ``apply`` and
 ``pullback`` (vector-Jacobian product) once bound to a mesh. Compose with
 ``|`` and bind::
 
-    chain = SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | Heaviside() | SIMP()
+    chain = DensityFilter(radius=1.5) | Heaviside() | SIMP()
     bound = chain.bind(mesh)
     scale = bound.apply(x)
     grad_x = bound.pullback(x, grad_scale)
@@ -47,8 +47,19 @@ from topokit.exceptions import TopoKitError
 from topokit.fields import FieldSpec
 from topokit.mesh import Mesh, StructuredGrid
 
+__all__ = [
+    "SIMP",
+    "BoundChain",
+    "BoundLink",
+    "Chain",
+    "ChainEval",
+    "DensityFilter",
+    "Heaviside",
+    "LinkSpec",
+    "ParametrizationError",
+]
+
 _F64 = npt.NDArray[np.float64]
-_I64 = npt.NDArray[np.int64]
 
 # Warnings raised here are about the caller's configuration, and binding
 # happens both directly and from Problem(); skipping the package's own frames
@@ -144,9 +155,7 @@ class BoundLink:
     Implement ``apply`` (forward) and ``pullback`` (the vector-Jacobian
     product; finite-difference verified for registry-registered links).
     A terminal link's bound form must set ``out_field`` to the
-    :class:`~topokit.fields.FieldSpec` the physics consumes. A
-    reduced-input link's bound form must set ``n_reduced``, the
-    size of its input space.
+    :class:`~topokit.fields.FieldSpec` the physics consumes.
     """
 
     out_field: FieldSpec | None = None
