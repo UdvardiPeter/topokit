@@ -22,7 +22,7 @@ class GradientMismatchError(TopoKitError, AssertionError):
     """An analytic gradient disagrees with central differences."""
 
 
-def central_difference(f: Callable[[_F64], float], x: _F64, h: float) -> _F64:
+def _central_difference(f: Callable[[_F64], float], x: _F64, h: float) -> _F64:
     """Dense central-difference gradient of ``f`` at ``x`` with step ``h``."""
     g = np.empty_like(x)
     for i in range(x.size):
@@ -57,7 +57,7 @@ def assert_gradient_matches(
     scale = max(1.0, float(np.abs(x).max()))
     norm = max(float(np.linalg.norm(analytic)), 1e-30)
     errors = {
-        h: float(np.linalg.norm(central_difference(f, x, h * scale) - analytic)) / norm
+        h: float(np.linalg.norm(_central_difference(f, x, h * scale) - analytic)) / norm
         for h in steps
     }
     if min(errors.values()) > rtol:

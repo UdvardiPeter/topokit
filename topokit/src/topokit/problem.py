@@ -22,7 +22,6 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -119,14 +118,6 @@ def _staged_spec(spec: Chain, *, p: float, beta: float) -> Chain:
     return Chain(links)
 
 
-def _staged_chain(spec: Chain, mesh: Mesh, *, p: float, beta: float) -> BoundChain:
-    """Rebind ``spec`` with the stage's SIMP ``p``/Heaviside ``beta`` (Option A)."""
-    return _staged_spec(spec, p=p, beta=beta).bind(mesh)
-
-
-_NODES_PER_ELEMENT = {"quad4": 4, "hex8": 8, "tri3": 3, "tet4": 4, "tet10": 10}
-
-
 def _geometry_digest(mesh: Mesh) -> str:
     """Hex digest of a mesh's node coordinates and connectivity.
 
@@ -151,35 +142,6 @@ def _mask_digest(mesh: Mesh) -> str:
     digest.update(np.asarray(mesh.solid).tobytes())
     digest.update(np.asarray(mesh.void).tobytes())
     return digest.hexdigest()
-
-
-def _estimate_stiffness_bytes(n_dof: int, nnz: int) -> int:
-    """Rough CSR float64 stiffness-matrix size: data + indices + indptr."""
-    return nnz * (8 + 4) + (n_dof + 1) * 4
-
-
-def _available_ram_bytes() -> int | None:
-    """Best-effort total RAM in bytes, or None if undetectable."""
-    try:
-        return int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
-    except (ValueError, OSError, AttributeError):
-        return None
-
-
-def _warn_if_memory_tight(model: PhysicsModel) -> None:
-    """Warn (with numbers) if the estimated stiffness matrix may strain RAM."""
-    nen = _NODES_PER_ELEMENT.get(model.mesh.element_kind)
-    if nen is None:
-        return
-    nnz = model.mesh.n_elements * (nen * model.mesh.dim) ** 2
-    estimate = _estimate_stiffness_bytes(model.n_dof, nnz)
-    ram = _available_ram_bytes()
-    if ram is not None and estimate > 0.5 * ram:
-        warnings.warn(
-            f"estimated stiffness matrix ~{estimate / 1e9:.1f} GB may strain available "
-            f"RAM ~{ram / 1e9:.1f} GB; consider a coarser mesh or the AmgCG solver",
-            stacklevel=3,
-        )
 
 
 def _schedule_to_json(schedule: Schedule) -> list[dict[str, float]]:
@@ -293,7 +255,6 @@ class Problem:
         # without the pairing is simply left alone).
         if hasattr(self.solver, "set_near_nullspace") and hasattr(model, "near_nullspace"):
             self.solver.set_near_nullspace(model.near_nullspace())
-        _warn_if_memory_tight(model)
 
     def default_volume_fraction(self) -> float:
         """Guess an initial design density from the first volume constraint."""

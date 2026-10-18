@@ -539,22 +539,6 @@ def test_resume_matches_uninterrupted(tmp_path: Path) -> None:
     np.testing.assert_array_equal(out.x, full.x)
 
 
-def test_estimate_stiffness_bytes() -> None:
-    from topokit.problem import _estimate_stiffness_bytes
-
-    assert _estimate_stiffness_bytes(n_dof=1_000_000, nnz=80_000_000) == (
-        80_000_000 * 12 + 1_000_001 * 4
-    )
-
-
-def test_small_problem_does_not_warn() -> None:
-    import warnings
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")  # any memory warning would fail the test
-        _problem(OC(move=0.2))  # the 20x10 cantilever is tiny
-
-
 def test_checkpoint_every_zero_writes_only_final(tmp_path: Path) -> None:
     # checkpoint_every <= 0 must not divide-by-zero; the final write still happens
     path = tmp_path / "run.topo"
@@ -689,27 +673,25 @@ def test_symmetry_runs_in_reduced_space() -> None:
     assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
 
 
-def test_staged_chain_overrides_p_and_beta() -> None:
-    from topokit.problem import _staged_chain
+def test_staged_spec_overrides_p_and_beta() -> None:
+    from topokit.problem import _staged_spec
 
-    model = _cantilever()
     spec = DensityFilter(radius=1.5) | Heaviside(beta=1.0) | SIMP(p=3.0)
-    staged = _staged_chain(spec, model.mesh, p=2.0, beta=8.0)
-    simp = next(link for link in staged.spec.links if isinstance(link, SIMP))
-    heav = next(link for link in staged.spec.links if isinstance(link, Heaviside))
+    staged = _staged_spec(spec, p=2.0, beta=8.0)
+    simp = next(link for link in staged.links if isinstance(link, SIMP))
+    heav = next(link for link in staged.links if isinstance(link, Heaviside))
     assert simp.p == 2.0
     assert heav.beta == 8.0
 
 
-def test_staged_chains_equal_when_params_unchanged() -> None:
+def test_staged_specs_equal_when_params_unchanged() -> None:
     # a chain without Heaviside: beta changes produce identical specs (dedup)
-    from topokit.problem import _staged_chain
+    from topokit.problem import _staged_spec
 
-    model = _cantilever()
     spec = DensityFilter(radius=1.5) | SIMP(p=3.0)
-    a = _staged_chain(spec, model.mesh, p=3.0, beta=1.0)
-    b = _staged_chain(spec, model.mesh, p=3.0, beta=32.0)
-    assert a.spec == b.spec  # frozen-dataclass equality -> dedup
+    a = _staged_spec(spec, p=3.0, beta=1.0)
+    b = _staged_spec(spec, p=3.0, beta=32.0)
+    assert a == b  # frozen-dataclass equality -> dedup
 
 
 def test_study_reports_kkt() -> None:
