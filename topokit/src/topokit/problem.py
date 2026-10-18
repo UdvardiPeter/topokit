@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -329,6 +329,54 @@ class _Resume:
 
 
 @dataclass
+class _RunState:
+    """Everything a run accumulates, in one place.
+
+    ``iterate`` used to hang these off ``self``, which meant ``run`` and
+    ``_checkpoint`` read ten attributes that nothing in ``__init__`` created.
+    """
+
+    history: dict[str, list[float]]
+    converged: bool = False
+    reason: str = "max iterations reached"
+    best_feasible: bool = False
+    best_x: _F64 = field(default_factory=lambda: np.zeros(0))
+    best_objective: float = float("inf")
+    best_g: float = float("inf")
+    timing: float = 0.0
+    final: IterationState | None = None
+    final_chain: BoundChain | None = None
+
+    def offer(self, x: _F64, objective: float, max_g: float) -> None:
+        """Keep ``x`` if it is the best iterate of this stage so far.
+
+        Feasible beats infeasible; among feasible, lowest objective; among
+        infeasible, least violation.
+        """
+        if max_g <= 1e-4 and (not self.best_feasible or objective < self.best_objective):
+            self.best_feasible, self.best_x, self.best_objective, self.best_g = (
+                True,
+                x.copy(),
+                objective,
+                max_g,
+            )
+        elif not self.best_feasible and max_g < self.best_g:
+            self.best_x, self.best_objective, self.best_g = x.copy(), objective, max_g
+
+    def reset_best(self, x: _F64) -> None:
+        """Forget the previous stage's best.
+
+        Compliance is not comparable across stages (different ``p``) and early
+        grey stages are not valid topologies, so "best" means the best iterate
+        of the current stage.
+        """
+        self.best_feasible = False
+        self.best_x = x.copy()
+        self.best_objective = float("inf")
+        self.best_g = float("inf")
+
+
+@dataclass
 class IterationState:
     """The per-iteration state yielded by :meth:`Study.iterate`."""
 
@@ -541,7 +589,13 @@ class Study:
         )
 
     def _checkpoint(
-        self, stage_index: int, iter_in_stage: int, iteration: int, x: _F64, c0: float | None
+        self,
+        state: _RunState,
+        stage_index: int,
+        iter_in_stage: int,
+        iteration: int,
+        x: _F64,
+        c0: float | None,
     ) -> None:
         """Write the resumable state to ``checkpoint_path`` (atomic .topo)."""
         if self.checkpoint_path is None:
@@ -566,44 +620,56 @@ class Study:
             "iter_in_stage": iter_in_stage,
             "iteration": iteration,
             "c0": c0,
-            "converged": self._converged,
-            "reason": self._reason,
-            "history": self._history,
-            "best_objective": self._best_obj,
-            "best_g": self._best_g,
-            "best_feasible": self._best_feasible,
+            "converged": state.converged,
+            "reason": state.reason,
+            "history": state.history,
+            "best_objective": state.best_objective,
+            "best_g": state.best_g,
+            "best_feasible": state.best_feasible,
             "opt_scalars": opt_scalars,
             "opt_none": opt_none,
         }
-        arrays = {"x": np.asarray(x), "best_x": np.asarray(self._best_x), **opt_arrays}
+        arrays = {"x": np.asarray(x), "best_x": np.asarray(state.best_x), **opt_arrays}
         write_topo(self.checkpoint_path, manifest, arrays)
 
     def run(self) -> Result:
         """Run every continuation stage to convergence or the cap, firing events."""
-        for _ in self.iterate():
-            pass
-        x = self._final.x  # the evaluated design (paired with self._final.objective)
+        gen = self.iterate()
+        while True:
+            try:
+                next(gen)
+            except StopIteration as stop:
+                final: Result = stop.value
+                return final
+
+    def _result(self, state: _RunState, iterations: int) -> Result:
+        """Package a finished run."""
+        assert state.final is not None and state.final_chain is not None
         mesh = self.problem.model.mesh
+        x = state.final.x  # the evaluated design, paired with state.final.objective
         return Result(
-            design=DesignField(self._final_chain.physical_density(x), mesh, name="density"),
+            design=DesignField(state.final_chain.physical_density(x), mesh, name="density"),
             x=x,
-            objective=self._final.objective,
+            objective=state.final.objective,
             best_design=DesignField(
-                self._final_chain.physical_density(self._best_x), mesh, name="density"
+                state.final_chain.physical_density(state.best_x), mesh, name="density"
             ),
-            best_x=self._best_x,
-            best_objective=self._best_obj,
-            history=self._history,
-            iterations=self._final.iteration,
-            stages_run=len({int(s) for s in self._history["stage"]}),
-            converged=self._converged,
-            reason=self._reason,
-            timing=self._timing,
-            kkt=self._final.kkt,
+            best_x=state.best_x,
+            best_objective=state.best_objective,
+            history=state.history,
+            iterations=iterations,
+            stages_run=len({int(v) for v in state.history["stage"]}),
+            converged=state.converged,
+            reason=state.reason,
+            timing=state.timing,
+            kkt=state.final.kkt,
         )
 
-    def iterate(self) -> Iterator[IterationState]:
+    def iterate(self) -> Generator[IterationState, None, Result]:
         """Yield one :class:`IterationState` per iteration across all stages.
+
+        Returns the :class:`Result` when the generator finishes, which is
+        what :meth:`run` collects.
 
         Each yielded state pairs the *evaluated* design ``x`` with the
         objective measured at that ``x``. Stages override the chain's SIMP
@@ -616,23 +682,22 @@ class Study:
         self._resume = None  # consume; a re-run starts fresh
         if resume is None:
             x = self._initial_x()
-            self._history: dict[str, list[float]] = {
+            history: dict[str, list[float]] = {
                 "objective": [],
                 "change": [],
                 "kkt": [],
                 "stage": [],
             }
             for c in p.constraints:
-                self._history[c.report_key] = []
-            self._converged = False
-            self._reason = "max iterations reached"
+                history[c.report_key] = []
+            state = _RunState(history=history)
             iteration = 0
             start_stage, start_j = 0, 1
         else:
             x = resume.x
-            self._history = resume.history
-            self._converged = resume.converged
-            self._reason = resume.reason
+            state = _RunState(
+                history=resume.history, converged=resume.converged, reason=resume.reason
+            )
             iteration = resume.iteration
             start_stage, start_j = resume.stage_index, resume.iter_in_stage
         t0 = time.perf_counter()
@@ -654,7 +719,7 @@ class Study:
         final_cursor: tuple[int, int, float | None] | None = None
         for stage_index, stage, staged in planned:
             chain = staged.bind(p.model.mesh)
-            self._final_chain = chain
+            state.final_chain = chain
             p.optimizer.setup(chain.n_vars, np.zeros(chain.n_vars), np.ones(chain.n_vars))
             c0: float | None = None
             stage_reason = "stage max iterations reached"
@@ -663,21 +728,15 @@ class Study:
                 # state, c0, and best are all restored)
                 p.optimizer.load_state(resume.opt_state)
                 c0 = resume.c0
-                self._best_feasible = resume.best_feasible
-                self._best_x = resume.best_x
-                self._best_obj = resume.best_obj
-                self._best_g = resume.best_g
+                state.best_feasible = resume.best_feasible
+                state.best_x = resume.best_x
+                state.best_objective = resume.best_obj
+                state.best_g = resume.best_g
                 j_start = start_j
             else:
-                # best-feasible tracking, reset per stage: compliance across stages
-                # is not comparable (different p), and early grey stages are not
-                # valid topologies, so "best" means the best iterate of this stage.
-                self._best_feasible = False
-                self._best_x = x.copy()
-                self._best_obj = float("inf")
-                self._best_g = float("inf")
+                state.reset_best(x)
                 j_start = 1
-            self._converged = False
+            state.converged = False
 
             reached = 0  # the last iteration this stage actually ran
             for j in range(j_start, stage.max_iter + 1):
@@ -690,23 +749,15 @@ class Study:
                 step = p.optimizer.step(x, f0 / c0, df0 / c0, gvals, dgs)
 
                 maxg = float(gvals.max()) if gvals.size else 0.0
-                if maxg <= 1e-4 and (not self._best_feasible or f0 < self._best_obj):
-                    self._best_feasible, self._best_x, self._best_obj, self._best_g = (
-                        True,
-                        x.copy(),
-                        f0,
-                        maxg,
-                    )
-                elif not self._best_feasible and maxg < self._best_g:
-                    self._best_x, self._best_obj, self._best_g = x.copy(), f0, maxg
+                state.offer(x, f0, maxg)
 
-                self._history["objective"].append(f0)
-                self._history["change"].append(step.change)
-                self._history["kkt"].append(step.kkt)
-                self._history["stage"].append(float(stage_index))
+                state.history["objective"].append(f0)
+                state.history["change"].append(step.change)
+                state.history["kkt"].append(step.kkt)
+                state.history["stage"].append(float(stage_index))
                 for name, val in responses.items():
                     if name != p.objective.name:
-                        self._history[name].append(val)
+                        state.history[name].append(val)
                 self.events.publish(
                     IterationFinished(
                         iteration=iteration,
@@ -722,7 +773,7 @@ class Study:
                         FieldSnapshot(iteration=iteration, rho=sol.density, mesh=sol.mesh)
                     )
 
-                self._final = IterationState(
+                state.final = IterationState(
                     iteration=iteration,
                     x=x.copy(),
                     objective=f0,
@@ -730,10 +781,10 @@ class Study:
                     kkt=step.kkt,
                     stage=stage_index,
                 )
-                yield self._final
+                yield state.final
 
                 if step.change < stage.tol:
-                    self._converged = True
+                    state.converged = True
                     stage_reason = f"design change {step.change:.2e} < tol {stage.tol:g}"
                     break
                 x = step.x_next
@@ -745,9 +796,9 @@ class Study:
                     and self.checkpoint_every > 0
                     and iteration % self.checkpoint_every == 0
                 ):
-                    self._checkpoint(stage_index, j + 1, iteration, x, c0)
+                    self._checkpoint(state, stage_index, j + 1, iteration, x, c0)
 
-            self._reason = stage_reason
+            state.reason = stage_reason
             if reached:
                 # resuming at the end of a stage leaves the range empty, so only
                 # a stage that ran can name the cursor to resume from
@@ -760,11 +811,12 @@ class Study:
                 "Start a new study from the result instead: "
                 "Study(problem, schedule=longer, x0=result.x)"
             )
-        self._checkpoint(*final_cursor[:2], iteration, x, final_cursor[2])
-        self._timing = time.perf_counter() - t0
+        self._checkpoint(state, *final_cursor[:2], iteration, x, final_cursor[2])
+        state.timing = time.perf_counter() - t0
         self.events.publish(
             StudyFinished(
-                reason=self._reason,
-                summary={"iterations": iteration, "converged": self._converged},
+                reason=state.reason,
+                summary={"iterations": iteration, "converged": state.converged},
             )
         )
+        return self._result(state, iteration)
