@@ -13,10 +13,11 @@ from topokit.problem import Result, Schedule, Study
 
 from topokit_bench.problems import Builder, cantilever, cantilever_3d, make_optimizer, mbb
 
+# One size only. The 120x40 row asserted the same five properties as 60x20 and
+# cost 123 CPU-seconds against 13.7 for eight more cases.
 _2D = [
-    (builder, nelx, nely, volfrac, rmin)
+    (builder, 60, 20, volfrac, rmin)
     for builder in (mbb, cantilever)
-    for nelx, nely in ((60, 20), (120, 40))
     for volfrac in (0.3, 0.5)
     for rmin in (1.5, 3.0)
 ]
