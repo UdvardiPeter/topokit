@@ -16,6 +16,7 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+from scipy.optimize import brentq
 
 from topokit.optimizers._base import (
     OptimizerError,
@@ -38,15 +39,12 @@ class OC:
 
     move: float = 0.2
     eta: float = 0.5
-    bisection_tol: float = 1e-4
 
     def __post_init__(self) -> None:
         if not 0.0 < self.move <= 1.0:
             raise OptimizerError(f"move must be in (0, 1], got {self.move}")
         if self.eta <= 0.0:
             raise OptimizerError(f"eta must be > 0, got {self.eta}")
-        if self.bisection_tol <= 0.0:
-            raise OptimizerError(f"bisection_tol must be > 0, got {self.bisection_tol}")
         self._lower: _F64 | None = None
         self._upper: _F64 | None = None
 
@@ -84,21 +82,30 @@ class OC:
             xn = candidate(lam)
             return float(g[0] + dgdx @ (xn - x))
 
+        # The 88-line's starting bracket, widened until it spans the sign change
+        # (the residual decreases in lambda). brentq needs a bracketing interval
+        # and will not search for one, so the expansion stays: it is what lets a
+        # fixed starting bracket survive a differently scaled objective.
         l1, l2 = 1e-9, 1e9
-        # ensure the bracket spans a sign change (residual decreasing in lambda)
         while residual(l1) < 0.0 and l1 > 1e-30:
             l1 *= 0.1
         while residual(l2) > 0.0 and l2 < 1e30:
             l2 *= 10.0
-        for _ in range(200):
-            lmid = 0.5 * (l1 + l2)
-            if residual(lmid) > 0.0:
-                l1 = lmid
-            else:
-                l2 = lmid
-            if (l2 - l1) <= self.bisection_tol * (1.0 + l2):
-                break
-        lam_final = 0.5 * (l1 + l2)
+        try:
+            lam_final = float(brentq(residual, l1, l2))
+        except ValueError as exc:
+            # brentq refuses a bracket without a sign change, where the manual
+            # bisection this replaced returned a meaningless midpoint. The
+            # residual is lambda-independent whenever max(0, -df0) is all zero,
+            # i.e. no variable lowers the objective by growing, so there is no
+            # multiplier to find.
+            raise OptimizerError(
+                "OC cannot bracket the volume multiplier: the linearized residual is "
+                f"{residual(l1):.3g} at lambda={l1:g} and {residual(l2):.3g} at "
+                f"lambda={l2:g}, so it never crosses zero. The usual cause is an "
+                "objective gradient with no negative entry, which makes the OC ratio "
+                "independent of the multiplier; use MMA for such a step."
+            ) from exc
         x_next = candidate(lam_final)
         kkt = kkt_residual(x, df0, g, dg, self._lower, self._upper, np.array([lam_final]))
         return StepResult(x_next=x_next, change=float(np.abs(x_next - x).max()), kkt=kkt)

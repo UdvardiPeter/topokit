@@ -288,8 +288,29 @@ def test_oc_reports_kkt_decreasing() -> None:
     assert last < first
 
 
-def test_oc_rejects_a_non_positive_bisection_tol() -> None:
-    # move and eta were validated, this one was not; zero makes the multiplier
-    # bisection run its full 200 iterations for nothing
-    with pytest.raises(OptimizerError, match="bisection_tol must be > 0"):
-        OC(bisection_tol=0.0)
+def test_oc_drives_the_volume_residual_to_zero() -> None:
+    # brentq solves the multiplier to machine precision, where the fixed-tolerance
+    # bisection it replaced stopped at ~1e-7 of the constraint bound
+    opt = OC(move=0.2)
+    n = 40
+    rng = np.random.default_rng(5)
+    x = np.full(n, 0.5)
+    opt.setup(n, np.zeros(n), np.ones(n))
+    df0 = -rng.uniform(0.5, 2.0, n)
+    dg = np.ones((1, n)) / n
+    r = opt.step(x, 1.0, df0, np.array([float(x.mean()) - 0.4]), dg)
+    assert float(r.x_next.mean()) == pytest.approx(0.4, abs=1e-15)
+
+
+def test_oc_fails_loud_when_no_multiplier_exists() -> None:
+    # max(0, -df0) is all zero, so the OC ratio does not depend on lambda and the
+    # residual never crosses zero; the manual bisection used to return a
+    # meaningless midpoint here
+    opt = OC(move=0.2)
+    n = 8
+    opt.setup(n, np.zeros(n), np.ones(n))
+    g = np.array([0.1])  # infeasible, and nothing can move to fix it
+    dg = np.ones((1, n)) / n
+    for df0 in (np.zeros(n), np.full(n, 0.5)):
+        with pytest.raises(OptimizerError, match="cannot bracket the volume multiplier"):
+            opt.step(np.full(n, 0.5), 1.0, df0, g, dg)
