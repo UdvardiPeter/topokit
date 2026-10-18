@@ -290,9 +290,7 @@ class BoundChain:
 
     def apply(self, x: Any) -> _F64:
         """Map design variables to the physics field, shape ``(n_elements,)``."""
-        arr = self._check(x)
-        _, pinned = self._forward(arr)
-        return self._terminal.apply(pinned)
+        return self.evaluate(x).field.copy()
 
     def physical_density(self, x: Any) -> _F64:
         """Return the physical density field, ``(n_elements,)``, after filters and projection.
@@ -303,17 +301,11 @@ class BoundChain:
         as compliance, consume :meth:`apply`. It is also the branch point
         for coupled physics (one terminal link per physics share it).
         """
-        arr = self._check(x)
-        _, pinned = self._forward(arr)
-        return pinned
+        return self.evaluate(x).density.copy()
 
     def pullback(self, x: Any, grad_field: Any) -> _F64:
         """Chain-rule ``dF/d(field)`` back to ``dF/dx`` through the whole chain."""
-        arr = self._check(x)
-        grad = self._check_grad(grad_field)
-        inputs, pinned = self._forward(arr)
-        g = self._terminal.pullback(pinned, grad)
-        return self._density_pullback(inputs, g)
+        return self.evaluate(x).pullback(grad_field)
 
     def pullback_density(self, x: Any, grad_density: Any) -> _F64:
         """Chain-rule ``dF/d(rho_bar)`` back to ``dF/dx`` for density responses.
@@ -322,10 +314,7 @@ class BoundChain:
         :meth:`physical_density` (e.g. volume), :meth:`pullback` for one on
         :meth:`apply`.
         """
-        arr = self._check(x)
-        grad = self._check_grad(grad_density)
-        inputs, _ = self._forward(arr)
-        return self._density_pullback(inputs, grad)
+        return self.evaluate(x).pullback_density(grad_density)
 
     def _check_grad(self, grad: Any) -> _F64:
         arr = np.asarray(grad, dtype=np.float64)
@@ -351,12 +340,12 @@ class BoundChain:
     def evaluate(self, x: Any) -> ChainEval:
         """Run the forward pass once and return a reusable evaluation.
 
-        ``ChainEval.field``/``.density`` are what :meth:`apply` and
-        :meth:`physical_density` return; its pullbacks equal
-        :meth:`pullback`/:meth:`pullback_density` bit-for-bit. Use it when a
-        loop needs several of these per design point (the orchestration
-        layer does), paying the filter forward pass once instead of four
-        times.
+        This is the one forward pass; :meth:`apply`,
+        :meth:`physical_density`, :meth:`pullback` and
+        :meth:`pullback_density` are one-line wrappers over it. Call it
+        directly when a loop needs several of those per design point (the
+        orchestration layer does) and pay the filter pass once instead of
+        four times.
         """
         arr = self._check(x)
         inputs, pinned = self._forward(arr)
