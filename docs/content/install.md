@@ -10,6 +10,7 @@ Python 3.12 or newer. The core depends only on numpy and scipy.
 | ----- | ---- | --- |
 | `fast` | pyamg | AMG-preconditioned CG, the default for large 3D problems |
 | `viz` | matplotlib, pyvista | `result.view()`, convergence plots, 3D iso-surfaces |
+| `mesh` | meshio | `UnstructuredMesh.from_file`, gmsh and other mesh formats |
 | `jax` | jax | JAX-backed assembly kernels via `use_backend` |
 | `all` | all of the above | |
 

@@ -8,7 +8,9 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from topokit.events import Event, FieldSnapshot, IterationFinished
+from topokit.mesh import StructuredGrid
 from topokit.viz._backend import has_display
+from topokit.viz._density import VizError
 
 if TYPE_CHECKING:
     from topokit.problem import Study
@@ -21,6 +23,7 @@ class LiveView:
 
     Rendering is on the main thread inside the callback; cadence is throttled
     upstream by ``Study.snapshot_every``. With no display it is a silent no-op.
+    Supports ``StructuredGrid`` meshes only for now.
 
     Examples
     --------
@@ -43,7 +46,14 @@ class LiveView:
 
     @classmethod
     def attach(cls, study: Study, *, iso: float = 0.5) -> LiveView:
-        """Construct a LiveView and subscribe it to ``study.events``."""
+        """Construct a LiveView and subscribe it to ``study.events``.
+
+        Raises ``VizError`` for a non-``StructuredGrid`` mesh, before
+        subscribing anything — unstructured live rendering is not supported
+        yet.
+        """
+        if not isinstance(study.problem.model.mesh, StructuredGrid):
+            raise VizError("LiveView supports structured grids only for now")
         view = cls(iso=iso)
         study.events.subscribe(FieldSnapshot, view)
         study.events.subscribe(IterationFinished, view)
@@ -70,8 +80,12 @@ class LiveView:
         import numpy as np
 
         mesh = snap.mesh
+        if not isinstance(mesh, StructuredGrid):
+            # Defensive: direct-subscription callers bypass `attach`'s guard;
+            # the EventBus catches and logs this, which is fine for misuse.
+            raise VizError("LiveView supports structured grids only for now")
         values = np.asarray(snap.rho, dtype=np.float64)
-        if mesh.dim == 2:  # type: ignore[attr-defined]
+        if mesh.dim == 2:
             self._draw_2d(mesh, values)
         else:
             self._draw_3d(mesh, values)

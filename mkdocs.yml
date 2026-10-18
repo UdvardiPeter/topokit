@@ -26,6 +26,7 @@ nav:
       - Multiple load cases: tutorials/multi-load.md
       - Symmetry, checkpoints, resume: tutorials/symmetry-checkpoint.md
       - Visualization: tutorials/visualization.md
+      - Unstructured meshes: tutorials/unstructured.md
   - Concepts:
       - concepts/index.md
       - Objectives and constraints: concepts/objectives.md

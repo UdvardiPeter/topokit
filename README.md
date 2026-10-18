@@ -81,8 +81,8 @@ Pre-alpha. The numerical core runs end to end (2D and 3D)
 | `topokit.jax` JAX backend + assembly kernels via `use_backend("jax")` (`[jax]` extra) | done |
 | AMG rigid-body near-nullspace, shared-forward chain evaluation | done |
 | perf budgets gated in the nightly against a committed Linux baseline | done |
-| documentation: tutorials, examples, extension guide | next |
-| unstructured meshes | planned |
+| documentation: tutorials, examples, extension guide | done |
+| unstructured meshes, simplex elements, gmsh import (`[mesh]` extra) | done |
 | CAD import/export | planned |
 | Local daemon, Fusion 360 add-in | planned |
 
