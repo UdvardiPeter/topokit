@@ -1022,8 +1022,9 @@ class UnstructuredMesh(MeshBase):
         owner = active_ids[rows // n_patterns]
         local = patterns[rows % n_patterns]
         corners = facets[rows]
-        normal, _ = _facet_normals_areas(self._nodes[corners])
-        offset = self._nodes[corners].mean(axis=1) - self.element_centroids[owner]
+        coords = self._nodes[corners]
+        normal, _ = _facet_normals_areas(coords)
+        offset = coords.mean(axis=1) - self.element_centroids[owner]
         inward = np.einsum("ij,ij->i", normal, offset) < 0.0
         # reversing a facet's corner order flips its normal, so the inward
         # ones are reversed and the final orientation measured once
