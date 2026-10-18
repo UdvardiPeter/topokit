@@ -495,3 +495,29 @@ def test_unstructured_pickle_is_lean_and_preserves_immutability() -> None:
         assert not arr.flags.writeable
         with pytest.raises(ValueError, match="read-only"):
             arr[0] = 0
+
+
+def test_duplicated_elements_leave_no_boundary_and_say_so() -> None:
+    # both copies pair off every facet, so the mesh reports no boundary at all;
+    # it also assembles twice, which is the damage the message names
+    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]])
+    twins = np.array([[0, 1, 2], [0, 1, 2]], dtype=np.int64)
+    mesh = UnstructuredMesh(nodes, twins, "tri3")
+    with pytest.raises(MeshError, match="no boundary facets"):
+        mesh.boundary_faces()
+
+
+def test_a_facet_shared_by_three_elements_is_rejected() -> None:
+    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+    # the unit square split in two, with the first triangle duplicated
+    elements = np.array([[0, 1, 2], [0, 2, 3], [0, 1, 2]], dtype=np.int64)
+    mesh = UnstructuredMesh(nodes, elements, "tri3")
+    with pytest.raises(MeshError, match="shared by 3 elements"):
+        mesh.boundary_faces()
+
+
+def test_a_sound_mesh_still_reports_its_boundary() -> None:
+    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
+    elements = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+    faces = UnstructuredMesh(nodes, elements, "tri3").boundary_faces()
+    assert faces.n_faces == 4  # the square perimeter, the shared diagonal excluded

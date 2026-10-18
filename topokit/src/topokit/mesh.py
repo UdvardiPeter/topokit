@@ -974,10 +974,34 @@ class UnstructuredMesh:
                 key = tuple(sorted(corners))
                 occurrences.setdefault(key, []).append((e, pattern))
 
+        # A facet belongs to one element (boundary) or two (interior). More
+        # means the connectivity is wrong -- a duplicated element, or three
+        # elements meeting at one face -- and the facet pairing below would
+        # quietly call it interior. Free to check here: the counts are built.
+        crowded = next(
+            ((key, [e for e, _ in occ]) for key, occ in occurrences.items() if len(occ) > 2),
+            None,
+        )
+        if crowded is not None:
+            key, owners = crowded
+            raise MeshError(
+                f"facet with corner nodes {list(key)} is shared by {len(owners)} elements "
+                f"(ids {owners[:4]}): a facet belongs to at most two. Duplicated or "
+                "non-manifold elements also assemble their stiffness and volume twice."
+            )
+
         boundary = sorted(
             ((key, occ[0][0], occ[0][1]) for key, occ in occurrences.items() if len(occ) == 1),
             key=lambda item: item[0],
         )
+        if not boundary:
+            # Every facet paired off, which no finite mesh can manage: the
+            # usual cause is a mesh built entirely of duplicated elements.
+            raise MeshError(
+                "the mesh has no boundary facets: every facet is shared by two elements, "
+                "which a finite mesh cannot be. Check for duplicated elements -- they also "
+                "assemble their stiffness and volume twice."
+            )
 
         n_corner = len(patterns[0])
         n_face_nodes = n_corner + (3 if self._kind == "tet10" else 0)
