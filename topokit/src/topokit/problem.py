@@ -41,7 +41,7 @@ from topokit.events import (
 from topokit.exceptions import TopoKitError
 from topokit.fem import PhysicsModel
 from topokit.fields import DesignField
-from topokit.mesh import Mesh, StructuredGrid
+from topokit.mesh import Mesh
 from topokit.optimizers import OC, Optimizer
 from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside, LinkSpec
 from topokit.responses import Compliance, Constraint, Response, Solution
@@ -118,29 +118,19 @@ def _staged_spec(spec: Chain, *, p: float, beta: float) -> Chain:
     return Chain(links)
 
 
-def _geometry_digest(mesh: Mesh) -> str:
-    """Hex digest of a mesh's node coordinates and connectivity.
+def _mesh_digest(mesh: Mesh) -> str:
+    """Hex digest of everything about a mesh the design vector is indexed by.
 
-    The non-grid half of the checkpoint fingerprint: element counts alone
-    cannot tell two meshes over the same nodes apart.
+    Node coordinates, connectivity and the solid/void masks. Counts alone
+    cannot tell two meshes apart: re-splitting a quad along the other
+    diagonal keeps every count and every coordinate while making element 0 a
+    different triangle, moving a tet10 midside node leaves every centroid
+    unchanged, and swapping which element is solid changes neither n_dof nor
+    the design-variable count.
     """
     digest = hashlib.sha256()
-    digest.update(mesh.nodes.tobytes())
-    digest.update(mesh.element_nodes.tobytes())
-    return digest.hexdigest()
-
-
-def _mask_digest(mesh: Mesh) -> str:
-    """Hex digest of a mesh's solid and void masks.
-
-    Which elements are fixed material and which are removed is part of the
-    problem's identity, and neither the element counts nor ``n_dof`` can see
-    a swap that keeps them equal (moving the solid element from one end of
-    the grid to the other, say).
-    """
-    digest = hashlib.sha256()
-    digest.update(np.asarray(mesh.solid).tobytes())
-    digest.update(np.asarray(mesh.void).tobytes())
+    for part in (mesh.nodes, mesh.element_nodes, mesh.solid, mesh.void):
+        digest.update(np.ascontiguousarray(part).tobytes())
     return digest.hexdigest()
 
 
@@ -447,10 +437,7 @@ class Study:
 
     def _initial_x(self) -> _F64:
         if self.x0 is not None:
-            x0 = np.asarray(self.x0, dtype=np.float64)
-            if x0.shape != (self.problem.chain.n_vars,):
-                raise ProblemError(f"x0 shape {x0.shape} != ({self.problem.chain.n_vars},)")
-            return x0
+            return np.asarray(self.x0, dtype=np.float64)  # shape checked in __post_init__
         return self.problem.chain.initial_design(self.problem.default_volume_fraction())
 
     def _evaluate(
@@ -491,18 +478,14 @@ class Study:
         path: str,
         *,
         events: EventBus | None = None,
-        schedule: Schedule | None = None,
     ) -> Study:
         """Reconstruct a Study from a ``.topo`` and continue; ``problem`` must match.
 
-        Pass ``schedule`` to continue under a different one, which is how a run
-        that reached the end of its schedule is extended (a larger per-stage
-        ``max_iter``, or more stages). The problem itself must match the
-        checkpoint either way: the fingerprint is always verified against the
-        schedule the checkpoint was written with, so the override relaxes the
-        run parameters and never the problem identity. Stages the checkpoint
-        already completed are history and are not re-run, so the override
-        governs only what remains.
+        The run continues under the schedule the checkpoint was written with,
+        from the iteration its last checkpoint recorded, and the problem's
+        fingerprint is verified against the one stored in the file. To run
+        further than that schedule allows, start a new study from the result:
+        ``Study(problem, schedule=longer, x0=result.x)``.
         """
         manifest, arrays = read_topo(path)
         if int(manifest.get("schema", -1)) != SCHEMA_VERSION:
@@ -516,14 +499,6 @@ class Study:
         if config_fingerprint(study._config_parts()) != manifest["fingerprint"]:
             raise ProblemError("checkpoint was written for a different problem")
         stage_index = int(manifest["stage_index"])
-        if schedule is not None:
-            if stage_index >= len(schedule.stages):
-                raise ProblemError(
-                    f"the checkpoint resumes at stage {stage_index}, but the given schedule "
-                    f"has only {len(schedule.stages)} stage(s); it must keep at least the "
-                    "stages the run already reached"
-                )
-            study.schedule = schedule
         opt_state: dict[str, object] = dict(manifest["opt_scalars"])
         for name in manifest["opt_none"]:
             opt_state[name] = None
@@ -552,38 +527,11 @@ class Study:
         p = self.problem
         assert self.schedule is not None
         mesh = p.model.mesh
-        # This tuple is repr()-hashed into the checkpoint fingerprint. The
-        # grid case unpacks shape/spacing flat, which is also the layout every
-        # earlier checkpoint used; the mask digest below changes the hash for
-        # both kinds anyway, which is what SCHEMA_VERSION 2 announces. The
-        # non-grid
-        # branch is new territory with no prior checkpoints and is free to
-        # pick its own shape: it adds a geometry digest over the node
-        # coordinates AND the connectivity, so a mesh with the same
-        # dim/n_elements/n_nodes but moved nodes or a different element
-        # topology (neither of which the counts can see) is still rejected on
-        # resume. Connectivity matters as much as coordinates: re-splitting a
-        # quad along the other diagonal keeps every count and every node
-        # coordinate, yet element 0 is a different triangle, so the stored
-        # design vector would resume onto the wrong elements. Hashing the raw
-        # node array (not per-element centroids) also catches a moved tet10
-        # midside node: centroids are corner-only and a midside move leaves
-        # every centroid unchanged.
-        mesh_parts: tuple[object, ...] = (
-            (tuple(mesh.shape), tuple(float(s) for s in mesh.spacing))
-            if isinstance(mesh, StructuredGrid)
-            else (
-                (
-                    mesh.dim,
-                    mesh.n_elements,
-                    mesh.n_nodes,
-                    _geometry_digest(mesh),
-                ),
-            )
-        )
+        # repr()-hashed into the checkpoint fingerprint. One digest covers every
+        # mesh kind: the grid's shape and spacing are implied by its nodes, and
+        # SCHEMA_VERSION 3 announces that the layout changed.
         return (
-            *mesh_parts,
-            _mask_digest(mesh),
+            _mesh_digest(mesh),
             int(p.model.n_dof),
             repr(p.chain.spec),
             p.objective.name,

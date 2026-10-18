@@ -346,18 +346,20 @@ def test_study_writes_checkpoint(tmp_path: Path) -> None:
     assert "x" in a and "fingerprint" in m and "c0" in m
 
 
-def test_config_parts_keeps_grid_descriptor_flat() -> None:
-    # _config_parts() is repr()-hashed into the checkpoint fingerprint; a grid
-    # problem must place shape/spacing as flat elements 0 and 1 of the outer
-    # tuple (not nested under a wrapper), or every .topo file written for an
-    # unmodified structured-grid problem before a refactor starts failing
-    # resume with "checkpoint was written for a different problem".
-    study = Study(_problem())
-    parts = study._config_parts()
-    mesh = study.problem.model.mesh
-    assert isinstance(mesh, StructuredGrid)
-    assert parts[0] == tuple(mesh.shape)
-    assert parts[1] == tuple(float(s) for s in mesh.spacing)
+def test_the_fingerprint_sees_a_grid_respaced_or_reshaped() -> None:
+    # one digest covers every mesh kind; for a grid, shape and spacing are
+    # implied by its node coordinates
+    from topokit.problem import _mesh_digest
+
+    base = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
+    assert _mesh_digest(base) != _mesh_digest(StructuredGrid(shape=(2, 4), spacing=(1.0, 1.0)))
+    assert _mesh_digest(base) != _mesh_digest(StructuredGrid(shape=(4, 2), spacing=(1.0, 0.5)))
+    solid = np.zeros(8, dtype=bool)
+    solid[0] = True
+    assert _mesh_digest(base) != _mesh_digest(
+        StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
+    )
+    assert _mesh_digest(base) == _mesh_digest(StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0)))
 
 
 def _tri3_mesh(node2: tuple[float, float], *, other_diagonal: bool = False) -> UnstructuredMesh:
@@ -371,8 +373,8 @@ def _tri3_mesh(node2: tuple[float, float], *, other_diagonal: bool = False) -> U
 
 def _expected_digest(mesh: UnstructuredMesh) -> str:
     digest = hashlib.sha256()
-    digest.update(mesh.nodes.tobytes())
-    digest.update(mesh.element_nodes.tobytes())
+    for part in (mesh.nodes, mesh.element_nodes, mesh.solid, mesh.void):
+        digest.update(np.ascontiguousarray(part).tobytes())
     return digest.hexdigest()
 
 
@@ -403,7 +405,7 @@ def test_config_parts_non_grid_carries_a_node_digest_and_resume_sees_moved_nodes
     mesh = _tri3_mesh((1.0, 1.0))
     study = Study(_unstructured_problem(mesh))
     parts = study._config_parts()
-    assert parts[0] == (mesh.dim, mesh.n_elements, mesh.n_nodes, _expected_digest(mesh))
+    assert parts[0] == _expected_digest(mesh)
 
     # round trip: resuming against the identical mesh continues the run
     full = Study(
@@ -767,9 +769,9 @@ def test_iteration_shares_one_filter_forward_pass() -> None:
     assert len(calls) == 3
 
 
-def test_resume_with_extended_schedule_continues(tmp_path: Path) -> None:
-    # the "nothing to resume" error tells the user to extend the schedule; this
-    # is the API that makes that possible
+def test_a_finished_run_is_extended_by_a_new_study_from_its_result(tmp_path: Path) -> None:
+    # resume continues a checkpoint under its own schedule; running further is a
+    # new study seeded with the result, which is what the error message says
     path = tmp_path / "run.topo"
     done = Study(
         _problem(OC(move=0.2)),
@@ -778,49 +780,16 @@ def test_resume_with_extended_schedule_continues(tmp_path: Path) -> None:
         checkpoint_every=8,
     ).run()
     assert done.iterations == 8
-    resumed = Study.resume(
+    with pytest.raises(ProblemError, match="nothing to resume"):
+        Study.resume(_problem(OC(move=0.2)), str(path)).run()
+
+    longer = Study(
         _problem(OC(move=0.2)),
-        str(path),
         schedule=Schedule.single(p=3.0, max_iter=16, tol=0.0),
+        x0=done.x,
     ).run()
-    assert resumed.iterations == 16
-
-
-def test_resume_schedule_override_still_rejects_a_different_problem(tmp_path: Path) -> None:
-    # the override relaxes the run parameters, never the problem identity check
-    path = tmp_path / "run.topo"
-    Study(
-        _problem(OC(move=0.2)),
-        schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0),
-        checkpoint_path=str(path),
-        checkpoint_every=5,
-    ).run()
-    with pytest.raises(ProblemError, match="different problem"):
-        Study.resume(
-            _problem_proj(OC(move=0.2)),
-            str(path),
-            schedule=Schedule.single(p=3.0, max_iter=50, tol=0.0),
-        )
-
-
-def test_resume_schedule_override_rejects_a_shorter_schedule(tmp_path: Path) -> None:
-    # the checkpoint cursor points at stage 1; a one-stage schedule cannot host it
-    path = tmp_path / "run.topo"
-    two = Schedule(
-        (Stage(p=1.0, beta=1.0, max_iter=4, tol=0.0), Stage(p=3.0, beta=1.0, max_iter=4, tol=0.0))
-    )
-    Study(
-        _problem(OC(move=0.2)),
-        schedule=two,
-        checkpoint_path=str(path),
-        checkpoint_every=4,
-    ).run()
-    with pytest.raises(ProblemError, match="stage"):
-        Study.resume(
-            _problem(OC(move=0.2)),
-            str(path),
-            schedule=Schedule.single(p=3.0, max_iter=99, tol=0.0),
-        )
+    assert longer.iterations == 16
+    assert longer.objective <= done.objective
 
 
 def test_problem_rejects_non_protocol_components() -> None:

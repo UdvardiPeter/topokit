@@ -21,9 +21,10 @@ import numpy as np
 import numpy.typing as npt
 
 _F64 = npt.NDArray[np.float64]
-# 2: the config fingerprint gained a digest of the solid/void masks, so a
-# checkpoint written under schema 1 cannot be verified against it.
-SCHEMA_VERSION = 2
+# 3: the config fingerprint is one digest over nodes, connectivity and masks
+# for every mesh kind, so a checkpoint written under an earlier schema cannot
+# be verified against it.
+SCHEMA_VERSION = 3
 
 
 def config_fingerprint(parts: tuple[Any, ...]) -> str:
