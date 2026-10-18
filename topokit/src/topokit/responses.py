@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.exceptions import TopoKitError
 from topokit.fields import ElementField
 from topokit.mesh import Mesh
 
@@ -39,7 +40,7 @@ _F64 = npt.NDArray[np.float64]
 FieldBasis = Literal["interpolated", "density"]
 
 
-class ResponseError(ValueError):
+class ResponseError(TopoKitError, ValueError):
     """Invalid response setup or input."""
 
 

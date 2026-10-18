@@ -35,12 +35,14 @@ from typing import Any, Protocol, cast, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.exceptions import TopoKitError
+
 _F64 = npt.NDArray[np.float64]
 _I64 = npt.NDArray[np.int64]
 _Bool = npt.NDArray[np.bool_]
 
 
-class MeshError(ValueError):
+class MeshError(TopoKitError, ValueError):
     """Invalid mesh construction or mask."""
 
 

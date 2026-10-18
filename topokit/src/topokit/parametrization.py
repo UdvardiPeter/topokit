@@ -44,6 +44,7 @@ import numpy as np
 import numpy.typing as npt
 
 from topokit.backend import get_kernel, register_kernel
+from topokit.exceptions import TopoKitError
 from topokit.fields import FieldSpec
 from topokit.mesh import Mesh, StructuredGrid
 
@@ -58,7 +59,7 @@ _PACKAGE_DIR = os.path.dirname(__file__)
 STIFFNESS_SCALE = FieldSpec("stiffness_scale")
 
 
-class ParametrizationError(ValueError):
+class ParametrizationError(TopoKitError, ValueError):
     """Invalid chain composition or input."""
 
 

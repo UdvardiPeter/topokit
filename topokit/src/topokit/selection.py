@@ -28,6 +28,7 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.exceptions import TopoKitError
 from topokit.mesh import Mesh
 
 _F64 = npt.NDArray[np.float64]
@@ -35,7 +36,7 @@ _I64 = npt.NDArray[np.int64]
 _Bool = npt.NDArray[np.bool_]
 
 
-class SelectionError(ValueError):
+class SelectionError(TopoKitError, ValueError):
     """Invalid selector parameters or use."""
 
 

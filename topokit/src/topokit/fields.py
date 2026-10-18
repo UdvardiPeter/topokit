@@ -16,6 +16,8 @@ from typing import Protocol, Self, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.exceptions import TopoKitError
+
 
 @runtime_checkable
 class MeshLike(Protocol):
@@ -37,7 +39,7 @@ class MeshLike(Protocol):
         ...
 
 
-class FieldError(ValueError):
+class FieldError(TopoKitError, ValueError):
     """Shape, dtype, or mesh mismatch."""
 
 

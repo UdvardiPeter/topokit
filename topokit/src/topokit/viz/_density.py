@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from topokit.exceptions import TopoKitError
 from topokit.mesh import StructuredGrid
 from topokit.viz._backend import has_display, require_matplotlib, require_pyvista
 
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from pyvista import Plotter
 
 
-class VizError(ValueError):
+class VizError(TopoKitError, ValueError):
     """A view was asked for something it cannot render (e.g. slices of a 2D field)."""
 
 

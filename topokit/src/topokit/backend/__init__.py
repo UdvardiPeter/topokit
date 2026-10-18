@@ -33,6 +33,7 @@ from typing import Any, Final, Protocol, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.exceptions import TopoKitError
 from topokit.registry import registry
 
 
@@ -114,7 +115,7 @@ class ArrayBackend(Protocol):
         ...
 
 
-class KernelError(LookupError):
+class KernelError(TopoKitError, LookupError):
     """Unknown kernel or conflicting kernel registration."""
 
 

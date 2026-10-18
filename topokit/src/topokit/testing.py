@@ -13,10 +13,12 @@ from collections.abc import Callable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.exceptions import TopoKitError
+
 _F64 = npt.NDArray[np.float64]
 
 
-class GradientMismatchError(AssertionError):
+class GradientMismatchError(TopoKitError, AssertionError):
     """An analytic gradient disagrees with central differences."""
 
 

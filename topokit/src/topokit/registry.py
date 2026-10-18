@@ -12,6 +12,8 @@ from __future__ import annotations
 import importlib.metadata
 from typing import Any, Final
 
+from topokit.exceptions import TopoKitError
+
 GROUPS: Final = (
     "backends",
     "physics",
@@ -26,7 +28,7 @@ GROUPS: Final = (
 _ENTRY_POINT_PREFIX: Final = "topokit"
 
 
-class RegistryError(LookupError):
+class RegistryError(TopoKitError, LookupError):
     """Unknown group or name, or a conflicting registration."""
 
 

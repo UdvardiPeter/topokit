@@ -40,6 +40,7 @@ import numpy as np
 import numpy.typing as npt
 
 from topokit.backend import SparseMatrix, active_backend, get_kernel, register_kernel
+from topokit.exceptions import TopoKitError
 from topokit.fields import FieldSpec, NodeField
 from topokit.mesh import Mesh, StructuredGrid
 from topokit.selection import Selector
@@ -50,7 +51,7 @@ _I64 = npt.NDArray[np.int64]
 _GP = 1.0 / np.sqrt(3.0)
 
 
-class FemError(ValueError):
+class FemError(TopoKitError, ValueError):
     """Invalid physics setup or input."""
 
 

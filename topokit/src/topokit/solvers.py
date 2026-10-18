@@ -30,6 +30,7 @@ import scipy.sparse
 import scipy.sparse.linalg
 
 from topokit.backend import SparseMatrix
+from topokit.exceptions import TopoKitError
 
 _F64 = npt.NDArray[np.float64]
 
@@ -37,7 +38,7 @@ AUTO_DIRECT_LIMIT_2D = 150_000
 AUTO_DIRECT_LIMIT_3D = 15_000
 
 
-class SolverError(RuntimeError):
+class SolverError(TopoKitError, RuntimeError):
     """Solver misuse or numerical failure."""
 
 

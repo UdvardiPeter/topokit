@@ -11,6 +11,7 @@ from topokit.backend import (
     use_backend,
 )
 from topokit.events import EventBus
+from topokit.exceptions import TopoKitError
 from topokit.fem import (
     ABS,
     ALUMINUM_6061,
@@ -147,6 +148,7 @@ __all__ = [
     "Study",
     "SurfaceTraction",
     "SymmetryMap",
+    "TopoKitError",
     "UnstructuredElasticity",
     "UnstructuredMesh",
     "Volume",
