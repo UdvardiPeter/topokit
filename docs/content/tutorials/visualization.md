@@ -62,6 +62,10 @@ matplotlib `Figure`: `.show()` opens an interactive window, and
 `.screenshot("part.png")` renders the same scene off screen, without one:
 the way to capture an image on a headless machine.
 
+An `iso` no part of the field crosses draws nothing, so `view` raises
+`VizError` naming the `iso` asked for and the field's actual range rather
+than handing back an empty scene.
+
 <!-- no-run -->
 ```python
 plotter = result.view(iso=0.5)
@@ -98,3 +102,6 @@ study.run()
 It draws through matplotlib in 2D and PyVista in 3D, and is a no-op on a
 machine with no display, so the same script runs unmodified on a
 headless CI box or a workstation.
+
+`view_slices` and `LiveView` are structured-grid-only for now; see
+[Unstructured meshes](unstructured.md) for what to use instead.

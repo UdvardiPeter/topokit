@@ -113,6 +113,27 @@ def test_view_3d_returns_isosurface_with_points() -> None:
     assert any(getattr(m, "n_points", 0) > 0 for m in plotter.meshes)
 
 
+def test_view_3d_raises_when_field_stays_below_iso() -> None:
+    from topokit.viz import VizError, view
+
+    grid = StructuredGrid.box(size=(4.0, 4.0, 4.0), shape=(4, 4, 4))
+    design = DesignField(np.zeros(grid.n_elements), grid, name="density")
+    with pytest.raises(VizError, match="does not cross") as excinfo:
+        view(design, iso=0.5, off_screen=True)
+    # both numbers the user needs to act on: the iso asked for, the range it has
+    assert "iso=0.5" in str(excinfo.value)
+    assert "[0, 0]" in str(excinfo.value)
+
+
+def test_view_3d_raises_when_field_stays_above_iso() -> None:
+    from topokit.viz import VizError, view
+
+    grid = StructuredGrid.box(size=(4.0, 4.0, 4.0), shape=(4, 4, 4))
+    design = DesignField(np.ones(grid.n_elements), grid, name="density")
+    with pytest.raises(VizError, match="does not cross"):
+        view(design, iso=0.5, off_screen=True)
+
+
 def test_view_slices_3d_returns_n_subplots() -> None:
     from matplotlib.figure import Figure
 
@@ -185,6 +206,18 @@ def test_liveview_tracks_iteration_hud(monkeypatch: pytest.MonkeyPatch) -> None:
     assert lv._hud is not None and lv._hud[0] == 7
     assert "iter 7" in lv._hud_title()
     assert "compliance=12.5" in lv._hud_title()
+
+
+def test_liveview_3d_empty_isosurface_raises_actionable_error() -> None:
+    from topokit.viz import LiveView, VizError
+
+    # A run starts uniform at the volume fraction, so the first 3D snapshot has
+    # nothing to contour at the default iso. It must say so (and before any
+    # window opens) rather than surfacing PyVista's empty-mesh error.
+    grid = _design_3d(4).mesh
+    live = LiveView(iso=0.5)
+    with pytest.raises(VizError, match="does not cross"):
+        live._draw_3d(grid, np.full(grid.n_elements, 0.4))
 
 
 def test_result_sugar_delegates_to_viz() -> None:
@@ -286,6 +319,36 @@ def test_view_renders_3d_unstructured_as_thresholded_plotter() -> None:
     plotter.close()
     # Pin the at-or-above threshold semantics: only the 0.9 cell survives.
     assert _unstructured_grid(values, mesh).threshold(0.5, scalars="rho").n_cells == 1
+
+
+def test_view_3d_unstructured_raises_when_nothing_meets_iso() -> None:
+    from topokit.viz import VizError, view
+
+    mesh = _tet_pair()
+    field = DesignField(np.array([0.1, 0.2]), mesh, name="density")
+    with pytest.raises(VizError, match="lower iso") as excinfo:
+        view(field, iso=0.5, off_screen=True)
+    assert "iso=0.5" in str(excinfo.value)
+    assert "maximum is 0.2" in str(excinfo.value)
+
+
+def test_view_3d_empty_scene_raises_before_a_plotter_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pyvista as pv
+
+    from topokit.viz import VizError, view
+
+    def _no_plotter(*args: object, **kwargs: object) -> None:
+        raise AssertionError("an empty scene must raise before a render window is created")
+
+    monkeypatch.setattr(pv, "Plotter", _no_plotter)
+    grid = StructuredGrid.box(size=(4.0, 4.0, 4.0), shape=(4, 4, 4))
+    with pytest.raises(VizError, match="does not cross"):
+        view(DesignField(np.zeros(grid.n_elements), grid, name="density"), iso=0.5, off_screen=True)
+    mesh = _tet_pair()
+    with pytest.raises(VizError, match="lower iso"):
+        view(DesignField(np.zeros(2), mesh, name="density"), iso=0.5, off_screen=True)
 
 
 def test_unstructured_grid_uses_vtk_cell_types() -> None:
