@@ -130,11 +130,15 @@ between runs; the tight gates ride the near-deterministic metrics. A case whose
 numbers describe a different problem, so comparing them proves nothing.
 
 Numbers are only comparable within one platform, so the check refuses to compare a
-baseline generated elsewhere. Regenerate after an intended performance change —
-and after any **pyamg version change**: AMG iteration counts are version
-sensitive, so the check drops the AMG gate whenever the baseline's pyamg differs
-from the run's, and it stays off, noted in a green log, until the baseline is
-regenerated on the new version.
+baseline generated elsewhere. Regenerate after an intended performance change, and
+after any **pyamg version change**: AMG iteration counts are version sensitive, so
+the check drops the AMG gate whenever the baseline's pyamg differs from the run's,
+and it stays off until the baseline is regenerated on the new version.
+
+The check prints only what failed. A case the baseline does not carry, a metric
+neither report carries, and a disabled AMG gate are all silent, so every line it
+prints is a number that moved; `bench-check` reports how many of the baseline's
+cases the run covered, which is what shows a baseline gone partially stale.
 
 To regenerate: trigger the nightly workflow, download its `bench-latest` artifact
 from a run whose *test* steps are green, check no case in it carries an `error`
