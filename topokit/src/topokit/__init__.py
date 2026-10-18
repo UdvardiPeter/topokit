@@ -35,7 +35,6 @@ from topokit.parametrization import (
     LinkSpec,
     ParametrizationError,
     RadialDensityFilter,
-    SymmetryMap,
 )
 from topokit.problem import (
     IterationState,
@@ -137,7 +136,6 @@ __all__ = [
     "StructuredGrid",
     "Study",
     "SurfaceTraction",
-    "SymmetryMap",
     "TopoKitError",
     "UnstructuredElasticity",
     "UnstructuredMesh",
@@ -161,7 +159,6 @@ registry.register(
 )
 registry.register("solvers", "direct", Direct, source="topokit.solvers")
 registry.register("solvers", "amg_cg", AmgCG, source="topokit.solvers")
-registry.register("chain_links", "symmetry", SymmetryMap, source="topokit.parametrization")
 registry.register("chain_links", "density_filter", DensityFilter, source="topokit.parametrization")
 registry.register(
     "chain_links", "radial_density_filter", RadialDensityFilter, source="topokit.parametrization"

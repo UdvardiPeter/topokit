@@ -139,7 +139,7 @@ second-order mesh.
 `DensityFilter` and `RadialDensityFilter` work unchanged on an unstructured
 mesh: `radius` stays a physical length, and both switch to an exact
 sparse-matrix implementation internally rather than the structured grid's
-separable convolution. `SymmetryMap`, `view_slices`, and `LiveView` are
+separable convolution. `view_slices` and `LiveView` are
 structured-grid-only for now; each raises rather than running silently
 wrong on an unstructured mesh.
 

@@ -317,24 +317,6 @@ def test_compliance_gradient_fd_with_solid_and_void() -> None:
     )
 
 
-def test_volume_gradient_fd_through_symmetry() -> None:
-    from topokit.parametrization import SymmetryMap
-
-    g = StructuredGrid(shape=(8, 6), spacing=(1.0, 1.0))
-    chain = (SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
-    rng = np.random.default_rng(2)
-    x = rng.uniform(0.3, 0.9, chain.n_vars)
-    vol = Volume()
-    assert_gradient_matches(
-        lambda xx: vol.value(_sol_masked(None, g, chain, xx)),
-        lambda xx: np.asarray(
-            chain.pullback_density(xx, vol.grad_field(_sol_masked(None, g, chain, xx)))
-        ),
-        x,
-        rtol=1e-5,
-    )
-
-
 def test_volume_active_region_gradient_with_solid() -> None:
     solid = np.zeros(48, dtype=bool)
     solid[:6] = True

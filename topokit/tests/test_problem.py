@@ -32,7 +32,6 @@ from topokit.parametrization import (
     DensityFilter,
     Heaviside,
     ParametrizationError,
-    SymmetryMap,
 )
 from topokit.problem import Problem, ProblemError, Schedule, Stage, Study
 from topokit.responses import Compliance, Constraint, Volume
@@ -651,26 +650,6 @@ def test_amg_solver_runs() -> None:
         _problem(solver=AmgCG(tol=1e-9)), schedule=Schedule.single(p=3.0, max_iter=15, tol=1e-3)
     ).run()
     assert result.objective > 0.0
-
-
-def test_symmetry_runs_in_reduced_space() -> None:
-    # SymmetryMap is a reduced-input link: the optimizer works in the reduced
-    # space, so n_vars < design-element count. Confirms the reduced gradient
-    # size flows through optimizer.setup/step and the design vars stay reduced.
-    model = _cantilever()
-    chain = SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | SIMP(p=3.0)
-    p = Problem(
-        model,
-        chain,
-        objective=Compliance(),
-        constraints=[Volume() <= 0.4],
-        optimizer=OC(move=0.2),
-    )
-    assert p.chain.n_vars < int(model.mesh.design.sum())  # space genuinely reduced
-    result = Study(p, schedule=Schedule.single(p=3.0, max_iter=30, tol=1e-3)).run()
-    assert result.x.size == p.chain.n_vars
-    assert result.history["objective"][-1] < result.history["objective"][0]
-    assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
 
 
 def test_staged_spec_overrides_p_and_beta() -> None:

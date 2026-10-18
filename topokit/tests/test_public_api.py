@@ -33,7 +33,6 @@ USER_FACING = [
     "OnBoundary",
     "Predicate",
     # parametrization
-    "SymmetryMap",
     "DensityFilter",
     "RadialDensityFilter",
     "Heaviside",

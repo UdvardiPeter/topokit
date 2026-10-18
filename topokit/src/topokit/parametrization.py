@@ -15,12 +15,9 @@ consumes is a chain of links, each a frozen spec with ``apply`` and
 To add a new link, subclass ``LinkSpec`` and implement ``build``, returning
 a ``BoundLink``. The bound link implements ``apply`` and ``pullback``, and
 a terminal link's bound form must set ``out_field`` to the field the
-physics consumes. Mark a terminal link class with ``is_terminal = True``,
-and a reduced-input link (one that consumes a smaller design space, e.g.
-symmetry) with ``is_reduced_input = True``, and its bound form must set
-``n_reduced``.
+physics consumes. Mark a terminal link class with ``is_terminal = True``.
 
-Design variables live on design elements (reduced further by symmetry).
+Design variables live on design elements.
 The bound chain embeds them into the full mesh with solid pinned to 1 and
 void to 0, runs the density links, re-pins, and applies the terminal
 material-interpolation link, which produces the ``FieldSpec`` the physics
@@ -37,7 +34,7 @@ import math
 import os
 import warnings
 from dataclasses import dataclass
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 import numpy as np
 import numpy.typing as npt
@@ -151,7 +148,6 @@ class LinkSpec:
     """Base for chain links; compose with ``|``."""
 
     is_terminal: ClassVar[bool] = False
-    is_reduced_input: ClassVar[bool] = False
 
     def __or__(self, other: LinkSpec | Chain) -> Chain:
         if isinstance(other, Chain):
@@ -184,7 +180,6 @@ class BoundLink:
     """
 
     out_field: FieldSpec | None = None
-    n_reduced: int | None = None
 
     def apply(self, x: _F64) -> _F64:
         """Map the link input to its output."""
@@ -214,12 +209,7 @@ class Chain:
         for link in links[:-1]:
             if link.is_terminal:
                 raise ParametrizationError("terminal link must be last and unique")
-        for link in links[1:]:
-            if link.is_reduced_input:
-                raise ParametrizationError(f"{type(link).__name__} must be the first link")
-        reduced = links[0].build(mesh) if links[0].is_reduced_input else None
-        middle_specs = links[1:-1] if reduced is not None else links[:-1]
-        middle = [link.build(mesh) for link in middle_specs]
+        middle = [link.build(mesh) for link in links[:-1]]
         terminal = links[-1].build(mesh)
         if terminal.out_field is None:
             raise ParametrizationError(
@@ -227,7 +217,7 @@ class Chain:
                 "out_field; a terminal link must declare the field the physics consumes"
             )
         out_field = terminal.out_field
-        return BoundChain(mesh, reduced, middle, terminal, out_field, self)
+        return BoundChain(mesh, middle, terminal, out_field, self)
 
 
 class BoundChain:
@@ -236,7 +226,6 @@ class BoundChain:
     def __init__(
         self,
         mesh: Mesh,
-        reduced: BoundLink | None,
         middle: list[BoundLink],
         terminal: BoundLink,
         out_field: FieldSpec,
@@ -244,20 +233,10 @@ class BoundChain:
     ) -> None:
         self.mesh = mesh
         self.spec = spec
-        self._reduced = reduced
         self._middle = middle
         self._terminal = terminal
         self.out_field = out_field
-        if reduced is not None:
-            if reduced.n_reduced is None:
-                raise ParametrizationError(
-                    f"reduced-input link {type(spec.links[0]).__name__} produced a bound "
-                    "link without n_reduced; a reduced-input link must declare the size "
-                    "of its input space"
-                )
-            self.n_vars = reduced.n_reduced
-        else:
-            self.n_vars = int(mesh.design.sum())
+        self.n_vars = int(mesh.design.sum())
         if self.n_vars == 0:
             raise ParametrizationError(
                 "the design region is empty (all elements are solid or void); "
@@ -301,11 +280,7 @@ class BoundChain:
     def _forward(self, x: _F64) -> tuple[list[_F64], _F64]:
         """Return per-link inputs and the pre-terminal pinned field."""
         inputs: list[_F64] = []
-        y = x
-        if self._reduced is not None:
-            inputs.append(y)
-            y = self._reduced.apply(y)
-        rho = self._embed(y)
+        rho = self._embed(x)
         for link in self._middle:
             inputs.append(rho)
             rho = link.apply(rho)
@@ -365,10 +340,7 @@ class BoundChain:
         for link in reversed(self._middle):
             g = link.pullback(inputs[idx], g)
             idx -= 1
-        g_design = g[self.mesh.design]
-        if self._reduced is not None:
-            g_design = self._reduced.pullback(inputs[0], g_design)
-        return g_design
+        return g[self.mesh.design]
 
     def _pin_pullback(self, g: _F64) -> _F64:
         out = g.copy()
@@ -417,78 +389,6 @@ class ChainEval:
         """Chain-rule ``dF/d(rho_bar)`` back to ``dF/dx`` using the cached forward."""
         chain = self._chain
         return chain._density_pullback(self._inputs, chain._check_grad(grad_density))
-
-
-@dataclass(frozen=True)
-class SymmetryMap(LinkSpec):
-    """Mirror symmetry about domain-center planes; reduces the design space."""
-
-    planes: tuple[str, ...] = ("x",)
-    is_reduced_input: ClassVar[bool] = True
-
-    def __post_init__(self) -> None:
-        valid = {"x", "y", "z"}
-        if not self.planes or any(p not in valid for p in self.planes):
-            raise ParametrizationError(f"plane names must be from {sorted(valid)}")
-
-    def build(self, mesh: Mesh) -> _BoundSymmetry:
-        """Build orbit maps and validate mask symmetry."""
-        if not isinstance(mesh, StructuredGrid):
-            raise ParametrizationError(
-                "SymmetryMap requires a structured grid; symmetry orbits on "
-                "unstructured meshes are not supported"
-            )
-        axes = []
-        names = "xyz"[: mesh.dim]
-        for p in self.planes:
-            if p not in names:
-                raise ParametrizationError(f"plane {p!r} invalid for a {mesh.dim}D mesh")
-            axes.append(names.index(p))
-        return _BoundSymmetry(mesh, tuple(sorted(set(axes))))
-
-    @classmethod
-    def fd_example(cls, mesh: Mesh) -> SymmetryMap:
-        """FD meta-test instance."""
-        return cls(planes=("x",))
-
-
-class _BoundSymmetry(BoundLink):
-    def __init__(self, mesh: StructuredGrid, axes: tuple[int, ...]) -> None:
-        ids = np.arange(mesh.n_elements, dtype=np.int64)
-        grids = [
-            g.ravel(order="F")
-            for g in np.meshgrid(*[np.arange(s) for s in mesh.shape], indexing="ij")
-        ]
-        canonical = ids.copy()
-        for subset in range(1, 2 ** len(axes)):
-            mapped = [g.copy() for g in grids]
-            for bit, axis in enumerate(axes):
-                if subset >> bit & 1:
-                    mapped[axis] = mesh.shape[axis] - 1 - mapped[axis]
-            flat = mapped[0]
-            mult = 1
-            for a in range(1, mesh.dim):
-                mult *= mesh.shape[a - 1]
-                flat = flat + mult * mapped[a]
-            canonical = np.minimum(canonical, flat)
-            for mask in (mesh.design, mesh.solid, mesh.void):
-                if not np.array_equal(mask, mask[flat]):
-                    raise ParametrizationError(
-                        "masks must be symmetric under the requested symmetry planes"
-                    )
-        design_ids = np.flatnonzero(mesh.design)
-        canon_design = canonical[design_ids]
-        unique, orbit = np.unique(canon_design, return_inverse=True)
-        self.n_reduced = int(unique.size)
-        self._orbit: _I64 = orbit.astype(np.int64)
-
-    def apply(self, x: _F64) -> _F64:
-        return x[self._orbit]
-
-    def pullback(self, x: _F64, grad_out: _F64) -> _F64:
-        out = np.zeros(cast(int, self.n_reduced))
-        np.add.at(out, self._orbit, grad_out)
-        return out
 
 
 @dataclass(frozen=True)

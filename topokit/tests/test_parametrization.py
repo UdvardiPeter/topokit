@@ -17,7 +17,6 @@ from topokit.parametrization import (
     Heaviside,
     ParametrizationError,
     RadialDensityFilter,
-    SymmetryMap,
 )
 from topokit.testing import assert_gradient_matches
 
@@ -25,9 +24,9 @@ G42 = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
 
 
 def test_pipe_composition_builds_chain() -> None:
-    chain = SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | Heaviside() | SIMP()
+    chain = DensityFilter(radius=1.5) | Heaviside() | SIMP()
     assert isinstance(chain, Chain)
-    assert len(chain.links) == 4
+    assert len(chain.links) == 3
 
 
 def test_bind_requires_terminal_link() -> None:
@@ -40,11 +39,6 @@ def test_terminal_must_be_last_and_unique() -> None:
         (SIMP() | Heaviside()).bind(G42)
     with pytest.raises(ParametrizationError, match="terminal"):
         (SIMP() | SIMP()).bind(G42)
-
-
-def test_symmetry_only_first() -> None:
-    with pytest.raises(ParametrizationError, match="first"):
-        (DensityFilter(radius=1.5) | SymmetryMap(planes=("x",)) | SIMP()).bind(G42)
 
 
 def test_out_field_and_sizes() -> None:
@@ -142,24 +136,6 @@ def test_radial_uniform_invariance() -> None:
     np.testing.assert_allclose(bound.apply(np.full(bound.n_vars, 0.6)), 0.6, rtol=1e-12)
 
 
-def test_symmetry_map_explicit_orbits() -> None:
-    bound = (SymmetryMap(planes=("x",)) | SIMP(p=1.0, scale_min=0.0)).bind(G42)
-    assert bound.n_vars == 4
-    x = np.array([0.1, 0.2, 0.3, 0.4])
-    out = bound.apply(x)
-    grid = G42.to_grid(out)
-    np.testing.assert_allclose(grid[0, :], grid[3, :])
-    np.testing.assert_allclose(grid[1, :], grid[2, :])
-
-
-def test_symmetry_requires_symmetric_masks() -> None:
-    void = np.zeros(8, dtype=bool)
-    void[0] = True  # not mirror-symmetric
-    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), void=void)
-    with pytest.raises(ParametrizationError, match="symmetric"):
-        (SymmetryMap(planes=("x",)) | SIMP()).bind(g)
-
-
 def test_chain_validates_input() -> None:
     bound = SIMP().bind(G42)
     with pytest.raises(ParametrizationError, match="shape"):
@@ -172,13 +148,11 @@ def test_chain_validates_input() -> None:
 
 def test_full_chain_fd_anisotropic_masked() -> None:
     void = np.zeros(12, dtype=bool)
-    void[[1, 2]] = True  # symmetric about the x mirror (columns 1, 2 of row 0)
+    void[[1, 2]] = True
     solid = np.zeros(12, dtype=bool)
     solid[[9, 10]] = True
     g = StructuredGrid(shape=(4, 3), spacing=(0.7, 0.45), void=void, solid=solid)
-    chain = (
-        SymmetryMap(planes=("x",)) | DensityFilter(radius=1.0) | Heaviside(beta=2.0) | SIMP(p=3.0)
-    )
+    chain = DensityFilter(radius=1.0) | Heaviside(beta=2.0) | SIMP(p=3.0)
     bound = chain.bind(g)
     rng = np.random.default_rng(seed=20260612)
     x = rng.uniform(0.2, 0.8, size=bound.n_vars)
@@ -222,8 +196,6 @@ def test_spec_validation_errors() -> None:
         Heaviside(beta=-1.0)
     with pytest.raises(ParametrizationError, match="p"):
         SIMP(p=0.0)
-    with pytest.raises(ParametrizationError, match="plane"):
-        SymmetryMap(planes=("q",))
 
 
 def test_physical_density_is_pre_terminal() -> None:
@@ -254,9 +226,7 @@ def test_pullback_density_fd_verified() -> None:
     solid = np.zeros(12, dtype=bool)
     solid[[9, 10]] = True
     g = StructuredGrid(shape=(4, 3), spacing=(0.7, 0.45), void=void, solid=solid)
-    bound = (
-        SymmetryMap(planes=("x",)) | DensityFilter(radius=1.0) | Heaviside(beta=2.0) | SIMP()
-    ).bind(g)
+    bound = (DensityFilter(radius=1.0) | Heaviside(beta=2.0) | SIMP()).bind(g)
     rng = np.random.default_rng(seed=11)
     x = rng.uniform(0.2, 0.8, size=bound.n_vars)
     w = rng.normal(size=g.n_elements)
@@ -279,39 +249,6 @@ def test_out_of_range_design_raises() -> None:
     # float noise at the bounds is tolerated
     bound.apply(np.full(8, 1.0 + 1e-9))
     bound.apply(np.full(8, -1e-9))
-
-
-def test_3d_multiplane_symmetry_fd_and_octants() -> None:
-    g = StructuredGrid(shape=(4, 4, 4), spacing=(1.0, 1.0, 1.0))
-    bound = (SymmetryMap(planes=("x", "y", "z")) | DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
-    assert bound.n_vars == 8  # 8 octants of a 4x4x4 grid
-    rng = np.random.default_rng(seed=3)
-    x = rng.uniform(0.2, 0.8, size=bound.n_vars)
-    out = g.to_grid(bound.apply(x))
-    np.testing.assert_allclose(out, out[::-1])
-    np.testing.assert_allclose(out, out[:, ::-1])
-    np.testing.assert_allclose(out, out[:, :, ::-1])
-    v = rng.normal(size=g.n_elements)
-    assert_gradient_matches(
-        lambda xx: float(v @ bound.apply(xx)),
-        lambda xx: np.asarray(bound.pullback(xx, v)),
-        x,
-    )
-
-
-def test_odd_width_mirror_fixes_center() -> None:
-    g = StructuredGrid(shape=(3, 2), spacing=(1.0, 1.0))
-    bound = (SymmetryMap(planes=("x",)) | SIMP(p=1.0, scale_min=0.0)).bind(g)
-    out = g.to_grid(bound.apply(np.linspace(0.1, 0.9, bound.n_vars)))
-    np.testing.assert_allclose(out[0], out[2])  # mirrored columns
-    rng = np.random.default_rng(5)
-    x = rng.uniform(0.2, 0.8, bound.n_vars)
-    v = rng.normal(size=g.n_elements)
-    assert_gradient_matches(
-        lambda xx: float(v @ bound.apply(xx)),
-        lambda xx: np.asarray(bound.pullback(xx, v)),
-        x,
-    )
 
 
 def test_heaviside_continuation_endpoint_fd() -> None:
@@ -403,16 +340,6 @@ def test_evaluate_matches_separate_methods_bit_exact() -> None:
     np.testing.assert_array_equal(ev.pullback_density(g), bound.pullback_density(x, g))
 
 
-def test_evaluate_matches_with_symmetry_reduction() -> None:
-    bound = (SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | SIMP()).bind(G42)
-    rng = np.random.default_rng(12)
-    x = rng.uniform(0.0, 1.0, bound.n_vars)
-    g = rng.standard_normal(bound.mesh.n_elements)
-    ev = bound.evaluate(x)
-    np.testing.assert_array_equal(ev.field, bound.apply(x))
-    np.testing.assert_array_equal(ev.pullback(g), bound.pullback(x, g))
-
-
 def test_evaluate_pullbacks_are_reusable() -> None:
     bound = (DensityFilter(radius=1.5) | SIMP()).bind(G42)
     x = np.full(bound.n_vars, 0.5)
@@ -437,7 +364,6 @@ def test_evaluate_arrays_are_frozen() -> None:
 
 
 def test_custom_link_authors_against_public_names() -> None:
-    from dataclasses import dataclass
 
     from topokit.parametrization import BoundLink, LinkSpec
 
@@ -463,7 +389,6 @@ def test_custom_link_authors_against_public_names() -> None:
 
 
 def test_terminal_link_without_out_field_fails_at_bind() -> None:
-    from dataclasses import dataclass
     from typing import ClassVar
 
     from topokit.parametrization import BoundLink, LinkSpec
@@ -488,34 +413,6 @@ def test_terminal_link_without_out_field_fails_at_bind() -> None:
 
     with pytest.raises(ParametrizationError, match="out_field"):
         Chain((BadTerminal(),)).bind(G42)
-
-
-def test_bind_rejects_reduced_link_without_n_reduced() -> None:
-    from dataclasses import dataclass
-    from typing import ClassVar
-
-    from topokit.parametrization import BoundLink, LinkSpec
-
-    @dataclass(frozen=True)
-    class BadReduced(LinkSpec):
-        is_reduced_input: ClassVar[bool] = True
-
-        def build(self, mesh: Mesh) -> BoundLink:
-            return _BoundBadReduced()
-
-        @classmethod
-        def fd_example(cls, mesh: Mesh) -> "BadReduced":
-            return cls()
-
-    class _BoundBadReduced(BoundLink):  # forgets to set n_reduced
-        def apply(self, x: np.ndarray) -> np.ndarray:
-            return x
-
-        def pullback(self, x: np.ndarray, grad_out: np.ndarray) -> np.ndarray:
-            return grad_out
-
-    with pytest.raises(ParametrizationError, match="n_reduced"):
-        (BadReduced() | SIMP()).bind(G42)
 
 
 @dataclass
@@ -632,12 +529,6 @@ def test_filters_dispatch_to_matrix_on_non_grid_meshes() -> None:
     stub = _stub_from_grid(g)
     assert isinstance(DensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
     assert isinstance(RadialDensityFilter(radius=1.5).build(stub), _BoundMatrixFilter)
-
-
-def test_symmetry_map_rejects_non_grid_meshes() -> None:
-    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
-    with pytest.raises(ParametrizationError, match="structured grid"):
-        SymmetryMap(planes=("x",)).build(_stub_from_grid(g))
 
 
 def test_chain_binds_on_a_non_grid_mesh_and_fd_verifies() -> None:
