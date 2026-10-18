@@ -3,13 +3,21 @@
 ## Dev setup
 
 ```
-uv sync --all-packages --extra viz --extra jax
+uv sync --all-packages
 uv run --directory topokit pytest
 ```
 
-Requires uv. Python 3.12 is installed by uv automatically. The two extras are
-what CI installs: without them `test_viz.py` and `test_jax.py` skip and mypy
-cannot check `topokit.viz` or `topokit.jax`.
+Requires uv, which installs Python 3.12 itself. That is a 270 MB environment
+and runs 524 of the 570 tests; `test_viz.py` and `test_jax.py` skip, because
+PyVista and JAX are 850 MB between them and serve those two files. Lint and
+typecheck pass either way.
+
+Add them when you touch visualization or the JAX backend, which is also what
+CI installs:
+
+```
+uv sync --all-packages --extra viz --extra jax
+```
 
 ## Rules
 

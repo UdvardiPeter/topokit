@@ -92,8 +92,16 @@ warn_unreachable = true
 cache_dir = "../.mypy_cache"
 
 [[tool.mypy.overrides]]
-module = "meshio.*"
+# These live behind optional extras, so a lean dev install has none of them.
+# Typecheck has to pass there or "green locally means green in CI" is false.
+module = ["meshio.*", "pyvista.*", "jax.*", "jaxlib.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Without the jax extra, jax resolves to Any and this module's narrowing
+# ignores read as unused. They are correct when jax is installed.
+module = "topokit.jax"
+warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

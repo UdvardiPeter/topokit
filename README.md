@@ -89,7 +89,7 @@ Pre-alpha. The numerical core runs end to end (2D and 3D)
 ## Dev quick start
 
 ```
-uv sync --all-packages --extra viz --extra jax
+uv sync --all-packages
 uv run --directory topokit pytest
 ```
 
