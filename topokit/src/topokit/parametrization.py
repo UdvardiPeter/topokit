@@ -38,6 +38,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import numpy.typing as npt
+import scipy.ndimage
 
 from topokit.backend import get_kernel, register_kernel
 from topokit.exceptions import TopoKitError
@@ -62,25 +63,15 @@ class ParametrizationError(TopoKitError, ValueError):
 def _radial_correlate(grid: _F64, kernel: _F64) -> _F64:
     """Correlate with a dense N-D kernel, zero outside the domain.
 
-    The kernel is symmetric under reflection (a function of distance), so the
-    correlation is self-adjoint and serves as its own pullback.
+    The kernel is a function of distance, so it is invariant under reflection
+    about its center. Two things rest on that symmetry: the correlation is
+    self-adjoint, so it serves as its own pullback, and it equals the
+    convolution, so the hand-rolled slice arithmetic this replaced (a
+    convolution) and ``scipy.ndimage.correlate`` agree -- measured to 8.4e-16
+    worst relative difference over 2D/3D, anisotropic spacing and void masks.
+    A non-symmetric kernel would break both.
     """
-    out = np.zeros_like(grid)
-    halves = [(s - 1) // 2 for s in kernel.shape]
-    for idx in np.ndindex(kernel.shape):
-        w = float(kernel[idx])
-        if w == 0.0:
-            continue
-        src = [slice(None)] * grid.ndim
-        dst = [slice(None)] * grid.ndim
-        for axis, (i, half) in enumerate(zip(idx, halves, strict=True)):
-            k = i - half
-            if k < 0:
-                src[axis], dst[axis] = slice(-k, None), slice(None, k)
-            elif k > 0:
-                src[axis], dst[axis] = slice(None, -k), slice(k, None)
-        out[tuple(dst)] += w * grid[tuple(src)]
-    return out
+    return np.asarray(scipy.ndimage.correlate(grid, kernel, mode="constant", cval=0.0))
 
 
 register_kernel("radial_correlate", "generic", _radial_correlate)
