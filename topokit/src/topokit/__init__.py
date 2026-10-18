@@ -2,7 +2,14 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Open-source topology optimization for engineers."""
 
-from topokit.backend import active_backend, default_backend, use_backend
+from topokit.backend import (
+    ArrayBackend,
+    KernelError,
+    SparseMatrix,
+    active_backend,
+    default_backend,
+    use_backend,
+)
 from topokit.events import EventBus
 from topokit.fem import (
     ABS,
@@ -11,28 +18,48 @@ from topokit.fem import (
     RESIN_SLA,
     STEEL,
     BodyForce,
+    FemError,
     LinearElasticity,
     Material,
+    PhysicsModel,
     PointLoad,
     SurfaceTraction,
     UnstructuredElasticity,
 )
-from topokit.fields import FieldSpec
-from topokit.mesh import Mesh, StructuredGrid, UnstructuredMesh
-from topokit.optimizers import MMA, OC, StepResult
+from topokit.fields import DesignField, ElementField, FieldError, FieldSpec, NodeField
+from topokit.mesh import Mesh, MeshError, StructuredGrid, UnstructuredMesh
+from topokit.optimizers import MMA, OC, Optimizer, OptimizerError, StepResult
 from topokit.parametrization import (
     SIMP,
     BoundLink,
     DensityFilter,
     Heaviside,
     LinkSpec,
+    ParametrizationError,
     RadialDensityFilter,
     SensitivityFilter,
     SymmetryMap,
 )
-from topokit.problem import IterationState, Problem, Result, Schedule, Stage, Study
-from topokit.registry import registry
-from topokit.responses import Compliance, Constraint, ResponseBase, Solution, Volume, von_mises
+from topokit.problem import (
+    IterationState,
+    Problem,
+    ProblemError,
+    Result,
+    Schedule,
+    Stage,
+    Study,
+)
+from topokit.registry import RegistryError, registry
+from topokit.responses import (
+    Compliance,
+    Constraint,
+    Response,
+    ResponseBase,
+    ResponseError,
+    Solution,
+    Volume,
+    von_mises,
+)
 from topokit.selection import (
     Box,
     Cylinder,
@@ -41,9 +68,13 @@ from topokit.selection import (
     OnBoundary,
     PlaneSlab,
     Predicate,
+    SelectionError,
+    Selector,
+    SelectorBase,
     Sphere,
 )
-from topokit.solvers import AmgCG, Direct
+from topokit.solvers import AmgCG, Direct, LinearSolver, SolverError
+from topokit.testing import GradientMismatchError
 
 __version__ = "0.0.1.dev0"
 
@@ -57,6 +88,7 @@ __all__ = [
     "SIMP",
     "STEEL",
     "AmgCG",
+    "ArrayBackend",
     "BodyForce",
     "BoundLink",
     "Box",
@@ -64,28 +96,50 @@ __all__ = [
     "Constraint",
     "Cylinder",
     "DensityFilter",
+    "DesignField",
     "Direct",
+    "ElementField",
     "EventBus",
     "FaceSetSelector",
+    "FemError",
+    "FieldError",
     "FieldSpec",
+    "GradientMismatchError",
     "Heaviside",
     "IterationState",
+    "KernelError",
     "LinearElasticity",
+    "LinearSolver",
     "LinkSpec",
     "Material",
     "Mesh",
+    "MeshError",
     "NearPoint",
+    "NodeField",
     "OnBoundary",
+    "Optimizer",
+    "OptimizerError",
+    "ParametrizationError",
+    "PhysicsModel",
     "PlaneSlab",
     "PointLoad",
     "Predicate",
     "Problem",
+    "ProblemError",
     "RadialDensityFilter",
+    "RegistryError",
+    "Response",
     "ResponseBase",
+    "ResponseError",
     "Result",
     "Schedule",
+    "SelectionError",
+    "Selector",
+    "SelectorBase",
     "SensitivityFilter",
     "Solution",
+    "SolverError",
+    "SparseMatrix",
     "Sphere",
     "Stage",
     "StepResult",
