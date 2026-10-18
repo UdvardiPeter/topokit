@@ -36,8 +36,22 @@ from typing import Any, Final, Protocol, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.backend.numpy import NumpyBackend, ScipyCsr
 from topokit.exceptions import TopoKitError
 from topokit.registry import registry
+
+__all__ = [
+    "ArrayBackend",
+    "KernelError",
+    "NumpyBackend",
+    "ScipyCsr",
+    "SparseMatrix",
+    "active_backend",
+    "default_backend",
+    "get_kernel",
+    "register_kernel",
+    "use_backend",
+]
 
 
 @runtime_checkable
@@ -130,9 +144,6 @@ def get_kernel(name: str) -> Callable[..., Any]:
             return _KERNELS[key]
     raise KernelError(f"no kernel {name!r} for backend {backend_name!r} and no generic fallback")
 
-
-from topokit.backend.numpy import NumpyBackend  # noqa: E402
-from topokit.backend.numpy import ScipyCsr as ScipyCsr
 
 _DEFAULT: Final = NumpyBackend()
 
