@@ -9,9 +9,16 @@ as sorted unique int64 id arrays; face ids index into
 
 Inclusion is geometric: an entity is selected when its representative point
 (node coordinate, element centroid, face centroid) lies inside the shape
-expanded by ``tol``. The default tolerance is half a typical element size,
-see :func:`default_tolerance`. Selection does not intersect with active
-masks and an empty result is not an error; both are the consumer's job.
+expanded by ``tol``. The containment shapes -- :class:`Box`,
+:class:`Sphere`, :class:`Cylinder` -- default to ``tol=0.0``, exact
+containment, because they already have the volume they need; raise ``tol``
+to catch points a hair outside a face you meant to include.
+:class:`PlaneSlab` is the exception: a plane has no thickness, so
+``tol=0.0`` would select nothing and its default is half a typical element
+size (:func:`default_tolerance`), which on any reasonable mesh picks the one
+layer of entities lying on the plane. Selection does not intersect with
+active masks and an empty result is not an error; both are the consumer's
+job.
 
 Combine selectors with ``&``, ``|`` and ``~``. ``~`` complements within the
 mesh's full id range per entity type. To write a custom selector, subclass
@@ -129,24 +136,24 @@ def _freeze(obj: object, **fields: object) -> None:
         object.__setattr__(obj, name, value)
 
 
-def _tol(tol: float | None, mesh: Mesh) -> float:
-    return default_tolerance(mesh) if tol is None else tol
-
-
 @dataclass(frozen=True)
 class Box(SelectorBase):
-    """Axis-aligned box from ``lower`` to ``upper`` corner."""
+    """Axis-aligned box from ``lower`` to ``upper`` corner.
+
+    Containment is exact by default (``tol=0.0``); ``tol`` pushes every
+    face out by that much.
+    """
 
     lower: tuple[float, ...]
     upper: tuple[float, ...]
-    tol: float | None = None
+    tol: float = 0.0
 
     def __post_init__(self) -> None:
         _freeze(
             self,
             lower=tuple(float(x) for x in self.lower),
             upper=tuple(float(x) for x in self.upper),
-            tol=None if self.tol is None else float(self.tol),
+            tol=float(self.tol),
         )
         if len(self.lower) != len(self.upper):
             raise SelectionError("lower and upper must have the same length")
@@ -155,27 +162,29 @@ class Box(SelectorBase):
 
     def _mask(self, coords: _F64, mesh: Mesh) -> _Bool:
         _check_dim(self.lower, coords)
-        t = _tol(self.tol, mesh)
-        lo = np.asarray(self.lower) - t
-        hi = np.asarray(self.upper) + t
+        lo = np.asarray(self.lower) - self.tol
+        hi = np.asarray(self.upper) + self.tol
         inside = ((coords >= lo) & (coords <= hi)).all(axis=1)
         return np.asarray(inside, dtype=bool)
 
 
 @dataclass(frozen=True)
 class Sphere(SelectorBase):
-    """Ball of ``radius`` around ``center`` (a disk in 2D)."""
+    """Ball of ``radius`` around ``center`` (a disk in 2D).
+
+    Containment is exact by default (``tol=0.0``); ``tol`` adds to the radius.
+    """
 
     center: tuple[float, ...]
     radius: float
-    tol: float | None = None
+    tol: float = 0.0
 
     def __post_init__(self) -> None:
         _freeze(
             self,
             center=tuple(float(x) for x in self.center),
             radius=float(self.radius),
-            tol=None if self.tol is None else float(self.tol),
+            tol=float(self.tol),
         )
         if self.radius < 0.0:
             raise SelectionError(f"radius must be >= 0, got {self.radius}")
@@ -183,18 +192,22 @@ class Sphere(SelectorBase):
     def _mask(self, coords: _F64, mesh: Mesh) -> _Bool:
         _check_dim(self.center, coords)
         dist = np.linalg.norm(coords - np.asarray(self.center), axis=1)
-        out: _Bool = dist <= self.radius + _tol(self.tol, mesh)
+        out: _Bool = dist <= self.radius + self.tol
         return out
 
 
 @dataclass(frozen=True)
 class Cylinder(SelectorBase):
-    """Finite cylinder around the axis segment ``p0``-``p1``."""
+    """Finite cylinder around the axis segment ``p0``-``p1``.
+
+    Containment is exact by default (``tol=0.0``); ``tol`` adds to the radius
+    and to both ends.
+    """
 
     p0: tuple[float, ...]
     p1: tuple[float, ...]
     radius: float
-    tol: float | None = None
+    tol: float = 0.0
 
     def __post_init__(self) -> None:
         _freeze(
@@ -202,7 +215,7 @@ class Cylinder(SelectorBase):
             p0=tuple(float(x) for x in self.p0),
             p1=tuple(float(x) for x in self.p1),
             radius=float(self.radius),
-            tol=None if self.tol is None else float(self.tol),
+            tol=float(self.tol),
         )
         if len(self.p0) != len(self.p1):
             raise SelectionError("p0 and p1 must have the same length")
@@ -213,7 +226,7 @@ class Cylinder(SelectorBase):
 
     def _mask(self, coords: _F64, mesh: Mesh) -> _Bool:
         _check_dim(self.p0, coords)
-        t = _tol(self.tol, mesh)
+        t = self.tol
         p0 = np.asarray(self.p0)
         axis = np.asarray(self.p1) - p0
         length = float(np.linalg.norm(axis))
@@ -227,7 +240,12 @@ class Cylinder(SelectorBase):
 
 @dataclass(frozen=True)
 class PlaneSlab(SelectorBase):
-    """Points within ``tol`` of the plane through ``point`` with ``normal``."""
+    """Points within ``tol`` of the plane through ``point`` with ``normal``.
+
+    A plane has no thickness, so an exact test would select nothing and
+    ``tol`` defaults to :func:`default_tolerance`, half a typical element
+    size -- the one layer of entities lying on the plane.
+    """
 
     point: tuple[float, ...]
     normal: tuple[float, ...]
@@ -250,7 +268,9 @@ class PlaneSlab(SelectorBase):
         n = np.asarray(self.normal)
         n = n / np.linalg.norm(n)
         dist = np.abs((coords - np.asarray(self.point)) @ n)
-        out: _Bool = dist <= _tol(self.tol, mesh)
+        # a zero-thickness plane would select nothing, so this one keeps the
+        # element-scale default; the containment shapes are exact by default
+        out: _Bool = dist <= (default_tolerance(mesh) if self.tol is None else self.tol)
         return out
 
 

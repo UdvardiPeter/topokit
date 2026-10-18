@@ -27,7 +27,7 @@ from topokit import (
 
 nelx, nely = 120, 40
 mesh = StructuredGrid.box(size=(float(nelx), float(nely)), shape=(nelx, nely))
-left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0))
 mid_right = NearPoint((float(nelx), nely / 2.0))
 model = LinearElasticity(
     mesh,

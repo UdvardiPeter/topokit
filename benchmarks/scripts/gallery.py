@@ -72,7 +72,7 @@ def mbb() -> Path:
     """Half-MBB beam, 150x50: left x-rollers, bottom-right y-support, top-left load."""
     nelx, nely = 150, 50
     mesh = StructuredGrid.box(size=(float(nelx), float(nely)), shape=(nelx, nely))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0))
     bottom_right = NearPoint((float(nelx), 0.0))
     top_left = NearPoint((0.0, float(nely)))
     model = LinearElasticity(
@@ -101,7 +101,7 @@ def cantilever() -> Path:
     """Cantilever, 120x40: left edge fully fixed, downward load at the mid-right edge."""
     nelx, nely = 120, 40
     mesh = StructuredGrid.box(size=(float(nelx), float(nely)), shape=(nelx, nely))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0))
     mid_right = NearPoint((float(nelx), nely / 2.0))
     model = LinearElasticity(
         mesh,
@@ -129,7 +129,7 @@ def michell() -> Path:
     """Michell cantilever, 90x30: a left-edge support band around mid-height, tip load."""
     nelx, nely = 90, 30
     mesh = StructuredGrid.box(size=(float(nelx), float(nely)), shape=(nelx, nely))
-    band = Box((0.0, nely / 3.0), (0.0, 2.0 * nely / 3.0), tol=1e-9)
+    band = Box((0.0, nely / 3.0), (0.0, 2.0 * nely / 3.0))
     mid_right = NearPoint((float(nelx), nely / 2.0))
     model = LinearElasticity(
         mesh,
@@ -159,7 +159,7 @@ def cantilever_3d() -> Path:
     mesh = StructuredGrid.box(
         size=(float(nelx), float(nely), float(nelz)), shape=(nelx, nely, nelz)
     )
-    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0))
     tip = NearPoint((float(nelx), nely / 2.0, nelz / 2.0))
     model = LinearElasticity(
         mesh,
