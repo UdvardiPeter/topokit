@@ -3,6 +3,7 @@
 """Tests for the Problem/Study orchestration layer."""
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -594,20 +595,6 @@ def test_resume_completed_run_raises(tmp_path: Path) -> None:
         resumed.run()
 
 
-def test_resume_rejects_changed_optimizer_params(tmp_path: Path) -> None:
-    path = tmp_path / "run.topo"
-    Study(
-        _problem(OC(move=0.2)),
-        schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0),
-        checkpoint_path=str(path),
-        checkpoint_every=5,
-    ).run()
-    # same chain/objective, but a different optimizer hyperparameter
-    other = _problem(OC(move=0.5))
-    with pytest.raises(ProblemError, match="different problem"):
-        Study.resume(other, str(path))
-
-
 def test_continuation_sharpens_vs_single_stage() -> None:
     # the point of continuation: ramping Heaviside beta drives the design toward
     # 0/1, so the grey fraction is lower than a fixed-beta single stage.
@@ -621,7 +608,16 @@ def test_continuation_sharpens_vs_single_stage() -> None:
     assert grey(cont.design.values) < grey(single.design.values)
 
 
-def test_resume_rejects_wrong_problem(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "other",
+    [
+        # a different chain (Heaviside added), and the same chain with one
+        # optimizer hyperparameter changed: both are a different problem
+        pytest.param(lambda: _problem_proj(OC(move=0.2)), id="chain"),
+        pytest.param(lambda: _problem(OC(move=0.5)), id="optimizer_params"),
+    ],
+)
+def test_resume_rejects_a_different_problem(other: Callable[[], Problem], tmp_path: Path) -> None:
     path = tmp_path / "run.topo"
     Study(
         _problem(OC(move=0.2)),
@@ -629,9 +625,8 @@ def test_resume_rejects_wrong_problem(tmp_path: Path) -> None:
         checkpoint_path=str(path),
         checkpoint_every=5,
     ).run()
-    other = _problem_proj(OC(move=0.2))  # different chain (has Heaviside)
     with pytest.raises(ProblemError, match="different problem"):
-        Study.resume(other, str(path))
+        Study.resume(other(), str(path))
 
 
 def test_amg_solver_runs() -> None:
