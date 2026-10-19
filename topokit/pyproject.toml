@@ -11,8 +11,22 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Manufacturing",
     "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Typing :: Typed",
+]
+keywords = [
+    "topology-optimization",
+    "structural-optimization",
+    "simp",
+    "finite-element",
+    "fem",
+    "optimization",
+    "mechanics",
+    "engineering-design",
 ]
 dependencies = [
     "numpy>=2.2",
@@ -20,7 +34,9 @@ dependencies = [
 ]
 
 [project.urls]
+Documentation = "https://topokit.readthedocs.io/"
 Repository = "https://github.com/UdvardiPeter/topokit"
+Issues = "https://github.com/UdvardiPeter/topokit/issues"
 
 [project.optional-dependencies]
 fast = ["pyamg>=5"]

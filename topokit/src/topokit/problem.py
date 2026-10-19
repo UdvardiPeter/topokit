@@ -25,7 +25,7 @@ import time
 import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.typing as npt
@@ -43,9 +43,13 @@ from topokit.fem import PhysicsModel
 from topokit.fields import DesignField
 from topokit.mesh import Mesh, StructuredGrid
 from topokit.optimizers import OC, Optimizer
-from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside
+from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside, LinkSpec
 from topokit.responses import Compliance, Constraint, Response, Solution
 from topokit.solvers import LinearSolver, auto_solver
+
+if TYPE_CHECKING:  # the viz return types, for callers who type-check
+    from matplotlib.figure import Figure
+    from pyvista import Plotter
 
 _F64 = npt.NDArray[np.float64]
 
@@ -83,7 +87,13 @@ _OPTIMIZER_METHODS = ("setup", "step", "state", "load_state")
 _SOLVER_METHODS = ("prepare", "solve")
 
 
-def _bind_chain(chain: Chain | BoundChain, model: PhysicsModel) -> BoundChain:
+def _bind_chain(chain: LinkSpec | Chain | BoundChain, model: PhysicsModel) -> BoundChain:
+    """Bind whatever the caller passed: a bound chain, a spec, or a lone link.
+
+    ``LinkSpec.bind`` makes a one-link chain, so a terminal link on its own is
+    a valid parametrization (SIMP with no filter, say). A non-terminal lone
+    link still fails in ``Chain.bind`` with the terminal-link error.
+    """
     if isinstance(chain, BoundChain):
         return chain
     return chain.bind(model.mesh)
@@ -177,7 +187,7 @@ class Problem:
     def __init__(
         self,
         model: PhysicsModel,
-        chain: Chain | BoundChain,
+        chain: LinkSpec | Chain | BoundChain,
         objective: Response,
         constraints: list[Constraint] | tuple[Constraint, ...] = (),
         optimizer: Optimizer | None = None,
@@ -382,33 +392,42 @@ class Result:
     timing: float
     kkt: float
 
-    def view(self, **kwargs: Any) -> object:
+    def view(self, **kwargs: Any) -> Figure | Plotter:
         """Render the final design (2D heatmap / 3D iso-surface). Needs ``[viz]``."""
         from topokit.viz import view
 
         return view(self, **kwargs)
 
-    def plot_convergence(self, **kwargs: Any) -> object:
+    def plot_convergence(self, **kwargs: Any) -> Figure:
         """Plot objective/constraint/Δx curves. Needs ``[viz]``."""
         from topokit.viz import plot_convergence
 
         return plot_convergence(self, **kwargs)
 
-    def view_slices(self, **kwargs: Any) -> object:
+    def view_slices(self, **kwargs: Any) -> Figure:
         """Render 3D density cross-sections. Needs ``[viz]``."""
         from topokit.viz import view_slices
 
         return view_slices(self, **kwargs)
 
 
+DEFAULT_MAX_ITER = 200
+DEFAULT_TOL = 0.01
+
+
 @dataclass
 class Study:
-    """Runs the optimization loop for a :class:`Problem`."""
+    """Runs the optimization loop for a :class:`Problem`.
+
+    ``max_iter`` and ``tol`` are the per-stage cap and convergence tolerance
+    of the default continuation schedule. A ``schedule`` carries its own, so
+    passing both is rejected rather than silently resolved.
+    """
 
     problem: Problem
     schedule: Schedule | None = None
-    max_iter: int = 200
-    tol: float = 0.01
+    max_iter: int = DEFAULT_MAX_ITER
+    tol: float = DEFAULT_TOL
     x0: _F64 | None = None
     snapshot_every: int = 5
     checkpoint_path: str | None = None
@@ -426,6 +445,25 @@ class Study:
         if self.schedule is None:
             # continuation is on by default; max_iter/tol feed the per-stage caps
             self.schedule = Schedule.default(max_iter=self.max_iter, tol=self.tol)
+        else:
+            # Every stage carries its own cap and tol, so these would do
+            # nothing: a Study(schedule=Schedule.single(max_iter=40),
+            # max_iter=3) used to run 40 iterations without a word. Knowable
+            # at construction, so it fails here like the rest of the assembly.
+            shadowed = [
+                f"{name}={value!r}"
+                for name, value, default in (
+                    ("max_iter", self.max_iter, DEFAULT_MAX_ITER),
+                    ("tol", self.tol, DEFAULT_TOL),
+                )
+                if value != default
+            ]
+            if shadowed:
+                raise ProblemError(
+                    f"{' and '.join(shadowed)} would be ignored: the given schedule carries "
+                    "a cap and tolerance per stage. Set them on the schedule instead, e.g. "
+                    "Schedule.single(max_iter=..., tol=...) or Schedule.default(max_iter=...)"
+                )
         if self.x0 is not None:
             x0 = np.asarray(self.x0, dtype=np.float64)
             if x0.shape != (self.problem.chain.n_vars,):

@@ -2,14 +2,17 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tier-1 tests for topokit.viz (headless: asserts on data/geometry, not pixels)."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import pytest
+from matplotlib.figure import Figure
 
 from topokit.fields import DesignField
 from topokit.mesh import StructuredGrid, UnstructuredMesh
+from topokit.problem import Result
 from topokit.viz import _backend
 
 
@@ -485,3 +488,38 @@ def test_liveview_draw_rejects_an_unstructured_snapshot() -> None:
     mesh = _tri_square()
     with pytest.raises(VizError, match="structured grids only"):
         LiveView()._draw(FieldSnapshot(iteration=0, rho=np.zeros(2), mesh=mesh))
+
+
+def _result(design: DesignField) -> Result:
+    """A Result carrying ``design``; the view methods are what is under test."""
+    values = design.values.copy()
+    return Result(
+        design=design,
+        x=values,
+        objective=1.0,
+        best_design=design,
+        best_x=values,
+        best_objective=1.0,
+        history={"objective": [2.0, 1.0], "change": [0.5, 0.1], "kkt": [0.0, 0.0]},
+        iterations=2,
+        stages_run=1,
+        converged=True,
+        reason="converged",
+        timing=0.1,
+        kkt=0.0,
+    )
+
+
+def test_result_view_methods_are_typed_as_the_figures_they_return(tmp_path: Path) -> None:
+    # The annotations are the point. These were `-> object`, so the savefig
+    # calls below -- the usage the README and the docstrings teach -- failed
+    # mypy for anyone type-checking against the shipped py.typed package.
+    convergence = _result(_design_2d()).plot_convergence()
+    convergence.savefig(tmp_path / "convergence.png")
+
+    design = _result(_design_2d()).view()
+    assert isinstance(design, Figure)  # 2D renders a Figure, 3D a Plotter
+    design.savefig(tmp_path / "design.png")
+
+    slices = _result(_design_3d()).view_slices()
+    slices.savefig(tmp_path / "slices.png")
