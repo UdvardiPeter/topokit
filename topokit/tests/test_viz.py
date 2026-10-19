@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 from matplotlib.figure import Figure
 
+from tests.conftest import UNIT_MATERIAL, corner_tet10, tri3_square
 from topokit.fields import DesignField
 from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.problem import Result
@@ -260,12 +261,6 @@ def test_require_matplotlib_missing_gives_actionable_hint(monkeypatch: pytest.Mo
         _backend.require_matplotlib()
 
 
-def _tri_square() -> UnstructuredMesh:
-    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-    elements = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
-    return UnstructuredMesh(nodes, elements, "tri3")
-
-
 def _tet_pair() -> UnstructuredMesh:
     nodes = np.array(
         [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 1.0, 1.0]]
@@ -274,29 +269,12 @@ def _tet_pair() -> UnstructuredMesh:
     return UnstructuredMesh(nodes, elements, "tet4")
 
 
-def _single_tet10() -> UnstructuredMesh:
-    corners = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
-    midsides = np.array(
-        [
-            (corners[0] + corners[1]) / 2.0,
-            (corners[1] + corners[2]) / 2.0,
-            (corners[2] + corners[0]) / 2.0,
-            (corners[0] + corners[3]) / 2.0,
-            (corners[1] + corners[3]) / 2.0,
-            (corners[2] + corners[3]) / 2.0,
-        ]
-    )
-    nodes = np.vstack([corners, midsides])
-    elements = np.array([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]], dtype=np.int64)
-    return UnstructuredMesh(nodes, elements, "tet10")
-
-
 def test_view_renders_2d_unstructured_as_tripcolor_figure() -> None:
     from matplotlib.figure import Figure
 
     from topokit.viz import view
 
-    mesh = _tri_square()
+    mesh = tri3_square()
     values = np.array([0.2, 0.9])
     fig = view(DesignField(values, mesh, name="density"))
     assert isinstance(fig, Figure)
@@ -361,7 +339,7 @@ def test_view_3d_empty_scene_raises_before_a_plotter_exists(
 def test_unstructured_grid_uses_vtk_cell_types() -> None:
     from topokit.viz._density import _unstructured_grid
 
-    grid2 = _unstructured_grid(np.array([0.5, 0.5]), _tri_square())
+    grid2 = _unstructured_grid(np.array([0.5, 0.5]), tri3_square())
     assert set(grid2.celltypes) == {5}
     grid3 = _unstructured_grid(np.array([0.5, 0.5]), _tet_pair())
     assert set(grid3.celltypes) == {10}
@@ -371,7 +349,7 @@ def test_unstructured_grid_uses_vtk_cell_types() -> None:
 def test_unstructured_grid_uses_vtk_cell_types_tet10() -> None:
     from topokit.viz._density import _unstructured_grid
 
-    grid = _unstructured_grid(np.array([0.5]), _single_tet10())
+    grid = _unstructured_grid(np.array([0.5]), corner_tet10())
     assert set(grid.celltypes) == {24}
 
 
@@ -387,17 +365,17 @@ def test_liveview_attach_rejects_unstructured_study(caplog: pytest.LogCaptureFix
     import logging
 
     from topokit.events import FieldSnapshot
-    from topokit.fem import Material, PointLoad, UnstructuredElasticity
+    from topokit.fem import PointLoad, UnstructuredElasticity
     from topokit.parametrization import SIMP, DensityFilter
     from topokit.problem import Problem, Study
     from topokit.responses import Compliance, Volume
     from topokit.selection import NearPoint, PlaneSlab
     from topokit.viz import LiveView, VizError
 
-    mesh = _tri_square()
+    mesh = tri3_square()
     model = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0)), "all")],
         loads=[PointLoad(NearPoint((1.0, 0.5)), force=(0.0, -1.0))],
     )
@@ -441,7 +419,7 @@ def test_unstructured_cells_carry_the_mesh_geometry() -> None:
     # tet10 with its last two midsides swapped (the gmsh order) measures 1/24, not 1/6.
     from topokit.viz._density import _unstructured_grid
 
-    for mesh in (_tri_square(), _tet_pair(), _single_tet10()):
+    for mesh in (tri3_square(), _tet_pair(), corner_tet10()):
         grid = _unstructured_grid(np.full(mesh.n_elements, 0.5), mesh)
         measured = grid.area if mesh.dim == 2 else grid.volume
         assert measured == pytest.approx(float(mesh.element_volumes.sum()))
@@ -480,7 +458,7 @@ def test_view_slices_keeps_its_dim_and_axis_errors_for_unstructured() -> None:
     from topokit.viz import VizError, view_slices
 
     with pytest.raises(VizError, match="needs a 3D field"):
-        view_slices(DesignField(np.array([0.5, 0.5]), _tri_square(), name="density"))
+        view_slices(DesignField(np.array([0.5, 0.5]), tri3_square(), name="density"))
     with pytest.raises(VizError, match="axis must be one of"):
         view_slices(DesignField(np.array([0.5, 0.5]), _tet_pair(), name="density"), axis="w")
 
@@ -489,7 +467,7 @@ def test_liveview_draw_rejects_an_unstructured_snapshot() -> None:
     from topokit.events import FieldSnapshot
     from topokit.viz import LiveView, VizError
 
-    mesh = _tri_square()
+    mesh = tri3_square()
     with pytest.raises(VizError, match="structured grids only"):
         LiveView()._draw(FieldSnapshot(iteration=0, rho=np.zeros(2), mesh=mesh))
 

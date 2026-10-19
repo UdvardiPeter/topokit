@@ -8,9 +8,10 @@ here fails against `StructuredGrid`, the assertion is wrong: `StructuredGrid`
 is the reference implementation, not the suite.
 
 The protocol members `MeshBase` derives (`active_elements`, `active_nodes`,
-`node_index_map`, the `boundary_faces` cache) are checked once against a
-minimal subclass at the bottom of this file instead of once per fixture:
-both shipped implementations inherit the one implementation.
+`node_index_map`, the mask validation and defaults, the `boundary_faces`
+cache) are checked once against a minimal subclass at the bottom of this
+file instead of once per fixture: both shipped implementations inherit the
+one implementation, so a second copy of the check pins nothing extra.
 """
 
 from __future__ import annotations
@@ -262,11 +263,11 @@ class _TwoTriangles(MeshBase):
     # The whole authoring surface of MeshBase, and nothing else: the five
     # geometry members, the masks, and the face builder. If this class needs
     # to grow, the base stopped deriving something it used to.
-    def __init__(self, void: list[bool] | None = None) -> None:
+    def __init__(self, solid: list[bool] | None = None, void: list[bool] | None = None) -> None:
         self._nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
         self._elements = np.array([[0, 1, 2], [0, 2, 3]])
         self.face_builds = 0
-        self._set_masks(None, void)
+        self._set_masks(solid, void)
 
     @property
     def element_kind(self) -> str:
@@ -308,6 +309,13 @@ def test_base_counts_come_off_the_arrays() -> None:
     assert (m.n_nodes, m.n_elements, m.dim) == (4, 2, 2)
 
 
+def test_base_masks_default_to_all_design() -> None:
+    m = _TwoTriangles()
+    assert m.design.all()
+    assert not m.solid.any()
+    assert not m.void.any()
+
+
 def test_base_active_elements_is_not_void() -> None:
     m = _TwoTriangles(void=[False, True])
     np.testing.assert_array_equal(m.active_elements, ~m.void)
@@ -338,3 +346,5 @@ def test_base_validates_the_masks_it_is_given() -> None:
         _TwoTriangles(void=[True])
     with pytest.raises(MeshError, match="all elements are void"):
         _TwoTriangles(void=[True, True])
+    with pytest.raises(MeshError, match="disjoint"):
+        _TwoTriangles(solid=[True, False], void=[True, False])

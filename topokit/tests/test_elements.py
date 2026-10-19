@@ -15,7 +15,8 @@ integrates to the same (wrong-looking-right) energy.
 import numpy as np
 import pytest
 
-from topokit.fem import FemError, Material, _d_matrix
+from tests.conftest import CORNER_TET10_ELEMENTS, CORNER_TET10_NODES, UNIT_MATERIAL
+from topokit.fem import FemError, _d_matrix
 from topokit.fem._elements import (
     NDOF,
     body_weights,
@@ -24,38 +25,16 @@ from topokit.fem._elements import (
     stiffness_stack,
 )
 
-_MATERIAL = Material(E=1.0, nu=0.3, rho=1.0)
-
 _TRI3_NODES = np.array([[0.0, 0.0], [3.0, 0.0], [1.0, 2.0]])
 _TRI3_ELEMENTS = np.array([[0, 1, 2]])
 
 _TET4_NODES = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
 _TET4_ELEMENTS = np.array([[0, 1, 2, 3]])
 
-# Corner tet10: straight edges, midsides at exact edge midpoints, node order
-# VTK_QUADRATIC_TETRA (4 vertices, then midsides on edges (0,1),(1,2),(2,0),
-# (0,3),(1,3),(2,3)). Physical coordinates equal the reference (r, s, t) here,
-# which keeps the analytic energy derivations below tractable.
-_TET10_NODES = np.array(
-    [
-        [0.0, 0.0, 0.0],  # 0
-        [1.0, 0.0, 0.0],  # 1
-        [0.0, 1.0, 0.0],  # 2
-        [0.0, 0.0, 1.0],  # 3
-        [0.5, 0.0, 0.0],  # 4 mid(0,1)
-        [0.5, 0.5, 0.0],  # 5 mid(1,2)
-        [0.0, 0.5, 0.0],  # 6 mid(2,0)
-        [0.0, 0.0, 0.5],  # 7 mid(0,3)
-        [0.5, 0.0, 0.5],  # 8 mid(1,3)
-        [0.0, 0.5, 0.5],  # 9 mid(2,3)
-    ]
-)
-_TET10_ELEMENTS = np.array([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]])
-
 _GEOMETRY: dict[str, tuple[np.ndarray, np.ndarray, int]] = {
     "tri3": (_TRI3_NODES, _TRI3_ELEMENTS, 2),
     "tet4": (_TET4_NODES, _TET4_ELEMENTS, 3),
-    "tet10": (_TET10_NODES, _TET10_ELEMENTS, 3),
+    "tet10": (CORNER_TET10_NODES, CORNER_TET10_ELEMENTS, 3),
 }
 
 _KINDS = ("tri3", "tet4", "tet10")
@@ -63,7 +42,7 @@ _KINDS = ("tri3", "tet4", "tet10")
 
 def _d(dim: int) -> np.ndarray:
     # 3D branch of _d_matrix ignores mode; plane_stress is only meaningful for dim=2.
-    return np.asarray(_d_matrix(_MATERIAL, dim, "plane_stress"))
+    return np.asarray(_d_matrix(UNIT_MATERIAL, dim, "plane_stress"))
 
 
 def test_ndof_and_nodes_per_face_tables() -> None:
@@ -230,7 +209,7 @@ def test_tet10_quadratic_patch_energy() -> None:
     u = np.stack([ux, uy, uz], axis=-1).ravel()
     ke = stiffness_stack("tet10", d, nodes, elements)[0]
     energy = 0.5 * u @ ke @ u
-    e, nu = _MATERIAL.E, _MATERIAL.nu
+    e, nu = UNIT_MATERIAL.E, UNIT_MATERIAL.nu
     lam = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
     mu = e / (2.0 * (1.0 + nu))
     analytic = (9.0 / 20.0) * lam + (3.0 / 8.0) * mu

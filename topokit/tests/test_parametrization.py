@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
+from tests.conftest import named_backend
 from topokit.fields import FieldSpec
 from topokit.mesh import BoundaryFaces, Mesh, StructuredGrid
 from topokit.parametrization import (
@@ -282,13 +283,8 @@ def test_simp_requires_p_at_least_one() -> None:
 
 
 def test_filter_kernel_resolves_at_call_time() -> None:
-    from topokit.backend import NumpyBackend, register_kernel, use_backend
+    from topokit.backend import register_kernel, use_backend
     from topokit.parametrization import _radial_correlate
-
-    class Named(NumpyBackend):
-        @property
-        def name(self) -> str:
-            return "filter_ctx"
 
     calls: list[str] = []
 
@@ -299,7 +295,7 @@ def test_filter_kernel_resolves_at_call_time() -> None:
     register_kernel("radial_correlate", "filter_ctx", marker)
     bound = (DensityFilter(radius=1.5) | SIMP()).bind(G42)  # bound OUTSIDE the context
     x = np.full(bound.n_vars, 0.5)
-    with use_backend(Named()):
+    with use_backend(named_backend("filter_ctx")):
         bound.apply(x)
     assert calls, "a chain bound outside the context must still honor it at call time"
     n = len(calls)

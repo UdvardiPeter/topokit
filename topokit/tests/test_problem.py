@@ -8,6 +8,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tests.conftest import (
+    CORNER_TET10_ELEMENTS,
+    CORNER_TET10_NODES,
+    LEFT_EDGE_2D,
+    UNIT_MATERIAL,
+    named_backend,
+)
 from topokit.checkpoint import read_topo, write_topo
 from topokit.events import (
     FieldSnapshot,
@@ -19,7 +26,6 @@ from topokit.events import (
 from topokit.fem import (
     BodyForce,
     LinearElasticity,
-    Material,
     PointLoad,
     SurfaceTraction,
     UnstructuredElasticity,
@@ -35,18 +41,17 @@ from topokit.parametrization import (
 )
 from topokit.problem import Problem, ProblemError, Schedule, Stage, Study
 from topokit.responses import Compliance, Constraint, Volume
-from topokit.selection import Box, NearPoint, PlaneSlab
+from topokit.selection import Box, NearPoint
 from topokit.solvers import AmgCG, Direct, LinearSolver
 
 
 def _cantilever(shape: tuple[int, int] = (20, 10)) -> LinearElasticity:
     g = StructuredGrid.box(size=(float(shape[0]), float(shape[1])), shape=shape)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     tip = Box((float(shape[0]), 0.0), (float(shape[0]), 0.0), tol=0.6)
     return LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(tip, (0.0, -1.0))],
     )
 
@@ -300,13 +305,12 @@ def test_max_iter_must_be_positive() -> None:
 
 def test_multi_load_runs() -> None:
     g = StructuredGrid.box(size=(10.0, 10.0), shape=(10, 10))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     from topokit.selection import NearPoint
 
     model = LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[
             [PointLoad(NearPoint((10.0, 10.0)), (0.0, -1.0))],
             [PointLoad(NearPoint((10.0, 0.0)), (0.0, -1.0))],
@@ -379,12 +383,11 @@ def _expected_digest(mesh: UnstructuredMesh) -> str:
 
 
 def _unstructured_problem(mesh: UnstructuredMesh, optimizer: Optimizer | None = None) -> Problem:
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     right = Box((1.0, 0.0), (1.0, 1.2), tol=1e-9)
     model = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "x"), (NearPoint((0.0, 0.0)), "y")],
         loads=[SurfaceTraction(right, traction=(1.0, 0.0))],
     )
     return Problem(
@@ -447,23 +450,9 @@ def test_config_parts_non_grid_carries_a_node_digest_and_resume_sees_moved_nodes
 
 def _tet10_single(mid_shift: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> UnstructuredMesh:
     """Single right-angle tet10; ``mid_shift`` perturbs midside node 5 (mid(1,2)) only."""
-    nodes = np.array(
-        [
-            [0.0, 0.0, 0.0],  # 0
-            [1.0, 0.0, 0.0],  # 1
-            [0.0, 1.0, 0.0],  # 2
-            [0.0, 0.0, 1.0],  # 3
-            [0.5, 0.0, 0.0],  # 4 mid(0,1)
-            [0.5, 0.5, 0.0],  # 5 mid(1,2)
-            [0.0, 0.5, 0.0],  # 6 mid(2,0)
-            [0.0, 0.0, 0.5],  # 7 mid(0,3)
-            [0.5, 0.0, 0.5],  # 8 mid(1,3)
-            [0.0, 0.5, 0.5],  # 9 mid(2,3)
-        ]
-    )
+    nodes = CORNER_TET10_NODES.copy()
     nodes[5] = nodes[5] + np.array(mid_shift)
-    elements = np.array([list(range(10))])
-    return UnstructuredMesh(nodes, elements, "tet10")
+    return UnstructuredMesh(nodes, CORNER_TET10_ELEMENTS, "tet10")
 
 
 def _unstructured_tet10_problem(
@@ -473,7 +462,7 @@ def _unstructured_tet10_problem(
     # modes of the single element without relying on a face selector.
     model = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[
             (NearPoint((0.0, 0.0, 0.0)), "all"),
             (NearPoint((1.0, 0.0, 0.0)), ("y", "z")),
@@ -743,13 +732,8 @@ def test_problem_direct_solver_needs_no_modes() -> None:
 
 
 def test_iteration_shares_one_filter_forward_pass() -> None:
-    from topokit.backend import NumpyBackend, register_kernel, use_backend
+    from topokit.backend import register_kernel, use_backend
     from topokit.parametrization import _radial_correlate
-
-    class Named(NumpyBackend):
-        @property
-        def name(self) -> str:
-            return "fwd_count"
 
     calls: list[int] = []
 
@@ -762,7 +746,7 @@ def test_iteration_shares_one_filter_forward_pass() -> None:
     study = Study(problem, schedule=Schedule.single(max_iter=2, tol=0.0), snapshot_every=0)
     it = study.iterate()
     next(it)  # prime: consumes the per-stage chain (re)bind, unrelated to _evaluate
-    with use_backend(Named()):
+    with use_backend(named_backend("fwd_count")):
         next(it)  # second iteration reuses the already-bound chain
     # 1 shared forward + 1 backward for the compliance pullback
     # + 1 backward for the volume pullback_density
@@ -959,8 +943,8 @@ def _masked_problem(solid_element: int) -> Problem:
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
     model = LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9), "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(NearPoint((4.0, 1.0)), (0.0, -1.0))],
     )
     return Problem(

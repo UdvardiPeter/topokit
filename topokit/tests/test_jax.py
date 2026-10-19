@@ -7,11 +7,12 @@ pytest.importorskip("jax")  # the [jax] extra, not a dev dependency
 import numpy as np
 
 import topokit.jax
+from tests.conftest import LEFT_EDGE_3D, UNIT_MATERIAL
 from topokit.backend import active_backend, default_backend, get_kernel, use_backend
 from topokit.backend.conformance import ArrayBackendConformance
-from topokit.fem import LinearElasticity, Material, PointLoad
+from topokit.fem import LinearElasticity, PointLoad
 from topokit.mesh import StructuredGrid
-from topokit.selection import NearPoint, PlaneSlab
+from topokit.selection import NearPoint
 
 
 class TestJaxBackendConformance(ArrayBackendConformance):
@@ -20,11 +21,10 @@ class TestJaxBackendConformance(ArrayBackendConformance):
 
 def _model() -> LinearElasticity:
     g = StructuredGrid.box(size=(6.0, 2.0, 2.0), shape=(6, 2, 2))
-    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
     return LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_3D, "all")],
         loads=[PointLoad(NearPoint((6.0, 1.0, 1.0)), (0.0, -1.0, 0.0))],
     )
 

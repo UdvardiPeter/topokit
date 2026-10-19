@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 import numpy as np
 import pytest
 
+from tests.conftest import LEFT_EDGE_2D
 from topokit.fem import STEEL, LinearElasticity, Material, PointLoad
 from topokit.mesh import StructuredGrid
 from topokit.parametrization import SIMP, DensityFilter
@@ -83,11 +84,10 @@ def test_compliance_gradient_fd_through_full_stack() -> None:
 
 def test_compliance_multi_load_weighted() -> None:
     g = StructuredGrid.box(size=(4.0, 4.0), shape=(4, 4))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     model = LinearElasticity(
         g,
         STEEL,
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[
             [PointLoad(NearPoint((4.0, 4.0)), (0.0, -1.0))],
             [PointLoad(NearPoint((4.0, 0.0)), (1.0, 0.0))],
@@ -176,9 +176,11 @@ def test_von_mises_field() -> None:
     void = np.zeros(8, dtype=bool)
     void[7] = True
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), void=void)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     model = LinearElasticity(
-        g, STEEL, supports=[(left, "all")], loads=[PointLoad(NearPoint((4.0, 0.0)), (0.0, -1.0))]
+        g,
+        STEEL,
+        supports=[(LEFT_EDGE_2D, "all")],
+        loads=[PointLoad(NearPoint((4.0, 0.0)), (0.0, -1.0))],
     )
     chain = SIMP().bind(g)
     sol = _solution(model, g, chain, np.full(chain.n_vars, 1.0))
@@ -211,11 +213,10 @@ def test_responses_registry_fd_meta() -> None:
 
 def test_multiload_gradient_fd() -> None:
     g = StructuredGrid.box(size=(6.0, 4.0), shape=(6, 4))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     model = LinearElasticity(
         g,
         STEEL,
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[
             [PointLoad(NearPoint((6.0, 4.0)), (0.0, -1.0))],
             [PointLoad(NearPoint((6.0, 0.0)), (1.0, 0.0))],
@@ -269,14 +270,13 @@ def test_negative_gradient_step_reduces_compliance() -> None:
 
 
 def _model_masked(g: StructuredGrid) -> LinearElasticity:
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     x_max = g.shape[0] * g.spacing[0]
     y_max = g.shape[1] * g.spacing[1]
     tip = Box((x_max, 0.0), (x_max, y_max), tol=1e-9)
     return LinearElasticity(
         g,
         Material(E=1000.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(tip, (0.0, -1.0))],
     )
 
@@ -387,11 +387,10 @@ def test_volume_empty_region_raises_for_the_gradient_too() -> None:
 
 def test_von_mises_selects_the_load_case() -> None:
     g = StructuredGrid.box(size=(4.0, 4.0), shape=(4, 4))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     model = LinearElasticity(
         g,
         STEEL,
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[
             [PointLoad(NearPoint((4.0, 4.0)), (0.0, -1.0))],
             [PointLoad(NearPoint((4.0, 0.0)), (1.0, 0.0))],

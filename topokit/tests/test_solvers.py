@@ -7,10 +7,11 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tests.conftest import LEFT_EDGE_2D, LEFT_EDGE_3D, UNIT_MATERIAL
 from topokit.backend import NumpyBackend, SparseMatrix
 from topokit.fem import LinearElasticity, Material, PointLoad
 from topokit.mesh import StructuredGrid
-from topokit.selection import Box, NearPoint, PlaneSlab
+from topokit.selection import Box, NearPoint
 from topokit.solvers import AmgCG, Direct, LinearSolver, SolverError, auto_solver
 
 BK = NumpyBackend()
@@ -29,12 +30,11 @@ def _spd_system() -> tuple[SparseMatrix, np.ndarray, np.ndarray]:
 
 def _cantilever_system(scale: np.ndarray | None = None) -> tuple[SparseMatrix, np.ndarray]:
     g = StructuredGrid.box(size=(12.0, 4.0), shape=(24, 8))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     tip = Box((12.0, 0.0), (12.0, 4.0), tol=1e-9)
     m = LinearElasticity(
         g,
         Material(E=1000.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(tip, (0.0, -1.0))],
     )
     s = np.ones(g.n_elements) if scale is None else scale
@@ -290,11 +290,10 @@ def test_direct_wraps_cholmod_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _cantilever_3d_model(n: int) -> LinearElasticity:
     g = StructuredGrid.box(size=(float(2 * n), float(n), float(n)), shape=(2 * n, n, n))
-    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
     return LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_3D, "all")],
         loads=[PointLoad(NearPoint((float(2 * n), n / 2.0, n / 2.0)), (0.0, -1.0, 0.0))],
     )
 
