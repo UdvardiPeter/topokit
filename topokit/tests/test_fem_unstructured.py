@@ -1,16 +1,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
-"""Tier-1 tests for ``UnstructuredElasticity``, mirroring the grid model's bar.
+"""Tier-1 tests for ``UnstructuredElasticity`` beyond the conformance bar.
 
-Mesh fixtures are built by hand (no mesh generator dependency):
+The checks both elasticity models owe the `PhysicsModel` contract live in
+`test_physics_conformance.py`, parametrized over quad4/tri3/tet4/tet10.
+What is here is what only the simplex models can be asked: the quadratic
+tet10 states, the consistent-load closed forms, the void-element
+condensation, and the end-to-end FD and `Study` runs on non-grid meshes.
 
-- ``_tri3_square``: the 2-triangle unit square (same split as
-  ``test_mesh_conformance``'s ``tri3_square`` fixture).
-- ``_tet4_box``: a Kuhn (Freudenthal) triangulation of an ``nx*ny*nz`` grid
-  of unit cubes into 6 tets each, sharing corner nodes -- a valid conforming
-  tet4 mesh with no extra (non-corner) nodes.
-- ``_tet10_box``: ``_tet4_box`` upgraded to tet10 by inserting an edge
-  midpoint node per unique edge (shared between adjacent elements).
+Meshes come from `tests.conftest` (hand-built, no mesh-generator
+dependency): the 2-triangle unit square, the quad-split tri3 grid, and the
+Kuhn triangulation of a cube lattice into 6 tet4s, optionally upgraded to
+tet10 by one midpoint node per unique edge.
 """
 
 from __future__ import annotations
@@ -20,17 +21,28 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tests.conftest import (
+    CORNER_TET10_NODES,
+    LEFT_EDGE_2D,
+    LEFT_EDGE_3D,
+    UNIT_MATERIAL,
+    corner_tet10,
+    ones,
+    solve,
+    tet4_box,
+    tet10_box,
+    tri3_grid,
+    tri3_square,
+)
 from topokit.fem import (
     BodyForce,
     FemError,
     LinearElasticity,
     Material,
-    PhysicsModel,
     PointLoad,
     SurfaceTraction,
     UnstructuredElasticity,
 )
-from topokit.fields import FieldSpec
 from topokit.mesh import StructuredGrid, UnstructuredMesh
 from topokit.optimizers import MMA, OC
 from topokit.parametrization import SIMP, DensityFilter
@@ -39,184 +51,6 @@ from topokit.responses import Compliance, Solution, Volume
 from topokit.selection import Box, NearPoint, PlaneSlab
 from topokit.solvers import Direct
 from topokit.testing import assert_gradient_matches
-
-_TET10_MIDSIDE_PAIRS = ((0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3))
-
-# Kuhn decomposition of a unit cube into 6 tets, corners only (see
-# module docstring): for each of the 3! axis orderings, walk the cube
-# diagonal one axis at a time. Local corner order is
-# (0,0,0),(1,0,0),(0,1,0),(1,1,0),(0,0,1),(1,0,1),(0,1,1),(1,1,1); the
-# element rows below are reordered from the raw permutation walk so every
-# tet has positive signed volume (`UnstructuredMesh` requires it).
-_KUHN_CUBE_LOCAL = (
-    (0, 0, 0),
-    (1, 0, 0),
-    (0, 1, 0),
-    (1, 1, 0),
-    (0, 0, 1),
-    (1, 0, 1),
-    (0, 1, 1),
-    (1, 1, 1),
-)
-_KUHN_CUBE_TETS = (
-    (0, 1, 3, 7),
-    (0, 1, 7, 5),
-    (0, 2, 7, 3),
-    (0, 2, 6, 7),
-    (0, 4, 5, 7),
-    (0, 4, 7, 6),
-)
-
-
-def _tri3_square() -> UnstructuredMesh:
-    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-    elements = np.array([[0, 1, 2], [0, 2, 3]])
-    return UnstructuredMesh(nodes, elements, "tri3")
-
-
-def _tet4_box_arrays(nx: int, ny: int, nz: int) -> tuple[np.ndarray, np.ndarray]:
-    xs, ys, zs = np.arange(nx + 1), np.arange(ny + 1), np.arange(nz + 1)
-    grid = np.meshgrid(xs, ys, zs, indexing="ij")
-    nodes = np.stack([g.ravel(order="F") for g in grid], axis=1).astype(float)
-
-    def nid(i: int, j: int, k: int) -> int:
-        return i + (nx + 1) * j + (nx + 1) * (ny + 1) * k
-
-    elements = []
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                corners = [nid(i + di, j + dj, k + dk) for di, dj, dk in _KUHN_CUBE_LOCAL]
-                for tet in _KUHN_CUBE_TETS:
-                    elements.append([corners[t] for t in tet])
-    return nodes, np.array(elements, dtype=np.int64)
-
-
-def _tet4_box(nx: int, ny: int, nz: int) -> UnstructuredMesh:
-    nodes, elements = _tet4_box_arrays(nx, ny, nz)
-    return UnstructuredMesh(nodes, elements, "tet4")
-
-
-def _tet4_to_tet10(nodes: np.ndarray, elements: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Insert one midside node per unique edge, shared between elements."""
-    node_list = [n for n in nodes]
-    edge_mid: dict[frozenset[int], int] = {}
-    rows = []
-    for elem in elements:
-        row = list(elem[:4])
-        for a, b in _TET10_MIDSIDE_PAIRS:
-            ga, gb = int(elem[a]), int(elem[b])
-            key = frozenset((ga, gb))
-            if key not in edge_mid:
-                edge_mid[key] = len(node_list)
-                node_list.append((nodes[ga] + nodes[gb]) / 2.0)
-            row.append(edge_mid[key])
-        rows.append(row)
-    return np.array(node_list), np.array(rows, dtype=np.int64)
-
-
-def _tri3_grid(nx: int, ny: int) -> UnstructuredMesh:
-    """A ``nx*ny`` unit-square grid, each cell split into 2 triangles."""
-    xs, ys = np.arange(nx + 1), np.arange(ny + 1)
-    grid = np.meshgrid(xs, ys, indexing="ij")
-    nodes = np.stack([g.ravel(order="F") for g in grid], axis=1).astype(float)
-
-    def nid(i: int, j: int) -> int:
-        return i + (nx + 1) * j
-
-    elements = []
-    for i in range(nx):
-        for j in range(ny):
-            n0, n1, n2, n3 = nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)
-            elements.append([n0, n1, n2])
-            elements.append([n0, n2, n3])
-    return UnstructuredMesh(nodes, np.array(elements, dtype=np.int64), "tri3")
-
-
-def _tet10_box(nx: int, ny: int, nz: int) -> UnstructuredMesh:
-    nodes4, elements4 = _tet4_box_arrays(nx, ny, nz)
-    nodes10, elements10 = _tet4_to_tet10(nodes4, elements4)
-    return UnstructuredMesh(nodes10, elements10, "tet10")
-
-
-def _solve(model: UnstructuredElasticity, scale: np.ndarray) -> np.ndarray:
-    solver = Direct()
-    solver.prepare(model.assemble(scale))
-    return np.asarray(solver.solve(model.loads()[:, 0]))
-
-
-def _ones(mesh: UnstructuredMesh) -> np.ndarray:
-    return np.ones(mesh.n_elements)
-
-
-# ---------------------------------------------------------------------------
-# Patch tests, exact to 1e-9
-# ---------------------------------------------------------------------------
-
-
-def test_uniaxial_patch_2d_exact_tri3() -> None:
-    mesh = _tri3_square()
-    e, sigma = 100.0, 10.0
-    mat = Material(E=e, nu=0.3, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
-    right = Box((1.0, 0.0), (1.0, 1.0), tol=1e-9)
-    m = UnstructuredElasticity(
-        mesh,
-        mat,
-        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
-        loads=[SurfaceTraction(right, traction=(sigma, 0.0))],
-    )
-    scale = _ones(mesh)
-    u = _solve(m, scale)
-    disp = m.displacement_field(u)
-    tip = disp.values[mesh.nodes[:, 0] == 1.0, 0]
-    np.testing.assert_allclose(tip, sigma * 1.0 / e, rtol=1e-9)
-    np.testing.assert_allclose(m.element_stress(u, scale), sigma, rtol=1e-9)
-
-
-def _uniaxial_3d_setup(
-    mesh: UnstructuredMesh, mat: Material, sigma: float, mode: str = "plane_stress"
-) -> UnstructuredElasticity:
-    face_x0 = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
-    face_x1 = Box((1.0, 0.0, 0.0), (1.0, 1.0, 1.0), tol=1e-9)
-    supports = [
-        (face_x0, "x"),
-        (NearPoint((0.0, 0.0, 0.0)), ("y", "z")),
-        (NearPoint((0.0, 0.0, 1.0)), ("y",)),
-    ]
-    return UnstructuredElasticity(
-        mesh,
-        mat,
-        supports=supports,
-        loads=[SurfaceTraction(face_x1, traction=(sigma, 0.0, 0.0))],
-        mode=mode,
-    )
-
-
-def test_uniaxial_patch_3d_exact_tet4() -> None:
-    mesh = _tet4_box(1, 1, 1)
-    e, sigma = 100.0, 10.0
-    mat = Material(E=e, nu=0.3, rho=1.0)
-    m = _uniaxial_3d_setup(mesh, mat, sigma)
-    scale = _ones(mesh)
-    u = _solve(m, scale)
-    np.testing.assert_allclose(m.element_stress(u, scale), sigma, rtol=1e-9)
-    disp = m.displacement_field(u)
-    tip = disp.values[mesh.nodes[:, 0] == 1.0, 0]
-    np.testing.assert_allclose(tip, sigma * 1.0 / e, rtol=1e-9)
-
-
-def test_uniaxial_patch_3d_exact_tet10() -> None:
-    mesh = _tet10_box(1, 1, 1)
-    e, sigma = 100.0, 10.0
-    mat = Material(E=e, nu=0.3, rho=1.0)
-    m = _uniaxial_3d_setup(mesh, mat, sigma)
-    scale = _ones(mesh)
-    u = _solve(m, scale)
-    np.testing.assert_allclose(m.element_stress(u, scale), sigma, rtol=1e-9)
-    disp = m.displacement_field(u)
-    tip = disp.values[np.isclose(mesh.nodes[:, 0], 1.0), 0]
-    np.testing.assert_allclose(tip, sigma * 1.0 / e, rtol=1e-9)
 
 
 def _face_consistent_linear_loads(
@@ -277,7 +111,7 @@ def test_tet10_pure_bending_quadratic_exact() -> None:
     consistent-load formula above -- ``SurfaceTraction`` only supports a
     uniform traction per selector, not one varying across a single face.
     """
-    mesh = _tet10_box(1, 1, 1)
+    mesh = tet10_box(1, 1, 1)
     e, nu, kappa = 100.0, 0.3, 1.0
     mat = Material(E=e, nu=nu, rho=1.0)
 
@@ -311,63 +145,21 @@ def test_tet10_pure_bending_quadratic_exact() -> None:
         for nid, force in accum.items()
         if abs(force) > 1e-12
     ]
-    face_x0 = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
     supports = [
-        (face_x0, "x"),
+        (LEFT_EDGE_3D, "x"),
         (NearPoint((0.0, 0.0, 0.0)), "all"),
         (NearPoint((0.0, 1.0, 0.0)), "z"),
     ]
     m = UnstructuredElasticity(mesh, mat, supports=supports, loads=loads)
-    u = _solve(m, _ones(mesh))
+    u = solve(m, ones(mesh))
     disp = m.displacement_field(u)
     for i, coord in enumerate(mesh.nodes):
         np.testing.assert_allclose(disp.values[i], u_exact(coord), atol=1e-9)
 
 
-def test_energy_identity_tet4_mixed_bc() -> None:
-    # 2x1x1 box: face_x0 roller + 2 point pins (mixed BC), traction on the
-    # true far face (x=2, not the x=1 mid-box interface)
-    mesh = _tet4_box(2, 1, 1)
-    mat = Material(E=100.0, nu=0.3, rho=1.0)
-    face_x0 = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
-    face_x2 = Box((2.0, 0.0, 0.0), (2.0, 1.0, 1.0), tol=1e-9)
-    supports = [
-        (face_x0, "x"),
-        (NearPoint((0.0, 0.0, 0.0)), ("y", "z")),
-        (NearPoint((0.0, 0.0, 1.0)), ("y",)),
-    ]
-    m = UnstructuredElasticity(
-        mesh, mat, supports=supports, loads=[SurfaceTraction(face_x2, traction=(5.0, 0.0, 0.0))]
-    )
-    scale = _ones(mesh)
-    u = _solve(m, scale)
-    k = m.assemble(scale)
-    energy = float(u @ k.matvec(u))
-    work = float(m.loads()[:, 0] @ u)
-    assert energy == pytest.approx(work, rel=1e-10)
-    assert m.element_energies(u, scale).sum() == pytest.approx(energy, rel=1e-10)
-
-
 # ---------------------------------------------------------------------------
 # Rigid-body / near-nullspace
 # ---------------------------------------------------------------------------
-
-
-def test_near_nullspace_shape_2d() -> None:
-    mesh = _tri3_square()
-    m = UnstructuredElasticity(
-        mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(NearPoint((0.0, 0.0)), "all")],
-        loads=[SurfaceTraction(Box((1.0, 0.0), (1.0, 1.0), tol=1e-9), traction=(1.0, 0.0))],
-    )
-    assert m.near_nullspace().shape == (m.n_dof, 3)
-
-
-def test_near_nullspace_shape_3d() -> None:
-    mesh = _tet4_box(1, 1, 1)
-    m = _uniaxial_3d_setup(mesh, Material(E=1.0, nu=0.3, rho=1.0), sigma=1.0)
-    assert m.near_nullspace().shape == (m.n_dof, 6)
 
 
 def _rigid_mode_energy_ratio(m: UnstructuredElasticity, mesh: UnstructuredMesh, seed: int) -> float:
@@ -380,7 +172,7 @@ def _rigid_mode_energy_ratio(m: UnstructuredElasticity, mesh: UnstructuredMesh, 
     random vector's strain energy makes that "approximately" precise
     without demanding an exact (and generally false) zero.
     """
-    k = m.assemble(_ones(mesh))
+    k = m.assemble(ones(mesh))
     b = m.near_nullspace()
     rng = np.random.default_rng(seed)
     generic = rng.normal(size=m.n_dof)
@@ -396,10 +188,10 @@ def test_near_nullspace_lies_in_numerical_nullspace_2d() -> None:
     # this mesh family across sizes; 0.3 leaves ample margin without being
     # toothless). A too-small mesh (e.g. the 2-triangle square) makes the
     # single pin a large fraction of the domain, so use a bigger grid.
-    mesh = _tri3_grid(6, 6)
+    mesh = tri3_grid(6, 6)
     m = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[(NearPoint((0.0, 0.0)), "all")],
         loads=[SurfaceTraction(Box((6.0, 0.0), (6.0, 6.0), tol=1e-9), traction=(1.0, 0.0))],
     )
@@ -407,11 +199,11 @@ def test_near_nullspace_lies_in_numerical_nullspace_2d() -> None:
 
 
 def test_near_nullspace_lies_in_numerical_nullspace_3d() -> None:
-    mesh = _tet4_box(3, 3, 3)
+    mesh = tet4_box(3, 3, 3)
     pin = NearPoint((0.0, 0.0, 0.0))
     m = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[(pin, "all")],
         loads=[
             SurfaceTraction(
@@ -432,27 +224,12 @@ def test_near_nullspace_lies_in_numerical_nullspace_3d() -> None:
 def test_tet10_constant_traction_zero_corner_and_area_third_midside() -> None:
     # single right-angle tet10, corners at the origin and unit axis points;
     # face (1,2,3) is the hypotenuse (nodes 1,2,3 + their 3 midsides)
-    nodes = np.array(
-        [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [0.5, 0.0, 0.0],  # mid(0,1)
-            [0.5, 0.5, 0.0],  # mid(1,2)
-            [0.0, 0.5, 0.0],  # mid(2,0)
-            [0.0, 0.0, 0.5],  # mid(0,3)
-            [0.5, 0.0, 0.5],  # mid(1,3)
-            [0.0, 0.5, 0.5],  # mid(2,3)
-        ]
-    )
-    elements = np.array([list(range(10))])
-    mesh = UnstructuredMesh(nodes, elements, "tet10")
+    mesh = corner_tet10()
     face = PlaneSlab(point=(1.0, 0.0, 0.0), normal=(1.0, 1.0, 1.0), tol=1e-6)
     traction = (0.0, 0.0, 3.0)
     m = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[(NearPoint((0.0, 0.0, 0.0)), "all")],
         loads=[SurfaceTraction(face, traction=traction)],
     )
@@ -487,27 +264,12 @@ def test_tet10_body_force_consistent_weights_on_free_dofs() -> None:
     involved, this is the load vector before any system reduction beyond
     that one pin.
     """
-    nodes = np.array(
-        [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [0.5, 0.0, 0.0],  # mid(0,1)
-            [0.5, 0.5, 0.0],  # mid(1,2)
-            [0.0, 0.5, 0.0],  # mid(2,0)
-            [0.0, 0.0, 0.5],  # mid(0,3)
-            [0.5, 0.0, 0.5],  # mid(1,3)
-            [0.0, 0.5, 0.5],  # mid(2,3)
-        ]
-    )
-    elements = np.array([list(range(10))])
-    mesh = UnstructuredMesh(nodes, elements, "tet10")
+    mesh = corner_tet10()
     volume = 1.0 / 6.0
     b = np.array([2.0, -3.0, 5.0])
     m = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[(NearPoint((0.0, 0.0, 0.0)), "all")],
         loads=[BodyForce((float(b[0]), float(b[1]), float(b[2])))],
     )
@@ -538,7 +300,7 @@ def test_void_elements_leave_the_system_tri3() -> None:
     ``scale``) are indexed over all elements, so a mesh with void elements
     is the only thing that exercises the two numberings against each other.
     """
-    full = _tri3_grid(2, 1)
+    full = tri3_grid(2, 1)
     void = np.zeros(full.n_elements, dtype=bool)
     void[2:] = True  # the 2 triangles of the right cell, x in [1, 2]
     mesh = UnstructuredMesh(full.nodes, full.element_nodes, "tri3", void=void)
@@ -546,17 +308,16 @@ def test_void_elements_leave_the_system_tri3() -> None:
 
     e, sigma = 100.0, 10.0
     mat = Material(E=e, nu=0.3, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     right = Box((1.0, 0.0), (1.0, 1.0), tol=1e-9)
     m = UnstructuredElasticity(
         mesh,
         mat,
-        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
+        supports=[(LEFT_EDGE_2D, "x"), (NearPoint((0.0, 0.0)), "y")],
         loads=[SurfaceTraction(right, traction=(sigma, 0.0))],
     )
     assert m.n_dof == 2 * 4 - 3  # 4 active nodes, 2 x-pins + 1 y-pin
-    scale = _ones(mesh)
-    u = _solve(m, scale)
+    scale = ones(mesh)
+    u = solve(m, scale)
 
     # the active half is the uniaxial patch test again, exactly
     np.testing.assert_allclose(m.element_stress(u, scale)[:2], sigma, rtol=1e-9)
@@ -581,20 +342,7 @@ def test_bad_tet10_names_its_mesh_element_id_not_its_active_row() -> None:
     element 1; reporting the row position would point the user at the wrong
     element (and at a perfectly good one).
     """
-    good = np.array(
-        [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [0.5, 0.0, 0.0],
-            [0.5, 0.5, 0.0],
-            [0.0, 0.5, 0.0],
-            [0.0, 0.0, 0.5],
-            [0.5, 0.0, 0.5],
-            [0.0, 0.5, 0.5],
-        ]
-    )
+    good = CORNER_TET10_NODES
     # a second, detached copy whose mid(0,1) node is dragged far off the edge:
     # the corner tetrahedron stays positive (so the mesh constructor accepts
     # it) but the quadratic map folds over at the Gauss points
@@ -605,7 +353,7 @@ def test_bad_tet10_names_its_mesh_element_id_not_its_active_row() -> None:
     with pytest.raises(FemError, match=r"element ids \[1\]"):
         UnstructuredElasticity(
             mesh,
-            Material(E=1.0, nu=0.3, rho=1.0),
+            UNIT_MATERIAL,
             supports=[(NearPoint((2.0, 0.0, 0.0)), "all")],
             loads=[BodyForce((0.0, 0.0, -1.0))],
         )
@@ -616,87 +364,26 @@ def test_bad_tet10_names_its_mesh_element_id_not_its_active_row() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_unsupported_element_kind_rejected() -> None:
-    mesh = _tri3_square()
-
-    class FakeKindMesh(UnstructuredMesh):
-        @property
-        def element_kind(self) -> str:
-            return "quad4"
-
-    fake = FakeKindMesh(mesh.nodes, mesh.element_nodes, "tri3")
-    with pytest.raises(FemError, match="quad4"):
-        UnstructuredElasticity(
-            fake,
-            Material(E=1.0, nu=0.3, rho=1.0),
-            supports=[(NearPoint((0.0, 0.0)), "all")],
-            loads=[SurfaceTraction(Box((1.0, 0.0), (1.0, 1.0), tol=1e-9), traction=(1.0, 0.0))],
-        )
-
-
-def test_support_selecting_nothing_raises() -> None:
-    mesh = _tri3_square()
-    far = Box((50.0, 50.0), (51.0, 51.0), tol=0.0)
-    with pytest.raises(FemError, match="no active nodes"):
-        UnstructuredElasticity(
-            mesh,
-            Material(E=1.0, nu=0.3, rho=1.0),
-            supports=[(far, "all")],
-            loads=[SurfaceTraction(Box((1.0, 0.0), (1.0, 1.0), tol=1e-9), traction=(1.0, 0.0))],
-        )
-
-
 def test_empty_supports_rejected() -> None:
-    mesh = _tri3_square()
+    mesh = tri3_square()
     with pytest.raises(FemError, match="at least one support"):
         UnstructuredElasticity(
             mesh,
-            Material(E=1.0, nu=0.3, rho=1.0),
+            UNIT_MATERIAL,
             supports=[],
             loads=[SurfaceTraction(Box((1.0, 0.0), (1.0, 1.0), tol=1e-9), traction=(1.0, 0.0))],
         )
 
 
 def test_empty_loads_rejected() -> None:
-    mesh = _tri3_square()
+    mesh = tri3_square()
     with pytest.raises(FemError, match="at least one load"):
         UnstructuredElasticity(
             mesh,
-            Material(E=1.0, nu=0.3, rho=1.0),
+            UNIT_MATERIAL,
             supports=[(NearPoint((0.0, 0.0)), "all")],
             loads=[],
         )
-
-
-def test_mode_rejected_for_3d() -> None:
-    mesh = _tet4_box(1, 1, 1)
-    with pytest.raises(FemError, match="2D"):
-        _uniaxial_3d_setup(mesh, Material(E=1.0, nu=0.3, rho=1.0), sigma=1.0, mode="plane_strain")
-
-
-# ---------------------------------------------------------------------------
-# Structural sanity: same call surface as the grid model
-# ---------------------------------------------------------------------------
-
-
-def test_satisfies_physics_protocol() -> None:
-    mesh = _tri3_square()
-    model: PhysicsModel = UnstructuredElasticity(
-        mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(NearPoint((0.0, 0.0)), "all")],
-        loads=[SurfaceTraction(Box((1.0, 0.0), (1.0, 1.0), tol=1e-9), traction=(1.0, 0.0))],
-    )
-    assert model.expected_field == FieldSpec("stiffness_scale")
-    assert model.n_cases == 1
-
-
-def test_unstructured_elasticity_registered_as_builtin() -> None:
-    from topokit.fem import UnstructuredElasticity as PublicUnstructuredElasticity
-    from topokit.registry import registry
-
-    assert registry.get("physics", "unstructured_elasticity") is UnstructuredElasticity
-    assert PublicUnstructuredElasticity is UnstructuredElasticity
 
 
 # ---------------------------------------------------------------------------
@@ -711,12 +398,14 @@ def test_compliance_gradient_fd_through_full_stack_tri3() -> None:
     (``_BoundMatrixFilter``); this is the first FD check of that path chained
     all the way through ``UnstructuredElasticity`` and ``Direct``.
     """
-    mesh = _tri3_grid(4, 3)
+    mesh = tri3_grid(4, 3)
     mat = Material(E=100.0, nu=0.3, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     tip = Box((4.0, 0.0), (4.0, 3.0), tol=1e-9)
     model = UnstructuredElasticity(
-        mesh, mat, supports=[(left, "all")], loads=[SurfaceTraction(tip, traction=(1.0, 0.0))]
+        mesh,
+        mat,
+        supports=[(LEFT_EDGE_2D, "all")],
+        loads=[SurfaceTraction(tip, traction=(1.0, 0.0))],
     )
     chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(mesh)
     rng = np.random.default_rng(20260823)
@@ -749,14 +438,13 @@ def test_compliance_gradient_fd_through_full_stack_tet10() -> None:
     element whose stack comes out of a quadrature loop rather than a closed
     form -- so it needs its own check, not just tri3's.
     """
-    mesh = _tet10_box(1, 1, 1)
+    mesh = tet10_box(1, 1, 1)
     mat = Material(E=100.0, nu=0.3, rho=1.0)
-    face_x0 = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
     face_x1 = Box((1.0, 0.0, 0.0), (1.0, 1.0, 1.0), tol=1e-9)
     model = UnstructuredElasticity(
         mesh,
         mat,
-        supports=[(face_x0, "all")],
+        supports=[(LEFT_EDGE_3D, "all")],
         loads=[SurfaceTraction(face_x1, traction=(1.0, 0.0, -1.0))],
     )
     chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(mesh)
@@ -785,28 +473,6 @@ def test_compliance_gradient_fd_through_full_stack_tet10() -> None:
     )
 
 
-def _tri3_box(length: float, height: float, nx: int, ny: int) -> UnstructuredMesh:
-    """Like ``_tri3_grid`` but over a fixed physical size, decoupled from ``nx``/``ny``.
-
-    Lets a convergence test refine the mesh (``nx``, ``ny`` up) while keeping the
-    same domain, mirroring ``StructuredGrid.box``.
-    """
-    xs, ys = np.linspace(0.0, length, nx + 1), np.linspace(0.0, height, ny + 1)
-    grid = np.meshgrid(xs, ys, indexing="ij")
-    nodes = np.stack([g.ravel(order="F") for g in grid], axis=1)
-
-    def nid(i: int, j: int) -> int:
-        return i + (nx + 1) * j
-
-    elements = []
-    for i in range(nx):
-        for j in range(ny):
-            n0, n1, n2, n3 = nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)
-            elements.append([n0, n1, n2])
-            elements.append([n0, n2, n3])
-    return UnstructuredMesh(nodes, np.array(elements, dtype=np.int64), "tri3")
-
-
 def test_tri3_cantilever_converges_toward_timoshenko() -> None:
     """Same reference as ``test_fem.test_cantilever_matches_timoshenko``.
 
@@ -822,14 +488,13 @@ def test_tri3_cantilever_converges_toward_timoshenko() -> None:
     reference = p * length**3 / (3.0 * e * inertia) + p * length / (kappa * shear_g * height)
 
     def tip_deflection(nx: int, ny: int) -> float:
-        mesh = _tri3_box(length, height, nx, ny)
+        mesh = tri3_grid(nx, ny, (length, height))
         mat = Material(E=e, nu=nu, rho=1.0)
-        left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
         tip = Box((length, 0.0), (length, height), tol=1e-9)
         m = UnstructuredElasticity(
-            mesh, mat, supports=[(left, "all")], loads=[PointLoad(tip, (0.0, -p))]
+            mesh, mat, supports=[(LEFT_EDGE_2D, "all")], loads=[PointLoad(tip, (0.0, -p))]
         )
-        u = _solve(m, _ones(mesh))
+        u = solve(m, ones(mesh))
         disp = m.displacement_field(u)
         tip_nodes = np.isclose(mesh.nodes[:, 0], length)
         return float(-disp.values[tip_nodes, 1].min())
@@ -840,32 +505,10 @@ def test_tri3_cantilever_converges_toward_timoshenko() -> None:
     assert abs(fine - reference) / reference < 0.1
 
 
-def _scaled_tet_mesh(
-    nx: int, ny: int, nz: int, size: tuple[float, float, float], kind: str
-) -> UnstructuredMesh:
-    """A Kuhn ``nx*ny*nz`` box (see the module docstring), rescaled to ``size``.
-
-    Decouples the mesh's element-count resolution from its physical extent,
-    so a tet4 and a tet10 mesh at different (nx, ny, nz) can still cover the
-    identical domain -- needed to compare them at equal DOF on one cantilever.
-    """
-    nodes4, elements4 = _tet4_box_arrays(nx, ny, nz)
-    nodes, elements = (nodes4, elements4) if kind == "tet4" else _tet4_to_tet10(nodes4, elements4)
-    scale = np.array([size[0] / nx, size[1] / ny, size[2] / nz])
-    return UnstructuredMesh(nodes * scale, elements, kind)
-
-
-def _solve_any(model: Any, scale: np.ndarray) -> np.ndarray:
-    """Like ``_solve``, generalized over ``LinearElasticity``/``UnstructuredElasticity``."""
-    solver = Direct()
-    solver.prepare(model.assemble(scale))
-    return np.asarray(solver.solve(model.loads()[:, 0]))
-
-
 def test_tet10_closer_than_tet4_at_equal_dof_budget() -> None:
     """tet10 (quadratic) beats tet4 (linear) at matched DOF on one cantilever.
 
-    Both meshes cover the same 6x2x2 box (see ``_scaled_tet_mesh``): tet4 is
+    Both meshes cover the same 6x2x2 box (the builders' ``size=``): tet4 is
     finely subdivided (13x2x2 Kuhn cubes, 312 elements, 378 DOF) and tet10 is
     coarsely subdivided (2x2x2 cubes, 48 elements, 375 DOF) -- an equal-DOF
     pair found by search over small Kuhn grids. The reference is a fine-grid
@@ -879,26 +522,29 @@ def test_tet10_closer_than_tet4_at_equal_dof_budget() -> None:
     length, side = 6.0, 2.0
     size = (length, side, side)
     mat = Material(E=e, nu=nu, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
     tip_sel = Box((length, 0.0, 0.0), (length, side, side), tol=1e-9)
     tip_load = [PointLoad(tip_sel, (0.0, 0.0, -p))]
 
     def tip_deflection(model: Any) -> float:
-        u = _solve_any(model, np.ones(model.mesh.n_elements))
+        u = solve(model, np.ones(model.mesh.n_elements))
         disp = model.displacement_field(u)
         tip_nodes = np.isclose(model.mesh.nodes[:, 0], length)
         return float(-disp.values[tip_nodes, 2].min())
 
     g = StructuredGrid.box(size=size, shape=(24, 8, 8))
-    hex_model = LinearElasticity(g, mat, supports=[(left, "all")], loads=tip_load)
+    hex_model = LinearElasticity(g, mat, supports=[(LEFT_EDGE_3D, "all")], loads=tip_load)
     reference = tip_deflection(hex_model)
 
-    tet4_mesh = _scaled_tet_mesh(13, 2, 2, size, "tet4")
-    tet10_mesh = _scaled_tet_mesh(2, 2, 2, size, "tet10")
+    tet4_mesh = tet4_box(13, 2, 2, size)
+    tet10_mesh = tet10_box(2, 2, 2, size)
     assert tet4_mesh.n_nodes * 3 == pytest.approx(tet10_mesh.n_nodes * 3, rel=0.02)  # equal DOF
 
-    tet4_model = UnstructuredElasticity(tet4_mesh, mat, supports=[(left, "all")], loads=tip_load)
-    tet10_model = UnstructuredElasticity(tet10_mesh, mat, supports=[(left, "all")], loads=tip_load)
+    tet4_model = UnstructuredElasticity(
+        tet4_mesh, mat, supports=[(LEFT_EDGE_3D, "all")], loads=tip_load
+    )
+    tet10_model = UnstructuredElasticity(
+        tet10_mesh, mat, supports=[(LEFT_EDGE_3D, "all")], loads=tip_load
+    )
     tet4_tip = tip_deflection(tet4_model)
     tet10_tip = tip_deflection(tet10_model)
 
@@ -906,28 +552,12 @@ def test_tet10_closer_than_tet4_at_equal_dof_budget() -> None:
 
 
 def test_study_smoke_tri3_oc() -> None:
-    """Full ``Study`` smoke run on a tri3 cantilever built from arrays in-test."""
+    """Full ``Study`` smoke run on a tri3 cantilever."""
     nx, ny = 8, 4
-    xs, ys = np.arange(nx + 1), np.arange(ny + 1)
-    grid = np.meshgrid(xs, ys, indexing="ij")
-    nodes = np.stack([g.ravel(order="F") for g in grid], axis=1).astype(float)
-
-    def nid(i: int, j: int) -> int:
-        return i + (nx + 1) * j
-
-    elements = []
-    for i in range(nx):
-        for j in range(ny):
-            n0, n1, n2, n3 = nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)
-            elements.append([n0, n1, n2])
-            elements.append([n0, n2, n3])
-    mesh = UnstructuredMesh(nodes, np.array(elements, dtype=np.int64), "tri3")
-
-    mat = Material(E=1.0, nu=0.3, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
+    mesh = tri3_grid(nx, ny)
     tip = Box((float(nx), 0.0), (float(nx), float(ny)), tol=1e-9)
     model = UnstructuredElasticity(
-        mesh, mat, supports=[(left, "all")], loads=[PointLoad(tip, (0.0, -1.0))]
+        mesh, UNIT_MATERIAL, supports=[(LEFT_EDGE_2D, "all")], loads=[PointLoad(tip, (0.0, -1.0))]
     )
     problem = Problem(
         model,
@@ -946,12 +576,13 @@ def test_study_smoke_tri3_oc() -> None:
 
 def test_study_smoke_tet4_mma() -> None:
     """Full ``Study`` smoke run on the 2-tet-refined tet4 box, MMA, 15 iterations."""
-    mesh = _tet4_box(2, 2, 2)
-    mat = Material(E=1.0, nu=0.3, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
+    mesh = tet4_box(2, 2, 2)
     tip = Box((2.0, 0.0, 0.0), (2.0, 2.0, 2.0), tol=1e-9)
     model = UnstructuredElasticity(
-        mesh, mat, supports=[(left, "all")], loads=[PointLoad(tip, (0.0, 0.0, -1.0))]
+        mesh,
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_3D, "all")],
+        loads=[PointLoad(tip, (0.0, 0.0, -1.0))],
     )
     problem = Problem(
         model,
