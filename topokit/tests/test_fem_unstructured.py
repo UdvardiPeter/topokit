@@ -551,49 +551,38 @@ def test_tet10_closer_than_tet4_at_equal_dof_budget() -> None:
     assert abs(tet10_tip - reference) < abs(tet4_tip - reference)
 
 
-def test_study_smoke_tri3_oc() -> None:
-    """Full ``Study`` smoke run on a tri3 cantilever."""
-    nx, ny = 8, 4
-    mesh = tri3_grid(nx, ny)
-    tip = Box((float(nx), 0.0), (float(nx), float(ny)), tol=1e-9)
-    model = UnstructuredElasticity(
-        mesh, UNIT_MATERIAL, supports=[(LEFT_EDGE_2D, "all")], loads=[PointLoad(tip, (0.0, -1.0))]
+def _far_face_cantilever(mesh: UnstructuredMesh) -> UnstructuredElasticity:
+    """Cantilever on ``mesh``: x=0 face fully fixed, unit downward tip-face load."""
+    hi = mesh.nodes.max(axis=0)
+    tip = Box((hi[0],) + (0.0,) * (mesh.dim - 1), tuple(hi), tol=1e-9)
+    down = (0.0, -1.0) if mesh.dim == 2 else (0.0, 0.0, -1.0)
+    left = LEFT_EDGE_2D if mesh.dim == 2 else LEFT_EDGE_3D
+    return UnstructuredElasticity(
+        mesh, UNIT_MATERIAL, supports=[(left, "all")], loads=[PointLoad(tip, down)]
     )
+
+
+@pytest.mark.parametrize(
+    "mesh,optimizer,max_iter",
+    [
+        pytest.param(tri3_grid(8, 4), OC(), 25, id="tri3_oc"),
+        pytest.param(tet4_box(2, 2, 2), MMA(), 15, id="tet4_mma"),
+    ],
+)
+def test_study_smoke_on_a_non_grid_mesh(
+    mesh: UnstructuredMesh, optimizer: OC | MMA, max_iter: int
+) -> None:
+    """A full `Study` run drives both optimizers over a non-grid mesh end to end."""
     problem = Problem(
-        model,
+        _far_face_cantilever(mesh),
         DensityFilter(radius=1.5) | SIMP(p=3.0),
         objective=Compliance(),
         constraints=[Volume() <= 0.5],
-        optimizer=OC(),
+        optimizer=optimizer,
     )
-    result = Study(problem, schedule=Schedule.single(max_iter=25, tol=1e-3)).run()
+    result = Study(problem, schedule=Schedule.single(max_iter=max_iter, tol=1e-3)).run()
 
     assert result.objective < result.history["objective"][0]
     assert abs(result.history["volume"][-1] - 0.5) < 0.01
-    assert result.converged or result.iterations == 25
-    assert (result.design.values >= 0.0).all() and (result.design.values <= 1.0).all()
-
-
-def test_study_smoke_tet4_mma() -> None:
-    """Full ``Study`` smoke run on the 2-tet-refined tet4 box, MMA, 15 iterations."""
-    mesh = tet4_box(2, 2, 2)
-    tip = Box((2.0, 0.0, 0.0), (2.0, 2.0, 2.0), tol=1e-9)
-    model = UnstructuredElasticity(
-        mesh,
-        UNIT_MATERIAL,
-        supports=[(LEFT_EDGE_3D, "all")],
-        loads=[PointLoad(tip, (0.0, 0.0, -1.0))],
-    )
-    problem = Problem(
-        model,
-        DensityFilter(radius=1.5) | SIMP(p=3.0),
-        objective=Compliance(),
-        constraints=[Volume() <= 0.5],
-        optimizer=MMA(),
-    )
-    result = Study(problem, schedule=Schedule.single(max_iter=15, tol=1e-3)).run()
-
-    assert result.objective < result.history["objective"][0]
-    assert abs(result.history["volume"][-1] - 0.5) < 0.01
-    assert result.converged or result.iterations == 15
+    assert result.converged or result.iterations == max_iter
     assert (result.design.values >= 0.0).all() and (result.design.values <= 1.0).all()

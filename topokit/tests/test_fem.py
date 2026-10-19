@@ -204,25 +204,29 @@ def test_uniaxial_patch_3d_exact() -> None:
     np.testing.assert_allclose(tip, sigma * 2.0 / e, rtol=1e-9)
 
 
-def test_plane_strain_stiffening_ratio() -> None:
-    nu = 0.3
+def _bar_2d(mode: str = "plane_stress", solid: np.ndarray | None = None) -> LinearElasticity:
+    """The 2D uniaxial bar: 4x2 unit grid, x-roller on x=0, corner y-pin.
 
+    E=100 and a traction of 10 on the x=4 edge, so the exact answer is
+    sigma_xx = 10 everywhere and a tip u_x of 10 * 4 / 100.
+    """
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
+    return LinearElasticity(
+        g,
+        Material(E=100.0, nu=0.3, rho=1.0),
+        supports=[(LEFT_EDGE_2D, "x"), (NearPoint((0.0, 0.0)), "y")],
+        loads=[SurfaceTraction(Box((4.0, 0.0), (4.0, 2.0), tol=1e-9), traction=(10.0, 0.0))],
+        mode=mode,
+    )
+
+
+def test_plane_strain_stiffening_ratio() -> None:
     def tip_disp(mode: str) -> float:
-        g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
-        mat = Material(E=100.0, nu=nu, rho=1.0)
-        right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
-        m = LinearElasticity(
-            g,
-            mat,
-            supports=[(LEFT_EDGE_2D, "x"), (NearPoint((0.0, 0.0)), "y")],
-            loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
-            mode=mode,
-        )
-        u = solve(m, ones(g))
-        return float(m.displacement_field(u).values[:, 0].max())
+        m = _bar_2d(mode)
+        return float(m.displacement_field(solve(m)).values[:, 0].max())
 
     ratio = tip_disp("plane_strain") / tip_disp("plane_stress")
-    assert ratio == pytest.approx(1.0 - nu**2, rel=1e-9)
+    assert ratio == pytest.approx(1.0 - 0.3**2, rel=1e-9)  # nu = 0.3
 
 
 def test_cantilever_matches_timoshenko() -> None:
@@ -338,33 +342,14 @@ def test_uniaxial_patch_anisotropic_offset_grid_exact() -> None:
 def test_uniaxial_patch_with_solid_region_exact() -> None:
     solid = np.zeros(8, dtype=bool)
     solid[[1, 5]] = True  # one full column of solid elements
-    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
-    mat = Material(E=100.0, nu=0.3, rho=1.0)
-    right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
-    m = LinearElasticity(
-        g,
-        mat,
-        supports=[(LEFT_EDGE_2D, "x"), (NearPoint((0.0, 0.0)), "y")],
-        loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
-    )
-    u = solve(m, ones(g))
-    np.testing.assert_allclose(m.element_stress(u, ones(g)), 10.0, rtol=1e-9)
+    m = _bar_2d(solid=solid)
+    np.testing.assert_allclose(m.element_stress(solve(m), ones(m.mesh)), 10.0, rtol=1e-9)
 
 
 def test_plane_strain_von_mises_includes_sigma_z() -> None:
-    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
-    mat = Material(E=100.0, nu=0.3, rho=1.0)
-    right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
-    m = LinearElasticity(
-        g,
-        mat,
-        supports=[(LEFT_EDGE_2D, "x"), (NearPoint((0.0, 0.0)), "y")],
-        loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
-        mode="plane_strain",
-    )
-    u = solve(m, ones(g))
+    m = _bar_2d("plane_strain")
     # sigma_z = nu*(sx+sy) = 3, vm = sqrt(0.5*((10)^2 + 3^2 + 7^2)) = sqrt(79)
-    np.testing.assert_allclose(m.element_stress(u, ones(g)), np.sqrt(79.0), rtol=1e-9)
+    np.testing.assert_allclose(m.element_stress(solve(m), ones(m.mesh)), np.sqrt(79.0), rtol=1e-9)
 
 
 def test_energy_consistency_in_simp_regime() -> None:
