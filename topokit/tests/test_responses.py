@@ -20,32 +20,46 @@ from topokit.responses import (
     Volume,
     von_mises,
 )
-from topokit.selection import Box, NearPoint, PlaneSlab
+from topokit.selection import Box, NearPoint
 from topokit.solvers import Direct
 from topokit.testing import assert_gradient_matches
 
 
-def _cantilever(
-    shape: tuple[int, ...] = (12, 4), size: tuple[float, ...] = (12.0, 4.0), **mesh_kw: Any
-) -> tuple[StructuredGrid, LinearElasticity]:
-    g = StructuredGrid.box(size=size, shape=shape, **mesh_kw)
-    left = PlaneSlab(point=(0.0,) * g.dim, normal=(1.0,) + (0.0,) * (g.dim - 1), tol=1e-9)
-    tip = Box((size[0], 0.0), (size[0], size[1]), tol=1e-9)
-    model = LinearElasticity(
+def _model(g: StructuredGrid) -> LinearElasticity:
+    """Cantilever on ``g``: x=0 edge fully fixed, unit downward load on the far edge."""
+    x_max, y_max = g.shape[0] * g.spacing[0], g.shape[1] * g.spacing[1]
+    tip = Box((x_max, 0.0), (x_max, y_max), tol=1e-9)
+    return LinearElasticity(
         g,
         Material(E=1000.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(tip, (0.0, -1.0))],
     )
-    return g, model
 
 
-def _solution(model: LinearElasticity, g: StructuredGrid, chain: Any, x: np.ndarray) -> Solution:
+def _cantilever(shape: tuple[int, int] = (12, 4)) -> tuple[StructuredGrid, LinearElasticity]:
+    g = StructuredGrid(shape=shape, spacing=(1.0, 1.0))
+    return g, _model(g)
+
+
+def _solution(
+    model: LinearElasticity | None, g: StructuredGrid, chain: Any, x: np.ndarray
+) -> Solution:
+    """Solved state at ``x``; ``model=None`` gives a density-only `Solution`.
+
+    The density-basis responses (Volume, and the constraints over it) read
+    only the mesh and the density, so they need no solve -- and two of the FD
+    checks here are on a mesh with no model at all.
+    """
     scale = chain.apply(x)
     rho = chain.physical_density(x)
+    if model is None:
+        return Solution(
+            model=None, mesh=g, displacements=np.zeros((1, 1)), interpolated=scale, density=rho
+        )
     solver = Direct()
     solver.prepare(model.assemble(scale))
-    u = np.atleast_2d(np.asarray(solver.solve(model.loads()))).reshape(model.n_dof, -1)
+    u = np.asarray(solver.solve(model.loads())).reshape(model.n_dof, -1)
     return Solution(model=model, mesh=g, displacements=u, interpolated=scale, density=rho)
 
 
@@ -89,7 +103,7 @@ def test_compliance_multi_load_weighted() -> None:
 
 
 def test_compliance_weight_count_validated() -> None:
-    g, model = _cantilever(shape=(4, 2), size=(4.0, 2.0))
+    g, model = _cantilever(shape=(4, 2))
     chain = SIMP().bind(g)
     sol = _solution(model, g, chain, np.full(chain.n_vars, 0.5))
     with pytest.raises(ResponseError, match="weights"):
@@ -104,30 +118,26 @@ def test_volume_value_and_region() -> None:
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid, void=void)
     chain = SIMP().bind(g)
     x = np.full(chain.n_vars, 0.5)
-    sol = _solution_no_solve(g, chain, x)
+    sol = _solution(None, g, chain, x)
     # design region: 6 design elements at rho=0.5 -> fraction 0.5
     assert Volume(region="design").value(sol) == pytest.approx(0.5)
     # all region: (6*0.5 + 1 solid) / 8 = 4/8 = 0.5; void contributes 0
     assert Volume(region="all").value(sol) == pytest.approx((6 * 0.5 + 1.0) / 8.0)
 
 
-def _solution_no_solve(g: StructuredGrid, chain: Any, x: np.ndarray) -> Solution:
-    return Solution.for_density(g, chain.physical_density(x))
-
-
 def test_volume_gradient_is_constant_fraction() -> None:
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 2.0))  # v_e = 2.0
     chain = SIMP().bind(g)
-    sol = _solution_no_solve(g, chain, np.full(chain.n_vars, 0.5))
+    sol = _solution(None, g, chain, np.full(chain.n_vars, 0.5))
     grad = Volume().grad_field(sol)
     # dV/d rho_e = v_e / sum(v_design) = 2 / 16 = 0.125, equal for all design
     np.testing.assert_allclose(grad, 1.0 / 8.0)
 
 
 def test_constraint_normalization() -> None:
-    g, _model = _cantilever(shape=(4, 2), size=(4.0, 2.0))
+    g, _model = _cantilever(shape=(4, 2))
     chain = SIMP().bind(g)
-    sol = _solution_no_solve(g, chain, np.full(chain.n_vars, 0.6))
+    sol = _solution(None, g, chain, np.full(chain.n_vars, 0.6))
     c = Volume() <= 0.3
     assert isinstance(c, Constraint)
     # V = 0.6, bound 0.3 -> g = 0.6/0.3 - 1 = 1.0
@@ -159,7 +169,7 @@ def test_von_mises_field() -> None:
 def test_responses_registry_fd_meta() -> None:
     from topokit.registry import registry
 
-    g, model = _cantilever(shape=(6, 4), size=(6.0, 4.0))
+    g, model = _cantilever(shape=(6, 4))
     chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
     rng = np.random.default_rng(3)
     x = rng.uniform(0.3, 0.9, size=chain.n_vars)
@@ -220,38 +230,11 @@ def test_volume_empty_region_raises_for_the_value_and_the_gradient() -> None:
 
 
 def test_constraint_zero_bound() -> None:
-    g, _model = _cantilever(shape=(4, 2), size=(4.0, 2.0))
+    g, _model = _cantilever(shape=(4, 2))
     chain = SIMP().bind(g)
-    sol = _solution_no_solve(g, chain, np.full(chain.n_vars, 0.6))
+    sol = _solution(None, g, chain, np.full(chain.n_vars, 0.6))
     c = Volume() <= 0.0  # degenerate but must not divide by zero
     assert c.value(sol) == pytest.approx(0.6)  # unnormalized: g = value
-
-
-def _model_masked(g: StructuredGrid) -> LinearElasticity:
-    x_max = g.shape[0] * g.spacing[0]
-    y_max = g.shape[1] * g.spacing[1]
-    tip = Box((x_max, 0.0), (x_max, y_max), tol=1e-9)
-    return LinearElasticity(
-        g,
-        Material(E=1000.0, nu=0.3, rho=1.0),
-        supports=[(LEFT_EDGE_2D, "all")],
-        loads=[PointLoad(tip, (0.0, -1.0))],
-    )
-
-
-def _sol_masked(
-    model: LinearElasticity | None, g: StructuredGrid, chain: Any, x: np.ndarray
-) -> Solution:
-    scale = chain.apply(x)
-    rho = chain.physical_density(x)
-    if model is None:
-        return Solution(
-            model=None, mesh=g, displacements=np.zeros((1, 1)), interpolated=scale, density=rho
-        )
-    solver = Direct()
-    solver.prepare(model.assemble(scale))
-    u = np.asarray(solver.solve(model.loads())).reshape(model.n_dof, -1)
-    return Solution(model=model, mesh=g, displacements=u, interpolated=scale, density=rho)
 
 
 def test_compliance_gradient_fd_with_solid_and_void() -> None:
@@ -260,16 +243,14 @@ def test_compliance_gradient_fd_with_solid_and_void() -> None:
     void = np.zeros(24 * 12, dtype=bool)
     void[-3:] = True
     g = StructuredGrid(shape=(24, 12), spacing=(1.0, 1.0), solid=solid, void=void)
-    model = _model_masked(g)
+    model = _model(g)
     chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
     rng = np.random.default_rng(1)
     x = rng.uniform(0.3, 0.9, chain.n_vars)
     comp = Compliance()
     assert_gradient_matches(
-        lambda xx: comp.value(_sol_masked(model, g, chain, xx)),
-        lambda xx: np.asarray(
-            chain.pullback(xx, comp.grad_field(_sol_masked(model, g, chain, xx)))
-        ),
+        lambda xx: comp.value(_solution(model, g, chain, xx)),
+        lambda xx: np.asarray(chain.pullback(xx, comp.grad_field(_solution(model, g, chain, xx)))),
         x,
         rtol=1e-5,
     )
@@ -284,9 +265,9 @@ def test_volume_active_region_gradient_with_solid() -> None:
     x = rng.uniform(0.3, 0.9, chain.n_vars)
     vol = Volume(region="active")
     assert_gradient_matches(
-        lambda xx: vol.value(_sol_masked(None, g, chain, xx)),
+        lambda xx: vol.value(_solution(None, g, chain, xx)),
         lambda xx: np.asarray(
-            chain.pullback_density(xx, vol.grad_field(_sol_masked(None, g, chain, xx)))
+            chain.pullback_density(xx, vol.grad_field(_solution(None, g, chain, xx)))
         ),
         x,
         rtol=1e-5,
