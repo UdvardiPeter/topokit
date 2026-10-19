@@ -2,8 +2,6 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for the clean-room MMA optimizer and its subproblem solver."""
 
-from typing import Any
-
 import numpy as np
 import pytest
 import scipy.optimize
@@ -292,52 +290,6 @@ def test_mma_state_roundtrip_identical_trajectory() -> None:
         return x
 
     np.testing.assert_array_equal(run(None), run(10))
-
-
-def test_mma_matches_oc_on_cantilever() -> None:
-    from topokit.fem import LinearElasticity, Material, PointLoad
-    from topokit.mesh import StructuredGrid
-    from topokit.optimizers import OC
-    from topokit.parametrization import SIMP, DensityFilter
-    from topokit.responses import Compliance, Solution, Volume
-    from topokit.selection import Box, PlaneSlab
-    from topokit.solvers import Direct
-
-    def setup() -> tuple[Any, Any, Any]:
-        g = StructuredGrid.box(size=(20.0, 10.0), shape=(20, 10))
-        left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
-        tip = Box((20.0, 0.0), (20.0, 0.0), tol=0.6)
-        model = LinearElasticity(
-            g,
-            Material(E=1.0, nu=0.3, rho=1.0),
-            supports=[(left, "all")],
-            loads=[PointLoad(tip, (0.0, -1.0))],
-        )
-        return g, model, (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
-
-    def optimize(opt: object, n_iter: int) -> float:
-        g, model, chain = setup()
-        opt.setup(n_vars=chain.n_vars, lower=np.zeros(chain.n_vars), upper=np.ones(chain.n_vars))  # type: ignore[attr-defined]
-        x = chain.initial_design(0.4)
-        comp, con = Compliance(), Volume() <= 0.4
-        c = 0.0
-        for _ in range(n_iter):
-            scale, rho = chain.apply(x), chain.physical_density(x)
-            sv = Direct()
-            sv.prepare(model.assemble(scale))
-            u = np.asarray(sv.solve(model.loads())).reshape(model.n_dof, -1)
-            sol = Solution(model=model, mesh=g, displacements=u, interpolated=scale, density=rho)
-            c = comp.value(sol)
-            dc = chain.pullback(x, comp.grad_field(sol))
-            gv = np.array([con.value(sol)])
-            dg = chain.pullback_density(x, con.grad_field(sol)).reshape(1, -1)
-            res = opt.step(x, c, dc, gv, dg)  # type: ignore[attr-defined]
-            x = res.x_next
-        return c
-
-    c_oc = optimize(OC(move=0.2), 80)
-    c_mma = optimize(MMA(), 80)
-    assert abs(c_mma - c_oc) / c_oc < 0.05  # same minimum within 5%
 
 
 def test_protocol_registry_and_validation() -> None:

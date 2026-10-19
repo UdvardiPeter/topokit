@@ -129,29 +129,21 @@ def test_tri3_strain_row_order_matches_d_matrix() -> None:
     np.testing.assert_allclose(b @ u, [exx, eyy, gxy], atol=1e-9)
 
 
-def test_tet4_strain_row_order_matches_d_matrix() -> None:
-    """B @ u for a linear field pins the (xx, yy, zz, xy, yz, zx) row order."""
-    nodes, elements, _dim = _GEOMETRY["tet4"]
+@pytest.mark.parametrize("kind", ("tet4", "tet10"))
+def test_3d_strain_row_order_matches_d_matrix(kind: str) -> None:
+    """B @ u for a linear field pins the (xx, yy, zz, xy, yz, zx) row order.
+
+    A linear field is exact for tet10 as well as tet4, so one body serves
+    both; only the kind string differed between the two copies.
+    """
+    nodes, elements, _dim = _GEOMETRY[kind]
     exx, eyy, ezz, gxy, gyz, gzx = 1.0, 2.0, 3.0, 4.0, 5.0, 6.0
     x, y, z = nodes[:, 0], nodes[:, 1], nodes[:, 2]
     ux = exx * x + 0.5 * gxy * y + 0.5 * gzx * z
     uy = eyy * y + 0.5 * gxy * x + 0.5 * gyz * z
     uz = ezz * z + 0.5 * gyz * y + 0.5 * gzx * x
     u = np.stack([ux, uy, uz], axis=-1).ravel()
-    b = centroid_b_stack("tet4", nodes, elements)[0]
-    np.testing.assert_allclose(b @ u, [exx, eyy, ezz, gxy, gyz, gzx], atol=1e-9)
-
-
-def test_tet10_strain_row_order_matches_d_matrix() -> None:
-    """Same row-order pin as tet4; a linear field is exact for tet10 too."""
-    nodes, elements, _dim = _GEOMETRY["tet10"]
-    exx, eyy, ezz, gxy, gyz, gzx = 1.0, 2.0, 3.0, 4.0, 5.0, 6.0
-    x, y, z = nodes[:, 0], nodes[:, 1], nodes[:, 2]
-    ux = exx * x + 0.5 * gxy * y + 0.5 * gzx * z
-    uy = eyy * y + 0.5 * gxy * x + 0.5 * gyz * z
-    uz = ezz * z + 0.5 * gyz * y + 0.5 * gzx * x
-    u = np.stack([ux, uy, uz], axis=-1).ravel()
-    b = centroid_b_stack("tet10", nodes, elements)[0]
+    b = centroid_b_stack(kind, nodes, elements)[0]
     np.testing.assert_allclose(b @ u, [exx, eyy, ezz, gxy, gyz, gzx], atol=1e-9)
 
 

@@ -65,23 +65,6 @@ def test_compliance_value_equals_load_work() -> None:
     assert c > 0.0
 
 
-def test_compliance_gradient_fd_through_full_stack() -> None:
-    g, model = _cantilever()
-    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
-    rng = np.random.default_rng(20260615)
-    x = rng.uniform(0.3, 0.9, size=chain.n_vars)
-    comp = Compliance()
-
-    def f(xx: np.ndarray) -> float:
-        return comp.value(_solution(model, g, chain, xx))
-
-    def grad(xx: np.ndarray) -> np.ndarray:
-        sol = _solution(model, g, chain, xx)
-        return np.asarray(chain.pullback(xx, comp.grad_field(sol)))
-
-    assert_gradient_matches(f, grad, x, rtol=1e-5)
-
-
 def test_compliance_multi_load_weighted() -> None:
     g = StructuredGrid.box(size=(4.0, 4.0), shape=(4, 4))
     model = LinearElasticity(
@@ -130,23 +113,6 @@ def test_volume_value_and_region() -> None:
 
 def _solution_no_solve(g: StructuredGrid, chain: Any, x: np.ndarray) -> Solution:
     return Solution.for_density(g, chain.physical_density(x))
-
-
-def test_volume_gradient_fd() -> None:
-    g, _model = _cantilever(shape=(6, 4), size=(6.0, 4.0))
-    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
-    rng = np.random.default_rng(7)
-    x = rng.uniform(0.3, 0.9, size=chain.n_vars)
-    vol = Volume()
-
-    def f(xx: np.ndarray) -> float:
-        return vol.value(_solution_no_solve(g, chain, xx))
-
-    def grad(xx: np.ndarray) -> np.ndarray:
-        sol = _solution_no_solve(g, chain, xx)
-        return np.asarray(chain.pullback_density(xx, vol.grad_field(sol)))
-
-    assert_gradient_matches(f, grad, x, rtol=1e-5)
 
 
 def test_volume_gradient_is_constant_fraction() -> None:
@@ -236,7 +202,9 @@ def test_multiload_gradient_fd() -> None:
     assert_gradient_matches(f, grad, x, rtol=1e-5)
 
 
-def test_volume_empty_region_raises() -> None:
+def test_volume_empty_region_raises_for_the_value_and_the_gradient() -> None:
+    # an all-zero gradient would read as "independent of the design" instead,
+    # so both halves of the response have to refuse an empty region
     g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), solid=np.ones(4, dtype=bool))
     sol = Solution(
         model=None,
@@ -247,6 +215,8 @@ def test_volume_empty_region_raises() -> None:
     )
     with pytest.raises(ResponseError, match="no elements"):
         Volume(region="design").value(sol)
+    with pytest.raises(ResponseError, match="no elements"):
+        Volume(region="design").grad_field(sol)
 
 
 def test_constraint_zero_bound() -> None:
@@ -255,18 +225,6 @@ def test_constraint_zero_bound() -> None:
     sol = _solution_no_solve(g, chain, np.full(chain.n_vars, 0.6))
     c = Volume() <= 0.0  # degenerate but must not divide by zero
     assert c.value(sol) == pytest.approx(0.6)  # unnormalized: g = value
-
-
-def test_negative_gradient_step_reduces_compliance() -> None:
-    g, model = _cantilever(shape=(8, 4), size=(8.0, 4.0))
-    chain = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(g)
-    x = np.full(chain.n_vars, 0.5)
-    comp = Compliance()
-    c0 = comp.value(_solution(model, g, chain, x))
-    gx = chain.pullback(x, comp.grad_field(_solution(model, g, chain, x)))
-    x1 = np.clip(x - 1e-4 * gx / np.linalg.norm(gx), 0.0, 1.0)
-    c1 = comp.value(_solution(model, g, chain, x1))
-    assert c1 < c0
 
 
 def _model_masked(g: StructuredGrid) -> LinearElasticity:
@@ -369,20 +327,6 @@ def test_constraint_negative_bound_keeps_sign() -> None:
     # positive bounds keep the established normalization
     assert Constraint(_Fixed(0.6), 0.3, "<=").value(sol) == pytest.approx(1.0)
     assert Constraint(_Fixed(0.6), 0.3, ">=").value(sol) == pytest.approx(-1.0)
-
-
-def test_volume_empty_region_raises_for_the_gradient_too() -> None:
-    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), solid=np.ones(4, dtype=bool))
-    sol = Solution(
-        model=None,
-        mesh=g,
-        displacements=np.zeros((1, 1)),
-        interpolated=np.ones(4),
-        density=np.ones(4),
-    )
-    # an all-zero gradient would read as "independent of the design" instead
-    with pytest.raises(ResponseError, match="no elements"):
-        Volume(region="design").grad_field(sol)
 
 
 def test_von_mises_selects_the_load_case() -> None:

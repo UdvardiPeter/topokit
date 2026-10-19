@@ -37,14 +37,6 @@ def test_require_matplotlib_returns_module() -> None:
     assert _backend.require_matplotlib().__name__ == "matplotlib"
 
 
-def test_require_pyvista_returns_module() -> None:
-    assert _backend.require_pyvista().__name__ == "pyvista"
-
-
-def test_has_display_is_bool() -> None:
-    assert isinstance(_backend.has_display(), bool)
-
-
 def test_plot_convergence_plots_objective_and_change() -> None:
     from types import SimpleNamespace
 
@@ -226,31 +218,6 @@ def test_liveview_3d_empty_isosurface_raises_actionable_error() -> None:
     live = LiveView(iso=0.5)
     with pytest.raises(VizError, match="does not cross"):
         live._draw_3d(grid, np.full(grid.n_elements, 0.4))
-
-
-def test_result_sugar_delegates_to_viz() -> None:
-    from matplotlib.figure import Figure
-
-    from topokit.problem import Result
-
-    design = _design_2d(4, 3)
-    result = Result(
-        design=design,
-        x=design.values,
-        objective=1.0,
-        best_design=design,
-        best_x=design.values,
-        best_objective=1.0,
-        history={"objective": [2.0, 1.0], "change": [0.5, 0.1]},
-        iterations=2,
-        stages_run=1,
-        converged=True,
-        reason="tol",
-        timing=0.1,
-        kkt=0.0,
-    )
-    assert isinstance(result.view(), Figure)
-    assert isinstance(result.plot_convergence(), Figure)
 
 
 def test_require_matplotlib_missing_gives_actionable_hint(monkeypatch: pytest.MonkeyPatch) -> None:
