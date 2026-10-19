@@ -17,10 +17,12 @@ from typing import Any, Protocol, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.exceptions import TopoKitError
+
 _F64 = npt.NDArray[np.float64]
 
 
-class OptimizerError(ValueError):
+class OptimizerError(TopoKitError, ValueError):
     """Invalid optimizer setup or input."""
 
 

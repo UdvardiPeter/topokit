@@ -87,6 +87,7 @@ USER_FACING = [
 # modules, so a new error type that nobody exported fails the suite.
 ERROR_MODULES = (
     "topokit.backend",
+    "topokit.exceptions",
     "topokit.fem",
     "topokit.fields",
     "topokit.mesh",
@@ -136,3 +137,27 @@ def test_importing_topokit_does_not_pull_in_the_viz_namespace() -> None:
         check=True,
     )
     assert probe.stdout.strip() == "False"
+
+
+def test_every_error_type_shares_the_base_and_keeps_its_builtin() -> None:
+    # TopoKitError is what lets a caller wrap a run in one except; the builtin
+    # bases are what keep `except ValueError` working for code written before it
+    builtins = {
+        topokit.KernelError: LookupError,
+        topokit.RegistryError: LookupError,
+        topokit.SolverError: RuntimeError,
+        topokit.GradientMismatchError: AssertionError,
+    }
+    for name in topokit.__all__:
+        obj = getattr(topokit, name)
+        if inspect.isclass(obj) and issubclass(obj, Exception) and obj is not topokit.TopoKitError:
+            assert issubclass(obj, topokit.TopoKitError), f"{name} is not a TopoKitError"
+            assert issubclass(obj, builtins.get(obj, ValueError)), f"{name} lost its builtin base"
+
+
+def test_viz_error_is_a_topokit_error_too() -> None:
+    # the one error type outside the top-level namespace still joins the family
+    from topokit.viz import VizError
+
+    assert issubclass(VizError, topokit.TopoKitError)
+    assert issubclass(VizError, ValueError)

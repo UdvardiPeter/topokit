@@ -39,6 +39,7 @@ from topokit.events import (
     StudyFinished,
     StudyStarted,
 )
+from topokit.exceptions import TopoKitError
 from topokit.fem import PhysicsModel
 from topokit.fields import DesignField
 from topokit.mesh import Mesh, StructuredGrid
@@ -54,7 +55,7 @@ if TYPE_CHECKING:  # the viz return types, for callers who type-check
 _F64 = npt.NDArray[np.float64]
 
 
-class ProblemError(ValueError):
+class ProblemError(TopoKitError, ValueError):
     """Invalid problem assembly or study configuration."""
 
 
