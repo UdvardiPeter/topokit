@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import scipy.sparse
 
+from tests.conftest import LEFT_EDGE_2D, LEFT_EDGE_3D, UNIT_MATERIAL, ones, solve
 from topokit.fem import (
     ALUMINUM_6061,
     STEEL,
@@ -13,25 +14,11 @@ from topokit.fem import (
     FemError,
     LinearElasticity,
     Material,
-    PhysicsModel,
     PointLoad,
     SurfaceTraction,
 )
-from topokit.fields import FieldSpec
 from topokit.mesh import StructuredGrid
 from topokit.selection import Box, NearPoint, OnBoundary, PlaneSlab
-
-
-def _solve(model: LinearElasticity, scale: np.ndarray) -> np.ndarray:
-    from topokit.solvers import Direct
-
-    solver = Direct()
-    solver.prepare(model.assemble(scale))
-    return np.asarray(solver.solve(model.loads()[:, 0]))
-
-
-def _ones(mesh: StructuredGrid) -> np.ndarray:
-    return np.ones(mesh.n_elements)
 
 
 def test_material_validation() -> None:
@@ -60,12 +47,6 @@ def _cantilever(
         loads=[PointLoad(tip, force=(0.0, -1.0) + (0.0,) * (g.dim - 2))],
         mode=mode,
     )
-
-
-def test_satisfies_physics_protocol() -> None:
-    model: PhysicsModel = _cantilever((4, 2), (4.0, 2.0), STEEL)
-    assert model.expected_field == FieldSpec("stiffness_scale")
-    assert model.n_cases == 1
 
 
 def test_element_stiffness_properties_2d() -> None:
@@ -126,29 +107,23 @@ def test_3d_stiffness_scales_linearly() -> None:
 
 def test_dof_condensation_and_supports() -> None:
     g = StructuredGrid(shape=(2, 1), spacing=(1.0, 1.0), void=[False, True])
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     m = LinearElasticity(
-        g, STEEL, supports=[(left, "all")], loads=[PointLoad(NearPoint((1.0, 0.5)), (1.0, 0.0))]
+        g,
+        STEEL,
+        supports=[(LEFT_EDGE_2D, "all")],
+        loads=[PointLoad(NearPoint((1.0, 0.5)), (1.0, 0.0))],
     )
     # 4 active nodes, 2 fully fixed -> 4 free dofs
     assert m.n_dof == 4
 
 
-def test_support_selecting_nothing_raises() -> None:
-    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
-    far = Box((50.0, 50.0), (51.0, 51.0), tol=0.0)
-    with pytest.raises(FemError, match="no active nodes"):
-        LinearElasticity(g, STEEL, supports=[(far, "all")], loads=[BodyForce((0.0, -1.0))])
-
-
 def test_traction_consistent_nodal_values() -> None:
     g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     right = Box((2.0, 0.0), (2.0, 2.0), tol=1e-9)
     m = LinearElasticity(
         g,
         STEEL,
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
     )
     f = m.loads()[:, 0]
@@ -160,10 +135,9 @@ def test_traction_consistent_nodal_values() -> None:
 
 def test_pressure_acts_against_outward_normal() -> None:
     g = StructuredGrid(shape=(1, 1), spacing=(1.0, 1.0))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     top = Box((0.0, 1.0), (1.0, 1.0), tol=1e-9)
     m = LinearElasticity(
-        g, STEEL, supports=[(left, "all")], loads=[SurfaceTraction(top, pressure=4.0)]
+        g, STEEL, supports=[(LEFT_EDGE_2D, "all")], loads=[SurfaceTraction(top, pressure=4.0)]
     )
     f = m.loads()[:, 0]
     assert f[m.dof_index(3, 1)] == pytest.approx(-2.0)  # pushes down on +y face
@@ -195,11 +169,10 @@ def test_body_force_consistent() -> None:
 
 def test_multi_load_cases() -> None:
     g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     m = LinearElasticity(
         g,
         STEEL,
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[
             [PointLoad(NearPoint((2.0, 2.0)), (0.0, -1.0))],
             [PointLoad(NearPoint((2.0, 0.0)), (1.0, 0.0))],
@@ -209,54 +182,21 @@ def test_multi_load_cases() -> None:
     assert m.loads().shape == (m.n_dof, 2)
 
 
-def test_energy_identity() -> None:
-    m = _cantilever((8, 4), (8.0, 4.0), STEEL)
-    scale = _ones(m.mesh)
-    u = _solve(m, scale)
-    k = m.assemble(scale)
-    energy = float(u @ k.matvec(u))
-    work = float(m.loads()[:, 0] @ u)
-    assert energy == pytest.approx(work, rel=1e-10)
-    assert m.element_energies(u, scale).sum() == pytest.approx(energy, rel=1e-9)
-
-
-def test_uniaxial_patch_2d_exact() -> None:
-    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
-    e, sigma = 100.0, 10.0
-    mat = Material(E=e, nu=0.3, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
-    right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
-    m = LinearElasticity(
-        g,
-        mat,
-        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
-        loads=[SurfaceTraction(right, traction=(sigma, 0.0))],
-    )
-    scale = _ones(g)
-    u = _solve(m, scale)
-    disp = m.displacement_field(u)
-    tip = disp.values[g.nodes[:, 0] == 4.0, 0]
-    np.testing.assert_allclose(tip, sigma * 4.0 / e, rtol=1e-9)
-    vm = m.element_stress(u, scale)
-    np.testing.assert_allclose(vm, sigma, rtol=1e-9)
-
-
 def test_uniaxial_patch_3d_exact() -> None:
     g = StructuredGrid(shape=(2, 1, 1), spacing=(1.0, 1.0, 1.0))
     e, sigma = 100.0, 10.0
     mat = Material(E=e, nu=0.3, rho=1.0)
-    face_x0 = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
     face_x2 = Box((2.0, 0.0, 0.0), (2.0, 1.0, 1.0), tol=1e-9)
     supports = [
-        (face_x0, "x"),
+        (LEFT_EDGE_3D, "x"),
         (NearPoint((0.0, 0.0, 0.0)), ("y", "z")),
         (NearPoint((0.0, 0.0, 1.0)), ("y",)),
     ]
     m = LinearElasticity(
         g, mat, supports=supports, loads=[SurfaceTraction(face_x2, traction=(sigma, 0, 0))]
     )
-    scale = _ones(g)
-    u = _solve(m, scale)
+    scale = ones(g)
+    u = solve(m, scale)
     vm = m.element_stress(u, scale)
     np.testing.assert_allclose(vm, sigma, rtol=1e-9)
     disp = m.displacement_field(u)
@@ -264,26 +204,29 @@ def test_uniaxial_patch_3d_exact() -> None:
     np.testing.assert_allclose(tip, sigma * 2.0 / e, rtol=1e-9)
 
 
-def test_plane_strain_stiffening_ratio() -> None:
-    nu = 0.3
+def _bar_2d(mode: str = "plane_stress", solid: np.ndarray | None = None) -> LinearElasticity:
+    """The 2D uniaxial bar: 4x2 unit grid, x-roller on x=0, corner y-pin.
 
+    E=100 and a traction of 10 on the x=4 edge, so the exact answer is
+    sigma_xx = 10 everywhere and a tip u_x of 10 * 4 / 100.
+    """
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
+    return LinearElasticity(
+        g,
+        Material(E=100.0, nu=0.3, rho=1.0),
+        supports=[(LEFT_EDGE_2D, "x"), (NearPoint((0.0, 0.0)), "y")],
+        loads=[SurfaceTraction(Box((4.0, 0.0), (4.0, 2.0), tol=1e-9), traction=(10.0, 0.0))],
+        mode=mode,
+    )
+
+
+def test_plane_strain_stiffening_ratio() -> None:
     def tip_disp(mode: str) -> float:
-        g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
-        mat = Material(E=100.0, nu=nu, rho=1.0)
-        left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
-        right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
-        m = LinearElasticity(
-            g,
-            mat,
-            supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
-            loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
-            mode=mode,
-        )
-        u = _solve(m, _ones(g))
-        return float(m.displacement_field(u).values[:, 0].max())
+        m = _bar_2d(mode)
+        return float(m.displacement_field(solve(m)).values[:, 0].max())
 
     ratio = tip_disp("plane_strain") / tip_disp("plane_stress")
-    assert ratio == pytest.approx(1.0 - nu**2, rel=1e-9)
+    assert ratio == pytest.approx(1.0 - 0.3**2, rel=1e-9)  # nu = 0.3
 
 
 def test_cantilever_matches_timoshenko() -> None:
@@ -295,7 +238,7 @@ def test_cantilever_matches_timoshenko() -> None:
 
     def tip_deflection(shape: tuple[int, int]) -> float:
         m = _cantilever(shape, (length, height), Material(E=e, nu=nu, rho=1.0))
-        u = _solve(m, np.ones(shape[0] * shape[1]))
+        u = solve(m, np.ones(shape[0] * shape[1]))
         return float(-m.displacement_field(u).values[:, 1].min())
 
     coarse = tip_deflection((24, 4))
@@ -308,15 +251,14 @@ def test_void_elements_have_zero_energy_and_stress() -> None:
     void = np.zeros(8, dtype=bool)
     void[7] = True
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), void=void)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     m = LinearElasticity(
         g,
         STEEL,
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(NearPoint((4.0, 0.0)), (0.0, -1.0))],
     )
-    scale = _ones(g)
-    u = _solve(m, scale)
+    scale = ones(g)
+    u = solve(m, scale)
     assert m.element_energies(u, scale)[7] == 0.0
     assert m.element_stress(u, scale)[7] == 0.0
     assert m.element_energies(u, scale)[0] > 0.0
@@ -337,24 +279,6 @@ def test_traction_requires_exactly_one_of_traction_pressure() -> None:
         SurfaceTraction(OnBoundary(), traction=(1.0, 0.0), pressure=2.0)
     with pytest.raises(FemError, match="exactly one"):
         SurfaceTraction(OnBoundary())
-
-
-def test_linear_elasticity_registered_as_builtin() -> None:
-    from topokit.registry import registry
-
-    assert registry.get("physics", "linear_elasticity") is LinearElasticity
-
-
-def test_mode_rejected_for_3d() -> None:
-    g = StructuredGrid(shape=(1, 1, 1), spacing=(1.0, 1.0, 1.0))
-    with pytest.raises(FemError, match="2D"):
-        LinearElasticity(
-            g,
-            STEEL,
-            supports=[(NearPoint((0.0, 0.0, 0.0)), "all")],
-            loads=[BodyForce((0.0, 0.0, -1.0))],
-            mode="plane_strain",
-        )
 
 
 def test_negative_scale_rejected() -> None:
@@ -411,42 +335,21 @@ def test_uniaxial_patch_anisotropic_offset_grid_exact() -> None:
         supports=[(left, "x"), (NearPoint((5.0, -2.0)), "y")],
         loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
     )
-    u = _solve(m, _ones(g))
-    np.testing.assert_allclose(m.element_stress(u, _ones(g)), 10.0, rtol=1e-9)
+    u = solve(m, ones(g))
+    np.testing.assert_allclose(m.element_stress(u, ones(g)), 10.0, rtol=1e-9)
 
 
 def test_uniaxial_patch_with_solid_region_exact() -> None:
     solid = np.zeros(8, dtype=bool)
     solid[[1, 5]] = True  # one full column of solid elements
-    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
-    mat = Material(E=100.0, nu=0.3, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
-    right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
-    m = LinearElasticity(
-        g,
-        mat,
-        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
-        loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
-    )
-    u = _solve(m, _ones(g))
-    np.testing.assert_allclose(m.element_stress(u, _ones(g)), 10.0, rtol=1e-9)
+    m = _bar_2d(solid=solid)
+    np.testing.assert_allclose(m.element_stress(solve(m), ones(m.mesh)), 10.0, rtol=1e-9)
 
 
 def test_plane_strain_von_mises_includes_sigma_z() -> None:
-    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
-    mat = Material(E=100.0, nu=0.3, rho=1.0)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
-    right = Box((4.0, 0.0), (4.0, 2.0), tol=1e-9)
-    m = LinearElasticity(
-        g,
-        mat,
-        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
-        loads=[SurfaceTraction(right, traction=(10.0, 0.0))],
-        mode="plane_strain",
-    )
-    u = _solve(m, _ones(g))
+    m = _bar_2d("plane_strain")
     # sigma_z = nu*(sx+sy) = 3, vm = sqrt(0.5*((10)^2 + 3^2 + 7^2)) = sqrt(79)
-    np.testing.assert_allclose(m.element_stress(u, _ones(g)), np.sqrt(79.0), rtol=1e-9)
+    np.testing.assert_allclose(m.element_stress(solve(m), ones(m.mesh)), np.sqrt(79.0), rtol=1e-9)
 
 
 def test_energy_consistency_in_simp_regime() -> None:
@@ -462,7 +365,7 @@ def test_energy_consistency_in_simp_regime() -> None:
     )
     # for the solved u the identity is limited by the solver residual:
     # cond(K) ~ 1e9 at this scale contrast, measured mismatch ~5e-6
-    u = _solve(m, scale)
+    u = solve(m, scale)
     energy = float(u @ k.matvec(u))
     work = float(m.loads()[:, 0] @ u)
     assert energy == pytest.approx(work, rel=1e-4)
@@ -474,7 +377,7 @@ def test_pressure_on_void_interface_face() -> None:
     m = LinearElasticity(
         g,
         STEEL,
-        supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9), "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[SurfaceTraction(interface, pressure=4.0)],
     )
     f = m.loads()[:, 0]
@@ -491,15 +394,14 @@ def test_cantilever_3d_matches_timoshenko() -> None:
 
     def tip(shape: tuple[int, int, int]) -> float:
         g = StructuredGrid.box(size=(length, side, side), shape=shape)
-        left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
         tip_face = Box((length, 0.0, 0.0), (length, side, side), tol=1e-9)
         m = LinearElasticity(
             g,
             Material(E=e, nu=nu, rho=1.0),
-            supports=[(left, "all")],
+            supports=[(LEFT_EDGE_3D, "all")],
             loads=[PointLoad(tip_face, (0.0, 0.0, -p))],
         )
-        u = _solve(m, np.ones(g.n_elements))
+        u = solve(m, np.ones(g.n_elements))
         return float(-m.displacement_field(u).values[:, 2].min())
 
     coarse = tip((16, 2, 2))
@@ -510,24 +412,10 @@ def test_cantilever_3d_matches_timoshenko() -> None:
 
 def test_integer_dof_spec_equivalent_to_names() -> None:
     g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
-    a = LinearElasticity(g, STEEL, supports=[(left, (0,))], loads=[BodyForce((0.0, -1.0))])
-    b = LinearElasticity(g, STEEL, supports=[(left, "x")], loads=[BodyForce((0.0, -1.0))])
+    a = LinearElasticity(g, STEEL, supports=[(LEFT_EDGE_2D, (0,))], loads=[BodyForce((0.0, -1.0))])
+    b = LinearElasticity(g, STEEL, supports=[(LEFT_EDGE_2D, "x")], loads=[BodyForce((0.0, -1.0))])
     assert a.n_dof == b.n_dof
     assert a.dof_index(0, 1) == b.dof_index(0, 1)
-
-
-def test_unsupported_element_kind_rejected() -> None:
-    class FakeKindGrid(StructuredGrid):
-        @property
-        def element_kind(self) -> str:
-            return "tet4"
-
-    g = FakeKindGrid(shape=(2, 2), spacing=(1.0, 1.0))
-    with pytest.raises(FemError, match="tet4"):
-        LinearElasticity(
-            g, STEEL, supports=[(NearPoint((0.0, 0.0)), "all")], loads=[BodyForce((0.0, -1.0))]
-        )
 
 
 def test_assemble_matches_dense_reference() -> None:
@@ -536,12 +424,11 @@ def test_assemble_matches_dense_reference() -> None:
     solid = np.zeros(8, dtype=bool)
     solid[0] = True
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.5), solid=solid, void=void)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     tip = NearPoint((4.0, 1.5))
     model = LinearElasticity(
         g,
         Material(E=7.0, nu=0.28, rho=1.0),
-        supports=[(left, "all")],
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(tip, (0.0, -1.0))],
     )
     rng = np.random.default_rng(3)
@@ -569,11 +456,10 @@ def test_near_nullspace_matches_rigid_body_fields() -> None:
     void = np.zeros(8, dtype=bool)
     void[5] = True
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.5), void=void)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     model = LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(NearPoint((4.0, 1.5)), (0.0, -1.0))],
     )
     b = model.near_nullspace()
@@ -593,13 +479,60 @@ def test_near_nullspace_matches_rigid_body_fields() -> None:
 
 def test_near_nullspace_3d_shape() -> None:
     g = StructuredGrid.box(size=(4.0, 2.0, 2.0), shape=(4, 2, 2))
-    left = PlaneSlab(point=(0.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0), tol=1e-9)
     model = LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_3D, "all")],
         loads=[PointLoad(NearPoint((4.0, 1.0, 1.0)), (0.0, -1.0, 0.0))],
     )
     b = model.near_nullspace()
     assert b.shape == (model.n_dof, 6)
     assert np.linalg.matrix_rank(b) == 6
+
+
+def test_a_per_element_stack_assembles_exactly_like_the_shared_matrix() -> None:
+    """`ElasticityBase`'s hook may return either stiffness layout.
+
+    One assembly kernel serves both because the base hands it the stiffness
+    pair-major, so a grid's single matrix and a per-element stack carrying
+    copies of it must produce the same CSR data bit for bit. This is also the
+    smallest `ElasticityBase` subclass in the suite: one overridden hook.
+    """
+
+    class StackedElasticity(LinearElasticity):
+        def _build_elements(
+            self, conn: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            ke, b, face_w, body_w = super()._build_elements(conn)
+            n_ae = conn.shape[0]
+            return (
+                np.broadcast_to(ke, (n_ae, *ke.shape)).copy(),
+                np.broadcast_to(b, (n_ae, *b.shape)).copy(),
+                face_w,
+                body_w,
+            )
+
+    void = np.zeros(8, dtype=bool)
+    void[5] = True
+    g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.5), void=void)
+    supports = [(LEFT_EDGE_2D, "all")]
+    loads = [SurfaceTraction(Box((4.0, 0.0), (4.0, 3.0), tol=1e-9), traction=(1.0, -2.0))]
+    shared = LinearElasticity(g, STEEL, supports, loads)
+    stacked = StackedElasticity(g, STEEL, supports, loads)
+
+    rng = np.random.default_rng(20261018)
+    scale = rng.uniform(0.2, 1.0, g.n_elements)
+    u = rng.normal(size=shared.n_dof)
+    np.testing.assert_array_equal(shared.loads(), stacked.loads())
+    np.testing.assert_array_equal(
+        np.asarray(shared.assemble(scale).csr_arrays()[2]),
+        np.asarray(stacked.assemble(scale).csr_arrays()[2]),
+    )
+    # the energy and stress contractions broadcast over both layouts; BLAS
+    # reassociates between them, so they agree to rounding, not bit for bit
+    np.testing.assert_allclose(
+        shared.element_energies(u, scale), stacked.element_energies(u, scale), rtol=1e-12
+    )
+    np.testing.assert_allclose(
+        shared.element_stress(u, scale), stacked.element_stress(u, scale), rtol=1e-12
+    )

@@ -24,7 +24,7 @@ nav:
       - Your first 2D part: tutorials/first-2d.md
       - Your first 3D part: tutorials/first-3d.md
       - Multiple load cases: tutorials/multi-load.md
-      - Symmetry, checkpoints, resume: tutorials/symmetry-checkpoint.md
+      - Checkpoints and resume: tutorials/checkpoint-resume.md
       - Visualization: tutorials/visualization.md
       - Unstructured meshes: tutorials/unstructured.md
   - Concepts:
@@ -39,6 +39,7 @@ nav:
       - Custom response: extend/custom-response.md
       - Custom optimizer: extend/custom-optimizer.md
       - Custom chain link: extend/custom-link.md
+      - Custom mesh: extend/custom-mesh.md
       - Custom physics: extend/custom-physics.md
       - Backends and kernels: extend/backends.md
   - Gallery:

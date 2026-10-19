@@ -4,7 +4,7 @@ Tier-3 reference regression for TopoKit: the 2D MBB beam and cantilever at
 60x20 and 150x50, plus a tri3 cantilever at 60x20, run with OC and MMA,
 validated against frozen reference fields.
 
-Run: `npx nx run benchmarks:test-regression`.
+Run: `uv run --directory benchmarks pytest -m regression -n auto`.
 
 ## What "matches the literature" means here
 
@@ -16,8 +16,8 @@ The reference designs *are* the 88-line method's designs: TopoKit's Q4
 plane-stress element stiffness (eigenvalues), modified SIMP (`E = Emin +
 x^p (E0 - Emin)`), compliance functional, and boundary conditions match the
 88-line (Andreassen et al. 2011) exactly; `OC` is the clean-room 88-line
-optimality-criteria update, validated against scipy on convex problems; and `RadialDensityFilter`
-reproduces the 88-line density filter (`ft = 2`). So a faithful single-stage
+optimality-criteria update, validated against scipy on convex problems; and `DensityFilter`'s
+radial kernel reproduces the 88-line density filter (`ft = 2`). So a faithful single-stage
 run reproduces the 88-line, and the frozen `.npz` pins that result against
 drift.
 
@@ -46,15 +46,15 @@ nodes, the split doubles the design variables, and its fixed diagonal biases
 the design. The gap and the tolerance derived from it are recorded in that
 test.
 
-The four unstructured references (`cantilever_tri_60x20_{oc,mma}`,
-`cantilever_tet4_16x8x8_oc`, `cantilever_tet10_10x5x5_oc`) were frozen on
-macOS arm64 — recorded in the files — not on the Linux platform CI runs on, so
-they spend part of the suite's cross-platform margin instead of leaving all of
-it for genuine numerical change. The tolerances are coarse enough to absorb
-that: the OC iteration is contractive, so a 1e-10 perturbation moves the final
-field by 1e-10 against a `1e-2` gate. The tri3 pair is validated
-cross-platform by the per-PR gate, the tet pair only by the nightly. Refreeze
-them on Linux at the next deliberate baseline reset.
+Every reference carrying a `platform` key — all nine OC references and
+`cantilever_tri_60x20_mma` — was frozen on macOS arm64, not on the Linux
+platform CI runs on, so they spend part of the suite's cross-platform margin
+instead of leaving all of it for genuine numerical change. The tolerances are
+coarse enough to absorb that: the OC iteration is contractive, so a 1e-10
+perturbation moves the final field by 1e-10 against a `1e-2` gate. The 2D
+cases are validated cross-platform by the per-PR gate, the 3D and tet cases
+only by the nightly. Refreeze them on Linux at the next deliberate baseline
+reset.
 
 ## Regenerating references
 
@@ -71,14 +71,14 @@ instead of reporting success over an unchanged tree.
 Each reference holds the frozen `density`, `compliance`, `volume` and
 `iterations`, plus the provenance to read them against: `element_kind`,
 `n_elements`, `optimizer`, `penal`, `max_iter`, `tol`, the `platform` it was
-frozen on and the `topokit` version. Only the unstructured references carry
-the provenance keys so far — the earlier baselines predate them and pick them
-up on their next regeneration.
+frozen on and the `topokit` version. All nine OC references and the tri3
+MMA one carry the keys; the five remaining MMA references predate them and
+pick them up on their next regeneration.
 
 ## Nightly full suite
 
-`test-regression-full` (nightly only, `pytest -m regression_full`) adds 3D
-correctness on top of the per-PR 2D gate:
+The nightly tier (`pytest -m regression_full -n auto`) adds 3D correctness on
+top of the per-PR 2D gate:
 
 - **3D cantilever** (`24x12x12`, OC) and **Michell** (`90x30`, OC + MMA) —
   frozen-reference regression with the same reference assertions as the 2D suite
@@ -90,8 +90,8 @@ correctness on top of the per-PR 2D gate:
   2.27x the hex `cantilever_3d_24x12x12` case's wall time, over the ~2x nightly
   runtime budget). Same frozen-reference assertions as the other nightly cases,
   no separate literature anchor.
-- **Robustness sweep** (`test_robustness.py`) — `volfrac x rmin x resolution`
-  over the 2D builders plus small 3D points, asserting *clean convergence*
+- **Robustness sweep** (`test_robustness.py`) — `volfrac x rmin` over the 2D
+  builders at `60x20` plus two small 3D points, asserting *clean convergence*
   (finite field in `[0, 1]`, volume on target, net objective progress, no
   blow-up) rather than frozen values.
 
@@ -103,12 +103,12 @@ drift — not a published 3D compliance number.
 
 ## Scaling study
 
-`bench` (local and manual, never cached) runs a scaling study — 3D cantilever at
-`20^3 / 40^3` plus the 2D `150x50` full run — recording per-iteration wall time,
-peak RSS, solver, and AMG CG iterations to `bench/latest.json` (gitignored;
-written by every run). `bench-check` runs the same study and gates the numbers
-against the committed `bench/baseline.json`; that is the target the nightly runs,
-and the only one it runs — see below.
+`uv run python scripts/bench.py` (local and manual) runs a scaling study — 3D
+cantilever at `20^3 / 40^3` plus the 2D `150x50` full run — recording
+per-iteration wall time, peak RSS, solver, and AMG CG iterations to
+`bench/latest.json` (gitignored; written by every run). `--check` runs the same
+study and gates the numbers against the committed `bench/baseline.json`; that is
+what the nightly runs, and the only benchmark command it runs — see below.
 
 `60^3` (~6.6 GB peak) is a **heavy** case: it is skipped by default so the study
 fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
@@ -117,7 +117,7 @@ fits a 7 GB CI runner, and is included only with `TOPOKIT_BENCH_HEAVY=1` (needs
 ## Performance baseline
 
 `bench/baseline.json` holds the committed reference numbers. The nightly workflow
-(`.github/workflows/nightly.yml`) runs `bench-check` on a daily cron against
+(`.github/workflows/nightly.yml`) runs `scripts/bench.py --check` on a daily cron against
 `main` and uploads the resulting `bench/latest.json` as the `bench-latest`
 artifact. It runs in a step of its own, after the test tiers rather than beside
 them, because its timings *are* the measurement and a 2-vCPU runner shared with
@@ -130,11 +130,15 @@ between runs; the tight gates ride the near-deterministic metrics. A case whose
 numbers describe a different problem, so comparing them proves nothing.
 
 Numbers are only comparable within one platform, so the check refuses to compare a
-baseline generated elsewhere. Regenerate after an intended performance change —
-and after any **pyamg version change**: AMG iteration counts are version
-sensitive, so the check drops the AMG gate whenever the baseline's pyamg differs
-from the run's, and it stays off, noted in a green log, until the baseline is
-regenerated on the new version.
+baseline generated elsewhere. Regenerate after an intended performance change, and
+after any **pyamg version change**: AMG iteration counts are version sensitive, so
+the check drops the AMG gate whenever the baseline's pyamg differs from the run's,
+and it stays off until the baseline is regenerated on the new version.
+
+The check prints only what failed. A case the baseline does not carry, a metric
+neither report carries, and a disabled AMG gate are all silent, so every line it
+prints is a number that moved; the run reports how many of the baseline's
+cases the run covered, which is what shows a baseline gone partially stale.
 
 To regenerate: trigger the nightly workflow, download its `bench-latest` artifact
 from a run whose *test* steps are green, check no case in it carries an `error`

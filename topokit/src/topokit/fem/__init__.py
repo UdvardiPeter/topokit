@@ -3,18 +3,21 @@
 """Linear elasticity: the ``PhysicsModel`` implementations and their machinery.
 
 ``LinearElasticity`` (structured grids) and ``UnstructuredElasticity``
-(simplex meshes, in the private ``_unstructured`` submodule) implement the
-``PhysicsModel`` protocol: they assemble the free-DOF stiffness system for a
-given per-element stiffness scale (the parametrization chain's output), build
-consistent load vectors, and evaluate element energies and von Mises
-stresses. Supports, loads, condensation and rigid-body modes are
-mesh-generic and shared; the element kernels are not.
+(simplex meshes) implement the ``PhysicsModel`` protocol: they assemble the
+free-DOF stiffness system for a given per-element stiffness scale (the
+parametrization chain's output), build consistent load vectors, and evaluate
+element energies and von Mises stresses. Both are a `_build_elements` hook on
+`ElasticityBase`, which owns everything that does not depend on the element:
+supports, loads, condensation, assembly and rigid-body modes.
 
-Implementation notes on ``LinearElasticity``:
+Implementation notes:
 
-- All elements of a structured grid are geometrically identical, so one
-  element stiffness matrix is computed per model and assembly is a
-  scale-multiply into a precomputed COO pattern.
+- All elements of a structured grid are geometrically identical, so
+  ``LinearElasticity`` computes one element stiffness matrix per model and
+  assembly is a scale-multiply into a precomputed pattern. Simplex elements
+  are not, so ``UnstructuredElasticity`` carries a per-element stack; the
+  stiffness goes to the assembly kernel pair-major either way, which is why
+  one kernel serves both.
 - Boundary conditions use reduction: fixed DOFs are dropped from the
   pattern before CSR conversion. Supports are zero-valued (homogeneous
   Dirichlet) in v1.
@@ -32,27 +35,40 @@ Implementation notes on ``LinearElasticity``:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
+import scipy.sparse
 
 from topokit.backend import SparseMatrix, active_backend, get_kernel, register_kernel
-from topokit.exceptions import TopoKitError
+from topokit.exceptions import FemError
+from topokit.fem import _elements
 from topokit.fields import FieldSpec, NodeField
 from topokit.mesh import Mesh, StructuredGrid
 from topokit.selection import Selector
+
+__all__ = [
+    "ALUMINUM_6061",
+    "STEEL",
+    "BodyForce",
+    "ElasticityBase",
+    "FemError",
+    "LinearElasticity",
+    "Load",
+    "Material",
+    "PhysicsModel",
+    "PointLoad",
+    "SurfaceTraction",
+    "UnstructuredElasticity",
+]
 
 _F64 = npt.NDArray[np.float64]
 _I64 = npt.NDArray[np.int64]
 
 _GP = 1.0 / np.sqrt(3.0)
-
-
-class FemError(TopoKitError, ValueError):
-    """Invalid physics setup or input."""
 
 
 @dataclass(frozen=True)
@@ -78,9 +94,6 @@ class Material:
 # supplier data before using for real parts.
 STEEL = Material(E=210000.0, nu=0.30, rho=7.85e-9, name="steel")
 ALUMINUM_6061 = Material(E=68900.0, nu=0.33, rho=2.70e-9, name="aluminum-6061")
-ABS = Material(E=2300.0, nu=0.35, rho=1.05e-9, name="abs")
-PA12 = Material(E=1700.0, nu=0.40, rho=1.01e-9, name="pa12")
-RESIN_SLA = Material(E=2800.0, nu=0.35, rho=1.15e-9, name="resin-sla")
 
 
 def _freeze(obj: object, **fields: object) -> None:
@@ -239,29 +252,6 @@ def _shape_gradients(xi: _F64, corners: _F64, spacing: tuple[float, ...]) -> _F6
     return grads
 
 
-def _b_matrix(grads: _F64) -> _F64:
-    """Strain-displacement matrix from physical gradients, node-major DOFs."""
-    nen, dim = grads.shape
-    if dim == 2:
-        b = np.zeros((3, 2 * nen))
-        b[0, 0::2] = grads[:, 0]
-        b[1, 1::2] = grads[:, 1]
-        b[2, 0::2] = grads[:, 1]
-        b[2, 1::2] = grads[:, 0]
-        return b
-    b = np.zeros((6, 3 * nen))
-    b[0, 0::3] = grads[:, 0]
-    b[1, 1::3] = grads[:, 1]
-    b[2, 2::3] = grads[:, 2]
-    b[3, 0::3] = grads[:, 1]
-    b[3, 1::3] = grads[:, 0]
-    b[4, 1::3] = grads[:, 2]
-    b[4, 2::3] = grads[:, 1]
-    b[5, 0::3] = grads[:, 2]
-    b[5, 2::3] = grads[:, 0]
-    return b
-
-
 def _element_stiffness(d: _F64, spacing: tuple[float, ...]) -> _F64:
     dim = len(spacing)
     corners = _CORNERS_2D if dim == 2 else _CORNERS_3D
@@ -269,7 +259,9 @@ def _element_stiffness(d: _F64, spacing: tuple[float, ...]) -> _F64:
     nen = corners.shape[0]
     ke = np.zeros((nen * dim, nen * dim))
     for gp in corners * _GP:  # full Gauss points share the corner sign pattern
-        b = _b_matrix(_shape_gradients(gp, corners, spacing))
+        # a one-element stack: the simplex kernels' B is this element's B too,
+        # same engineering-strain rows and node-major DOFs
+        b: _F64 = _elements.b_stack(_shape_gradients(gp, corners, spacing)[None], dim)[0]
         ke += b.T @ d @ b * det_j
     return ke
 
@@ -277,7 +269,8 @@ def _element_stiffness(d: _F64, spacing: tuple[float, ...]) -> _F64:
 def _centroid_b(spacing: tuple[float, ...]) -> _F64:
     dim = len(spacing)
     corners = _CORNERS_2D if dim == 2 else _CORNERS_3D
-    return _b_matrix(_shape_gradients(np.zeros(dim), corners, spacing))
+    stack = _elements.b_stack(_shape_gradients(np.zeros(dim), corners, spacing)[None], dim)
+    return np.asarray(stack[0], dtype=np.float64)
 
 
 def _von_mises(stress: _F64, dim: int, mode: str, nu: float) -> _F64:
@@ -371,35 +364,24 @@ def _rigid_body_modes(mesh: Mesh, free_index: _I64, dim: int) -> _F64:
     return full[free_index >= 0]
 
 
-FaceWeightRow = Callable[[int], _F64]
-"""``face_nodes_count -> weights``; per-node share of a face's traction*area."""
-
-BodyWeightRow = Callable[[int], _F64]
-"""``element_nodes_count -> weights``; per-node share of a body force's vector*volume."""
-
-
-def _equal_split_weight_row(n: int) -> _F64:
-    """Equal-split weights: ``1/n`` per node (the grid model's behavior)."""
-    return np.full(n, 1.0) / n
-
-
 def _apply_load(
     mesh: Mesh,
     f: _F64,
     load: Load,
     cn: _I64,
     dim: int,
-    face_weight_row: FaceWeightRow,
-    body_weight_row: BodyWeightRow,
+    face_weights: _F64,
+    body_weights: _F64,
 ) -> None:
     """Accumulate ``load``'s contribution into the full condensed-DOF vector ``f``.
 
-    Mesh-generic; ``face_weight_row`` gives the per-node share of a face's
+    Mesh-generic; ``face_weights`` is the per-node share of a face's
     ``traction * area`` for ``SurfaceTraction`` (equal split for the grid,
-    shape-function-consistent weights for simplex elements). ``body_weight_row``
-    is the analogous per-node share of a ``BodyForce``'s ``vector * volume``
-    (equal split for the grid and constant-strain simplices; tet10's
-    consistent weights are negative at vertices, positive at midsides).
+    shape-function-consistent weights for simplex elements), one entry per
+    face node. ``body_weights`` is the analogous per-node share of a
+    ``BodyForce``'s ``vector * volume``, one entry per element node (equal
+    split for the grid and constant-strain simplices; tet10's consistent
+    weights are negative at vertices, positive at midsides).
     """
     if isinstance(load, PointLoad):
         if len(load.force) != dim:
@@ -426,9 +408,7 @@ def _apply_load(
             assert load.pressure is not None
             t = -load.pressure * bf.normal[fids]
         face_nodes = bf.nodes[fids]
-        nodes_per_face = face_nodes.shape[1]
-        weights = face_weight_row(nodes_per_face)  # (n,), per-node share of area*traction
-        area_weight = bf.area[fids][:, None] * weights[None, :]  # (n_f, n) = area[f]*weight[j]
+        area_weight = bf.area[fids][:, None] * face_weights[None, :]  # (n_f, n) = area*weight
         contrib = t[:, None, :] * area_weight[:, :, None]  # (n_f, n, dim)
         cnids = cn[face_nodes]
         for comp in range(dim):
@@ -437,12 +417,10 @@ def _apply_load(
     if len(load.vector) != dim:
         raise FemError(f"body force dim {len(load.vector)} != mesh dim {dim}")
     conn = mesh.element_nodes[mesh.active_elements]
-    nen = conn.shape[1]
-    weights = body_weight_row(nen)  # (nen,), per-node fraction of vector*volume
     vec_vol = (
         np.asarray(load.vector)[None, :] * mesh.element_volumes[mesh.active_elements][:, None]
     )  # (n_ae, dim)
-    per_node = weights[None, :, None] * vec_vol[:, None, :]  # (n_ae, nen, dim)
+    per_node = body_weights[None, :, None] * vec_vol[:, None, :]  # (n_ae, nen, dim)
     cnids = cn[conn]
     for comp in range(dim):
         np.add.at(f, (cnids * dim + comp).ravel(), per_node[:, :, comp].ravel())
@@ -455,8 +433,8 @@ def _build_loads(
     dim: int,
     n_cdof: int,
     free: npt.NDArray[np.bool_],
-    face_weight_row: FaceWeightRow,
-    body_weight_row: BodyWeightRow,
+    face_weights: _F64,
+    body_weights: _F64,
 ) -> _F64:
     """Free-DOF load matrix, shape ``(n_dof, n_cases)``; mesh-generic.
 
@@ -480,8 +458,27 @@ def _build_loads(
     out = np.zeros((n_cdof, len(cases)))
     for j, case in enumerate(cases):
         for load in case:
-            _apply_load(mesh, out[:, j], load, cn, dim, face_weight_row, body_weight_row)
+            _apply_load(mesh, out[:, j], load, cn, dim, face_weights, body_weights)
     return out[free, :]
+
+
+def _chunk_pattern(edofs_chunk: _I64, n_dof: int) -> Any:
+    """Sparsity pattern of one chunk of elements, as a deduplicated CSR.
+
+    COO-to-CSR conversion is exactly the dedup-and-sort this needs, so scipy
+    does it; the data is bool because only the pattern is ever read. Indices
+    stay int32 (``n_dof`` and ``nnz`` are both well inside it), which halves
+    the pattern memory.
+    """
+    m = edofs_chunk.shape[1]
+    ef = edofs_chunk.astype(np.int32)
+    rows = np.repeat(ef, m, axis=1).ravel()
+    cols = np.tile(ef, (1, m)).ravel()
+    keep = (rows >= 0) & (cols >= 0)
+    return scipy.sparse.coo_array(
+        (np.ones(int(keep.sum()), dtype=bool), (rows[keep], cols[keep])),
+        shape=(n_dof, n_dof),
+    ).tocsr()
 
 
 def _csr_pattern_positions(
@@ -491,48 +488,55 @@ def _csr_pattern_positions(
 
     Returns ``(indptr, indices, pos)`` with ``pos[k, e]`` the CSR data slot of
     element ``e``'s local stiffness entry ``k = a*m + b``; entries touching a
-    fixed DOF point at the trailing dump slot ``nnz``. Chunked so setup
-    transients stay bounded.
+    fixed DOF point at the trailing dump slot ``nnz``. Both passes run in
+    chunks of ``chunk`` elements so setup transients stay bounded by the
+    chunk and the pattern, never by ``n_elements * m**2``.
     """
     n_ae, m = edofs_free.shape
-    keys_unique = np.empty(0, dtype=np.int64)
-    for lo in range(0, n_ae, chunk):
-        ef = edofs_free[lo : lo + chunk].astype(np.int64)
-        rows = np.repeat(ef, m, axis=1).ravel()
-        cols = np.tile(ef, (1, m)).ravel()
-        keep = (rows >= 0) & (cols >= 0)
-        keys_unique = np.union1d(keys_unique, rows[keep] * n_dof + cols[keep])
-    nnz = int(keys_unique.size)
+    pattern = _chunk_pattern(edofs_free[:chunk], n_dof)
+    for lo in range(chunk, n_ae, chunk):
+        pattern = pattern + _chunk_pattern(edofs_free[lo : lo + chunk], n_dof)
+    indptr = np.asarray(pattern.indptr, dtype=np.int32)
+    indices = np.asarray(pattern.indices, dtype=np.int32)
+    nnz = int(indices.size)
     # int32 halves the pattern memory; positions index the data array, so the
     # binding bound is nnz (~81 per DOF in 3D), not n_dof. int32 overflows at
     # ~2.1e9 entries (~8.5M 3D elements), far beyond any grid this path can
     # hold in memory, but fail loud rather than silently wrap.
     if nnz >= np.iinfo(np.int32).max:
         raise FemError(f"CSR pattern has {nnz} nonzeros, exceeding int32 indexing")
-    indices = (keys_unique % n_dof).astype(np.int32)
-    counts = np.bincount((keys_unique // n_dof).astype(np.int64), minlength=n_dof)
-    indptr = np.concatenate([[0], np.cumsum(counts)]).astype(np.int32)
+    # A second CSR over the same pattern, carrying each entry's data slot as
+    # its value: sampling it at (row, col) is the position lookup.
+    slots = scipy.sparse.csr_array(
+        (np.arange(nnz, dtype=np.int32), indices, indptr), shape=(n_dof, n_dof)
+    )
     pos = np.full((m * m, n_ae), nnz, dtype=np.int32)
     for lo in range(0, n_ae, chunk):
-        ef = edofs_free[lo : lo + chunk].astype(np.int64)
+        ef = edofs_free[lo : lo + chunk]
         rows = np.repeat(ef, m, axis=1)
         cols = np.tile(ef, (1, m))
-        keys = (rows * n_dof + cols).ravel()
-        found = np.searchsorted(keys_unique, keys).clip(max=max(nnz - 1, 0))
-        ok = (rows.ravel() >= 0) & (cols.ravel() >= 0)
-        p = np.where(ok, found, nnz).astype(np.int32)
+        ok = (rows >= 0) & (cols >= 0)
+        # fixed-DOF entries are sampled at (0, 0) and then overwritten with
+        # the dump slot: a negative index would wrap to the far end instead
+        found = slots[np.where(ok, rows, 0).ravel(), np.where(ok, cols, 0).ravel()]
+        p = np.where(ok.ravel(), np.asarray(found), nnz).astype(np.int32)
         pos[:, lo : lo + ef.shape[0]] = p.reshape(ef.shape[0], m * m).T
     return indptr, indices, pos
 
 
-def _assemble_csr_data(scale_active: Any, ke_flat: Any, pos: Any, nnz: int) -> _F64:
+def _assemble_csr_data(scale_active: Any, ke_pairs: Any, pos: Any, nnz: int) -> _F64:
     """Fill CSR data with one scatter pass per local-stiffness entry pair.
 
-    Coerces inputs to host numpy so it stays correct (if slow) as the
-    fallback for device-array backends.
+    ``ke_pairs`` is pair-major: ``ke_pairs[k]`` is local entry ``k`` for every
+    active element, a scalar when one matrix is shared by all of them and an
+    ``(n_ae,)`` row when each element has its own, so the same pass serves a
+    grid and a simplex mesh. Coerces inputs to host numpy so it stays correct
+    (if slow) as the fallback for device-array backends. ``np.bincount``
+    instead of the scatter measured 0.45-0.84x: it has to materialize the
+    whole ``(m**2, n_ae)`` weight array.
     """
     sa = np.asarray(scale_active, dtype=np.float64)
-    ke = np.asarray(ke_flat, dtype=np.float64)
+    ke = np.asarray(ke_pairs, dtype=np.float64)
     p = np.asarray(pos)
     data = np.zeros(nnz + 1)
     for k in range(p.shape[0]):
@@ -543,14 +547,29 @@ def _assemble_csr_data(scale_active: Any, ke_flat: Any, pos: Any, nnz: int) -> _
 register_kernel("assemble_csr_data", "generic", _assemble_csr_data)
 
 
-class LinearElasticity:
-    """Linear static elasticity on a structured grid."""
+class ElasticityBase[MeshT: Mesh]:
+    """Optional base for linear-elastic `PhysicsModel` implementations.
+
+    Everything that does not depend on the element lives here: the condensed
+    DOF numbering over active nodes, the support reduction, the consistent
+    load vectors, the CSR assembly pattern and its kernel, the energy and
+    stress contractions, the nodal field expansion and the rigid-body modes.
+    A subclass implements one hook, `_build_elements`, and is a complete
+    physics model -- `LinearElasticity` and `UnstructuredElasticity` are each
+    about 20 lines on top of this, and a new element family (a shell, a
+    different quadrature) is the same shape of work.
+
+    Parametrized by the mesh type it accepts, so a subclass that needs more
+    than the `Mesh` protocol keeps it: ``class MyModel(ElasticityBase[MyMesh])``
+    gives ``self.mesh`` the type ``MyMesh``. Subclassing is optional; the
+    `PhysicsModel` protocol stays the consumption contract.
+    """
 
     expected_field: ClassVar[FieldSpec] = FieldSpec("stiffness_scale")
 
     def __init__(
         self,
-        mesh: StructuredGrid,
+        mesh: MeshT,
         material: Material,
         supports: Sequence[tuple[Selector, str | Sequence[str | int]]],
         loads: Sequence[Load] | Sequence[Sequence[Load]],
@@ -562,15 +581,7 @@ class LinearElasticity:
         dim = mesh.dim
         if dim == 3 and mode != "plane_stress":
             raise FemError("mode is a 2D setting; remove it for 3D meshes")
-        if mesh.element_kind not in ("quad4", "hex8"):
-            raise FemError(
-                f"unsupported element kind {mesh.element_kind!r}; supported: ['hex8', 'quad4']"
-            )
-
         self._d = _d_matrix(material, dim, mode)
-        self._ke = _element_stiffness(self._d, mesh.spacing)
-        self._ke.flags.writeable = False
-        self._centroid_b = _centroid_b(mesh.spacing)
 
         # condensed DOF numbering over active nodes
         cn = mesh.node_index_map
@@ -584,26 +595,51 @@ class LinearElasticity:
         if self._n_dof == 0:
             raise FemError("all DOFs are fixed")
 
-        # element DOF pattern over active elements, mapped to free numbering
         conn = mesh.element_nodes[mesh.active_elements]
+        self._ke, self._centroid_b, face_weights, body_weights = self._build_elements(conn)
+        self._ke.flags.writeable = False
+        self._centroid_b.flags.writeable = False
+        # Pair-major view of the stiffness, (m*m,) shared or (m*m, n_ae) per
+        # element, so ``ke[k] * scale`` broadcasts either way and one
+        # assembly kernel serves both. A view: a stack is not stored twice.
+        self._ke_pairs = (
+            self._ke.reshape(-1)
+            if self._ke.ndim == 2
+            else self._ke.reshape(self._ke.shape[0], -1).T
+        )
+
+        # element DOF pattern over active elements, mapped to free numbering
         nen = conn.shape[1]
         cdofs = (cn[conn][:, :, None] * dim + np.arange(dim)).reshape(-1, nen * dim)
         self._edofs_free = self._free_index[cdofs]  # (n_ae, nen*dim), -1 where fixed
-        self._ke_flat = self._ke.ravel()
         self._indptr, self._indices, self._pos = _csr_pattern_positions(
             self._edofs_free.astype(np.int64), self._n_dof
         )
         self._nnz = int(self._indices.size)
 
-        self._loads = _build_loads(
-            mesh, loads, cn, dim, n_cdof, free, _equal_split_weight_row, _equal_split_weight_row
-        )
+        self._loads = _build_loads(mesh, loads, cn, dim, n_cdof, free, face_weights, body_weights)
         self._loads.flags.writeable = False
 
-    @property
-    def element_stiffness(self) -> _F64:
-        """The shared element stiffness matrix (read-only)."""
-        return self._ke
+    def _build_elements(self, conn: _I64) -> tuple[_F64, _F64, _F64, _F64]:
+        """Element arrays for the active elements, whose connectivity is ``conn``.
+
+        The one hook a subclass owns. Returns, in order:
+
+        - the element stiffness: one ``(m, m)`` matrix every element shares,
+          or an ``(m, m)`` stack per active element, with ``m`` the element
+          DOF count and node-major DOF order;
+        - the strain-displacement matrix at the element centroid, likewise
+          ``(n_strain, m)`` shared or stacked per element;
+        - the per-node share of a boundary face's ``traction * area``, one
+          entry per face node;
+        - the per-node share of an element's ``vector * volume``, one entry
+          per element node.
+
+        ``self.mesh``, ``self.material``, ``self.mode`` and ``self._d`` (the
+        material matrix) are set before this runs, and element-kind
+        validation belongs here -- it is the element-specific step.
+        """
+        raise NotImplementedError
 
     @property
     def n_dof(self) -> int:
@@ -650,7 +686,7 @@ class LinearElasticity:
         sa = arr[self.mesh.active_elements]
         backend = active_backend()
         kernel = get_kernel("assemble_csr_data")
-        data = kernel(backend.asarray(sa), self._ke_flat, self._pos, self._nnz)
+        data = kernel(backend.asarray(sa), self._ke_pairs, self._pos, self._nnz)
         return backend.csr_from_parts(
             data, self._indices, self._indptr, shape=(self._n_dof, self._n_dof)
         )
@@ -675,7 +711,9 @@ class LinearElasticity:
         """
         arr = self._check_scale(scale)
         ue = self._element_displacements(u)
-        e_active = np.einsum("ei,ij,ej->e", ue, self.element_stiffness, ue)
+        # One broadcast matmul for both stiffness layouts, and 1.5-10.8x
+        # faster than the equivalent einsum (10.8 ms -> 1.0 ms at 8k hex8).
+        e_active = np.sum(ue * (self._ke @ ue[..., None])[..., 0], axis=1)
         out = np.zeros(self.mesh.n_elements)
         out[self.mesh.active_elements] = e_active * arr[self.mesh.active_elements]
         return out
@@ -684,7 +722,8 @@ class LinearElasticity:
         """Centroid von Mises stress per element, zeros at void."""
         arr = self._check_scale(scale)
         ue = self._element_displacements(u)
-        stress = ue @ self._centroid_b.T @ self._d.T
+        strain = (self._centroid_b @ ue[..., None])[..., 0]  # serves both B layouts
+        stress = strain @ self._d.T
         stress *= arr[self.mesh.active_elements][:, None]
         vm = _von_mises(stress, self.mesh.dim, self.mode, self.material.nu)
         out = np.zeros(self.mesh.n_elements)
@@ -707,8 +746,50 @@ class LinearElasticity:
         return NodeField(full, self.mesh, name=name)
 
 
-# Deferred to the end of the module: UnstructuredElasticity's own import of
-# topokit.fem needs everything above already defined on this module.
-from topokit.fem._unstructured import (  # noqa: E402
-    UnstructuredElasticity as UnstructuredElasticity,
-)
+class LinearElasticity(ElasticityBase[StructuredGrid]):
+    """Linear static elasticity on a structured grid."""
+
+    def _build_elements(self, conn: _I64) -> tuple[_F64, _F64, _F64, _F64]:
+        """One stiffness matrix and one B: a grid's elements are all identical."""
+        kind = self.mesh.element_kind
+        if kind not in ("quad4", "hex8"):
+            raise FemError(f"unsupported element kind {kind!r}; supported: ['hex8', 'quad4']")
+        spacing = self.mesh.spacing
+        nen, n_face_nodes = conn.shape[1], 2 if self.mesh.dim == 2 else 4
+        return (
+            _element_stiffness(self._d, spacing),
+            _centroid_b(spacing),
+            np.full(n_face_nodes, 1.0 / n_face_nodes),
+            np.full(nen, 1.0 / nen),
+        )
+
+    @property
+    def element_stiffness(self) -> _F64:
+        """The shared element stiffness matrix (read-only)."""
+        return self._ke
+
+
+class UnstructuredElasticity(ElasticityBase[Mesh]):
+    """Linear static elasticity on a simplex mesh (tri3, tet4, or tet10).
+
+    Written against the `Mesh` protocol, not `UnstructuredMesh`, so a
+    third-party mesh whose ``element_kind`` is one of the simplex kinds
+    works unchanged; any other kind is rejected at construction.
+    """
+
+    def _build_elements(self, conn: _I64) -> tuple[_F64, _F64, _F64, _F64]:
+        """Build a per-element stack: simplex elements differ in shape and size.
+
+        ``stiffness_stack`` is told the mesh element ids behind ``conn``'s
+        rows, so a bad element is named by its mesh id rather than by its
+        position among the active elements.
+        """
+        kind = self.mesh.element_kind
+        nodes = self.mesh.nodes
+        active_ids = np.nonzero(self.mesh.active_elements)[0]
+        return (
+            _elements.stiffness_stack(kind, self._d, nodes, conn, active_ids),
+            _elements.centroid_b_stack(kind, nodes, conn),
+            _elements.face_weights(kind),
+            _elements.body_weights(kind),
+        )

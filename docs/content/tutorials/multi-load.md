@@ -66,4 +66,4 @@ The weighted sum trades the cases off against each other: a design that is very 
 
 ## Next
 
-[Symmetry, checkpoints, resume](symmetry-checkpoint.md) covers longer-running studies: resuming a study from a checkpoint and cutting search space with symmetry.
+[Checkpoints and resume](checkpoint-resume.md) covers longer-running studies: writing a study's state to disk as it goes and picking an interrupted run back up.

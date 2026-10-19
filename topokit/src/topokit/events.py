@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import cast
 
 _log = logging.getLogger("topokit.events")
@@ -58,15 +58,6 @@ class StageFinished(Event):
 
 
 @dataclass(frozen=True, slots=True)
-class CheckResult(Event):
-    """Result of a design check."""
-
-    name: str
-    passed: bool
-    details: Mapping[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
 class StudyFinished(Event):
     """Published once when a study run ends."""
 
@@ -80,21 +71,9 @@ class EventBus:
     def __init__(self) -> None:
         self._subs: list[tuple[type[Event], Callable[[Event], None]]] = []
 
-    def subscribe[E: Event](
-        self, event_type: type[E], fn: Callable[[E], None]
-    ) -> Callable[[], None]:
-        """Call ``fn`` for events of ``event_type`` or its subclasses.
-
-        Returns a function that removes the subscription.
-        """
-        entry = (event_type, cast(Callable[[Event], None], fn))
-        self._subs.append(entry)
-
-        def unsubscribe() -> None:
-            if entry in self._subs:
-                self._subs.remove(entry)
-
-        return unsubscribe
+    def subscribe[E: Event](self, event_type: type[E], fn: Callable[[E], None]) -> None:
+        """Call ``fn`` for events of ``event_type`` or its subclasses."""
+        self._subs.append((event_type, cast(Callable[[Event], None], fn)))
 
     def publish(self, event: Event) -> None:
         """Send ``event`` to all matching subscribers.

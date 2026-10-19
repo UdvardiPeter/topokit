@@ -18,6 +18,9 @@ Implementations live in their own modules; ``topokit.backend.numpy`` ships
 the default. The conformance suite for implementations is in
 ``topokit.backend.conformance``.
 
+``ScipyCsr`` is the SparseMatrix implementation both built-in backends return;
+it is public so a third-party backend can return one too.
+
 The plugin registry stores backend *instances* under the ``backends`` group.
 Entry points in the ``topokit.backends`` namespace must reference a
 module-level instance, not a class.
@@ -33,8 +36,22 @@ from typing import Any, Final, Protocol, runtime_checkable
 import numpy as np
 import numpy.typing as npt
 
+from topokit.backend.numpy import NumpyBackend, ScipyCsr
 from topokit.exceptions import TopoKitError
 from topokit.registry import registry
+
+__all__ = [
+    "ArrayBackend",
+    "KernelError",
+    "NumpyBackend",
+    "ScipyCsr",
+    "SparseMatrix",
+    "active_backend",
+    "default_backend",
+    "get_kernel",
+    "register_kernel",
+    "use_backend",
+]
 
 
 @runtime_checkable
@@ -51,10 +68,6 @@ class SparseMatrix(Protocol):
 
     def matvec(self, x: Any) -> Any:
         """Matrix-vector product."""
-        ...
-
-    def diagonal(self) -> Any:
-        """Return the main diagonal as a dense vector."""
         ...
 
     def csr_arrays(self) -> tuple[Any, Any, Any]:
@@ -82,22 +95,6 @@ class ArrayBackend(Protocol):
         May return ``data`` itself when it already has the requested dtype.
         Callers must copy before mutating.
         """
-        ...
-
-    def zeros(self, shape: tuple[int, ...], dtype: npt.DTypeLike = np.float64) -> Any:
-        """Zero-filled array."""
-        ...
-
-    def einsum(self, subscripts: str, *operands: Any) -> Any:
-        """Einstein summation."""
-        ...
-
-    def scatter_add(self, target: Any, indices: Any, values: Any) -> Any:
-        """Return a copy of ``target`` with ``values`` accumulated at ``indices``."""
-        ...
-
-    def gather(self, source: Any, indices: Any) -> Any:
-        """Take ``source[indices]``."""
         ...
 
     def coo_to_csr(self, rows: Any, cols: Any, vals: Any, shape: tuple[int, int]) -> SparseMatrix:
@@ -147,8 +144,6 @@ def get_kernel(name: str) -> Callable[..., Any]:
             return _KERNELS[key]
     raise KernelError(f"no kernel {name!r} for backend {backend_name!r} and no generic fallback")
 
-
-from topokit.backend.numpy import NumpyBackend  # noqa: E402
 
 _DEFAULT: Final = NumpyBackend()
 

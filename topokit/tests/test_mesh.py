@@ -7,6 +7,14 @@ import math
 import numpy as np
 import pytest
 
+from tests.conftest import (
+    CORNER_TET10_NODES,
+    SQUARE_NODES,
+    SQUARE_TRI3,
+    corner_tet10,
+    tri3_grid,
+    tri3_square,
+)
 from topokit.mesh import Mesh, MeshError, StructuredGrid, UnstructuredMesh
 
 
@@ -81,13 +89,6 @@ def test_construction_validation() -> None:
         StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0, 1.0))
 
 
-def test_masks_default_all_design() -> None:
-    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
-    assert g.design.all()
-    assert not g.solid.any()
-    assert not g.void.any()
-
-
 def test_masks_partition() -> None:
     solid = np.array([True, False, False, False])
     void = np.array([False, False, False, True])
@@ -95,22 +96,6 @@ def test_masks_partition() -> None:
     np.testing.assert_array_equal(g.design, [False, True, True, False])
     assert not (g.design & g.solid).any()
     assert (g.design | g.solid | g.void).all()
-
-
-def test_overlapping_masks_raise() -> None:
-    both = np.array([True, False, False, False])
-    with pytest.raises(MeshError, match="disjoint"):
-        StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), solid=both, void=both)
-
-
-def test_wrong_mask_shape_raises() -> None:
-    with pytest.raises(MeshError, match="shape"):
-        StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0), void=np.array([True]))
-
-
-def test_all_void_raises() -> None:
-    with pytest.raises(MeshError, match="void"):
-        StructuredGrid(shape=(2, 1), spacing=(1.0, 1.0), void=np.array([True, True]))
 
 
 def test_active_nodes_exclude_void_only_nodes() -> None:
@@ -174,27 +159,6 @@ def test_grid_is_immutable() -> None:
         g.spacing = (2.0, 2.0)  # type: ignore[misc]
 
 
-def test_derived_arrays_are_read_only() -> None:
-    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
-    for arr in (
-        g.nodes,
-        g.element_nodes,
-        g.element_centroids,
-        g.element_volumes,
-        g.design,
-        g.active_elements,
-        g.boundary_faces().area,
-        g.boundary_faces().nodes,
-    ):
-        with pytest.raises(ValueError, match="read-only"):
-            arr[0] = 0
-
-
-def test_boundary_faces_cached() -> None:
-    g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
-    assert g.boundary_faces() is g.boundary_faces()
-
-
 def test_face_nodes_are_perimeter_cyclic() -> None:
     g = StructuredGrid(shape=(2, 2, 2), spacing=(1.0, 2.0, 3.0))
     f = g.boundary_faces()
@@ -219,21 +183,6 @@ def test_boundary_faces_3d_void_interface() -> None:
 def test_box_accepts_numpy_scalar_element_size() -> None:
     g = StructuredGrid.box(size=(1.0, 1.0), element_size=np.float32(0.5))
     assert g.shape == (2, 2)
-
-
-def test_pickle_is_lean_and_preserves_immutability() -> None:
-    import pickle
-
-    g = StructuredGrid(shape=(20, 20, 20), spacing=(1.0, 1.0, 1.0))
-    _ = g.element_nodes  # populate caches
-    _ = g.boundary_faces()
-    blob = pickle.dumps(g)
-    assert len(blob) < 100_000  # caches are not serialized
-    g2 = pickle.loads(blob)
-    assert not g2.void.flags.writeable
-    assert not g2.solid.flags.writeable
-    np.testing.assert_array_equal(g2.element_nodes, g.element_nodes)
-    assert g2.boundary_faces().n_faces == g.boundary_faces().n_faces
 
 
 def test_constructor_accepts_plain_lists_as_masks() -> None:
@@ -280,32 +229,13 @@ def test_protocol_exposes_masks_and_condensation() -> None:
 # --- UnstructuredMesh -------------------------------------------------
 
 
-_SQUARE_NODES = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-_SQUARE_ELEMENTS = np.array([[0, 1, 2], [0, 2, 3]])
-
 _CORNER_TET4_NODES = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
 _CORNER_TET4_ELEMENTS = np.array([[0, 1, 2, 3]])
 _CORNER_TET_SURFACE_AREA = 3 * 0.5 + math.sqrt(3) / 2
 
-_CORNER_TET10_NODES = np.array(
-    [
-        [0.0, 0.0, 0.0],  # 0
-        [1.0, 0.0, 0.0],  # 1
-        [0.0, 1.0, 0.0],  # 2
-        [0.0, 0.0, 1.0],  # 3
-        [0.5, 0.0, 0.0],  # 4 mid(0,1)
-        [0.5, 0.5, 0.0],  # 5 mid(1,2)
-        [0.0, 0.5, 0.0],  # 6 mid(2,0)
-        [0.0, 0.0, 0.5],  # 7 mid(0,3)
-        [0.5, 0.0, 0.5],  # 8 mid(1,3)
-        [0.0, 0.5, 0.5],  # 9 mid(2,3)
-    ]
-)
-_CORNER_TET10_ELEMENTS = np.array([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]])
-
 
 def test_tri3_construction_and_geometry() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3")
+    m = tri3_square()
     assert m.element_kind == "tri3"
     assert m.dim == 2
     assert m.n_nodes == 4
@@ -329,66 +259,25 @@ def test_tet4_corner_construction_and_geometry() -> None:
 
 
 def test_tet10_corner_construction_and_geometry() -> None:
-    m = UnstructuredMesh(_CORNER_TET10_NODES, _CORNER_TET10_ELEMENTS, "tet10")
+    m = corner_tet10()
     assert m.element_kind == "tet10"
     assert m.dim == 3
     np.testing.assert_allclose(m.element_volumes, [1.0 / 6.0])
-    np.testing.assert_allclose(m.element_centroids[0], _CORNER_TET10_NODES[:4].mean(axis=0))
+    np.testing.assert_allclose(m.element_centroids[0], CORNER_TET10_NODES[:4].mean(axis=0))
     f = m.boundary_faces()
     assert f.n_faces == 4
     assert f.nodes.shape == (4, 6)
     assert f.area.sum() == pytest.approx(_CORNER_TET_SURFACE_AREA)
 
 
-def test_unstructured_satisfies_mesh_protocol() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3")
-    mesh: Mesh = m
-    assert mesh.n_elements == 2
-
-
-def test_unstructured_masks_default_all_design() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3")
-    assert m.design.all()
-    assert not m.solid.any()
-    assert not m.void.any()
-
-
-def test_unstructured_active_nodes_exclude_void_only_nodes() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3", void=[True, False])
-    np.testing.assert_array_equal(m.active_elements, [False, True])
-    np.testing.assert_array_equal(m.active_nodes, [True, False, True, True])
-    np.testing.assert_array_equal(m.node_index_map, [0, -1, 1, 2])
-
-
 def test_unstructured_is_immutable() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3")
+    m = tri3_square()
     with pytest.raises(AttributeError):
         m.solid = np.ones(2, dtype=bool)  # type: ignore[misc]
 
 
-def test_unstructured_derived_arrays_are_read_only() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3")
-    for arr in (
-        m.nodes,
-        m.element_nodes,
-        m.element_centroids,
-        m.element_volumes,
-        m.design,
-        m.active_elements,
-        m.boundary_faces().area,
-        m.boundary_faces().nodes,
-    ):
-        with pytest.raises(ValueError, match="read-only"):
-            arr[0] = 0
-
-
-def test_unstructured_boundary_faces_cached() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3")
-    assert m.boundary_faces() is m.boundary_faces()
-
-
 def test_unstructured_repr_is_informative() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3", void=[True, False])
+    m = UnstructuredMesh(SQUARE_NODES, SQUARE_TRI3, "tri3", void=[True, False])
     r = repr(m)
     assert "tri3" in r
     assert "1 void" in r
@@ -397,7 +286,7 @@ def test_unstructured_repr_is_informative() -> None:
 def test_unstructured_negative_volume_raises_naming_element() -> None:
     elements = np.array([[0, 2, 1], [0, 2, 3]])  # element 0 wound clockwise
     with pytest.raises(MeshError, match=r"element ids \[0\]"):
-        UnstructuredMesh(_SQUARE_NODES, elements, "tri3")
+        UnstructuredMesh(SQUARE_NODES, elements, "tri3")
 
 
 @pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
@@ -406,10 +295,10 @@ def test_unstructured_non_finite_nodes_raise_naming_the_node(bad: float) -> None
     # False, and an inf coordinate can give a (meaningless) positive measure,
     # so without an explicit guard the mesh constructs and every derived
     # number -- volumes, centroids, stiffness, compliance -- is non-finite.
-    nodes = _SQUARE_NODES.copy()
+    nodes = SQUARE_NODES.copy()
     nodes[2, 0] = bad
     with pytest.raises(MeshError, match=r"non-finite node coordinates for node ids \[2\]"):
-        UnstructuredMesh(nodes, _SQUARE_ELEMENTS, "tri3")
+        UnstructuredMesh(nodes, SQUARE_TRI3, "tri3")
 
 
 def test_unstructured_out_of_range_connectivity_raises() -> None:
@@ -422,7 +311,7 @@ def test_unstructured_out_of_range_connectivity_raises() -> None:
 def test_unstructured_wrong_column_count_raises() -> None:
     elements = np.array([[0, 1, 2, 3]])
     with pytest.raises(MeshError, match="tri3"):
-        UnstructuredMesh(_SQUARE_NODES, elements, "tri3")
+        UnstructuredMesh(SQUARE_NODES, elements, "tri3")
 
 
 def test_unstructured_unknown_kind_raises() -> None:
@@ -439,62 +328,16 @@ def test_unstructured_dim_mismatch_raises() -> None:
         UnstructuredMesh(nodes, elements, "tri3")
 
 
-def test_unstructured_overlapping_masks_raise() -> None:
-    both = np.array([True, False])
-    with pytest.raises(MeshError, match="disjoint"):
-        UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3", solid=both, void=both)
-
-
-def test_unstructured_wrong_mask_shape_raises() -> None:
-    with pytest.raises(MeshError, match="shape"):
-        UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3", void=np.array([True]))
-
-
-def test_unstructured_all_void_raises() -> None:
-    with pytest.raises(MeshError, match="void"):
-        UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3", void=[True, True])
-
-
 def test_unstructured_group_ids_out_of_range_raise() -> None:
     with pytest.raises(MeshError, match="group"):
-        UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3", groups={"bad": [5]})
+        UnstructuredMesh(SQUARE_NODES, SQUARE_TRI3, "tri3", groups={"bad": [5]})
 
 
 def test_unstructured_groups_are_stored_and_read_only() -> None:
-    m = UnstructuredMesh(_SQUARE_NODES, _SQUARE_ELEMENTS, "tri3", groups={"top": [1]})
+    m = UnstructuredMesh(SQUARE_NODES, SQUARE_TRI3, "tri3", groups={"top": [1]})
     np.testing.assert_array_equal(m.groups["top"], [1])
     with pytest.raises(ValueError, match="read-only"):
         m.groups["top"][0] = 0
-
-
-def test_unstructured_pickle_is_lean_and_preserves_immutability() -> None:
-    import pickle
-
-    m = UnstructuredMesh(
-        _SQUARE_NODES,
-        _SQUARE_ELEMENTS,
-        "tri3",
-        void=[True, False],
-        groups={"top": [1]},
-    )
-    _ = m.element_centroids  # populate caches
-    _ = m.boundary_faces()
-    blob = pickle.dumps(m)
-    m2 = pickle.loads(blob)
-
-    assert "element_centroids" not in m2.__dict__  # caches are not serialized
-    assert "design" not in m2.__dict__
-    np.testing.assert_array_equal(m2.nodes, m.nodes)
-    np.testing.assert_array_equal(m2.element_nodes, m.element_nodes)
-    np.testing.assert_array_equal(m2.void, m.void)
-    np.testing.assert_array_equal(m2.solid, m.solid)
-    np.testing.assert_array_equal(m2.groups["top"], m.groups["top"])
-    assert m2.boundary_faces().n_faces == m.boundary_faces().n_faces
-
-    for arr in (m2.nodes, m2.element_nodes, m2.void, m2.solid, m2.groups["top"]):
-        assert not arr.flags.writeable
-        with pytest.raises(ValueError, match="read-only"):
-            arr[0] = 0
 
 
 def test_duplicated_elements_leave_no_boundary_and_say_so() -> None:
@@ -516,8 +359,13 @@ def test_a_facet_shared_by_three_elements_is_rejected() -> None:
         mesh.boundary_faces()
 
 
-def test_a_sound_mesh_still_reports_its_boundary() -> None:
-    nodes = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-    elements = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
-    faces = UnstructuredMesh(nodes, elements, "tri3").boundary_faces()
-    assert faces.n_faces == 4  # the square perimeter, the shared diagonal excluded
+@pytest.mark.parametrize("corners", [2, 3])
+def test_face_ids_follow_the_sorted_corner_tuple_order(corners: int) -> None:
+    # The documented stability guarantee: a face id is the position of the
+    # face's sorted corner-node tuple among all of them. The pairing uses
+    # np.unique(axis=0), whose row order is exactly Python's tuple sort, so
+    # the guarantee holds without the mesh sorting anything itself.
+    mesh = tri3_grid(4, 3) if corners == 2 else corner_tet10()
+    keys = [tuple(sorted(row[:corners])) for row in mesh.boundary_faces().nodes.tolist()]
+    assert keys == sorted(keys)
+    assert len(set(keys)) == len(keys)

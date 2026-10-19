@@ -21,9 +21,6 @@ USER_FACING = [
     "Material",
     "STEEL",
     "ALUMINUM_6061",
-    "ABS",
-    "PA12",
-    "RESIN_SLA",
     "PointLoad",
     "SurfaceTraction",
     "BodyForce",
@@ -35,14 +32,10 @@ USER_FACING = [
     "NearPoint",
     "OnBoundary",
     "Predicate",
-    "FaceSetSelector",
     # parametrization
-    "SymmetryMap",
     "DensityFilter",
-    "RadialDensityFilter",
     "Heaviside",
     "SIMP",
-    "SensitivityFilter",
     # responses
     "Compliance",
     "Volume",
@@ -76,6 +69,8 @@ USER_FACING = [
     "Response",
     "Selector",
     "SelectorBase",
+    "MeshBase",
+    "ElasticityBase",
     "SparseMatrix",
     # the field containers the public API hands back
     "DesignField",

@@ -9,6 +9,12 @@ import meshio
 import numpy as np
 import pytest
 
+from tests.conftest import (
+    CORNER_TET10_ELEMENTS,
+    CORNER_TET10_NODES,
+    SQUARE_NODES,
+    SQUARE_TRI3,
+)
 from topokit.mesh import MeshError, UnstructuredMesh
 
 # Two positive-volume tets sharing a face, nodes 1,2,3.
@@ -23,24 +29,6 @@ _TWO_TET_NODES = np.array(
 )
 _TWO_TET_ELEMENTS = np.array([[0, 1, 2, 3], [1, 2, 3, 4]])
 
-_SQUARE_NODES_2D = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-_SQUARE_ELEMENTS = np.array([[0, 1, 2], [0, 2, 3]])
-
-_CORNER_TET10_NODES = np.array(
-    [
-        [0.0, 0.0, 0.0],  # 0
-        [1.0, 0.0, 0.0],  # 1
-        [0.0, 1.0, 0.0],  # 2
-        [0.0, 0.0, 1.0],  # 3
-        [0.5, 0.0, 0.0],  # 4 mid(0,1)
-        [0.5, 0.5, 0.0],  # 5 mid(1,2)
-        [0.0, 0.5, 0.0],  # 6 mid(2,0)
-        [0.0, 0.0, 0.5],  # 7 mid(0,3)
-        [0.5, 0.0, 0.5],  # 8 mid(1,3)
-        [0.0, 0.5, 0.5],  # 9 mid(2,3)
-    ]
-)
-_CORNER_TET10_ELEMENTS = np.array([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]])
 
 # Two separate, non-touching positive-volume tets, each its own cell block
 # (mirrors gmsh 4.1: one CellBlock per geometrical entity).
@@ -77,17 +65,17 @@ def test_from_meshio_tetra_with_cell_sets_resolves_groups_and_masks() -> None:
 
 def test_from_meshio_triangle_mesh_trims_zero_z_column() -> None:
     # meshio file formats store 3-column points even for planar meshes.
-    points_3col = np.hstack([_SQUARE_NODES_2D, np.zeros((4, 1))])
-    mesh = meshio.Mesh(points_3col, [("triangle", _SQUARE_ELEMENTS)])
+    points_3col = np.hstack([SQUARE_NODES, np.zeros((4, 1))])
+    mesh = meshio.Mesh(points_3col, [("triangle", SQUARE_TRI3)])
     m = UnstructuredMesh.from_meshio(mesh)
     assert m.element_kind == "tri3"
     assert m.dim == 2
     assert m.nodes.shape == (4, 2)
-    np.testing.assert_allclose(m.nodes, _SQUARE_NODES_2D)
+    np.testing.assert_allclose(m.nodes, SQUARE_NODES)
 
 
 def test_from_meshio_tetra10() -> None:
-    mesh = meshio.Mesh(_CORNER_TET10_NODES, [("tetra10", _CORNER_TET10_ELEMENTS)])
+    mesh = meshio.Mesh(CORNER_TET10_NODES, [("tetra10", CORNER_TET10_ELEMENTS)])
     m = UnstructuredMesh.from_meshio(mesh)
     assert m.element_kind == "tet10"
     assert m.n_elements == 1

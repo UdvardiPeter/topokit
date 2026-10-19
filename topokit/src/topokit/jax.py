@@ -25,8 +25,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from topokit.backend import SparseMatrix, register_kernel
-from topokit.backend.numpy import _ScipyCsr
+from topokit.backend import ScipyCsr, SparseMatrix, register_kernel
 
 try:
     import jax
@@ -53,34 +52,18 @@ class JaxBackend:
         """Convert ``data`` to a jax array."""
         return jnp.asarray(data, dtype=dtype)  # type: ignore[arg-type]
 
-    def zeros(self, shape: tuple[int, ...], dtype: npt.DTypeLike = np.float64) -> Any:
-        """Zero-filled jax array."""
-        return jnp.zeros(shape, dtype=dtype)  # type: ignore[arg-type]
-
-    def einsum(self, subscripts: str, *operands: Any) -> Any:
-        """Einstein summation via ``jnp.einsum``."""
-        return jnp.einsum(subscripts, *operands)
-
-    def scatter_add(self, target: Any, indices: Any, values: Any) -> Any:
-        """Functional accumulation; jax arrays are immutable, so no copy needed."""
-        return jnp.asarray(target).at[jnp.asarray(indices)].add(jnp.asarray(values))
-
-    def gather(self, source: Any, indices: Any) -> Any:
-        """Take ``source[indices]``."""
-        return jnp.asarray(source)[jnp.asarray(indices)]
-
     def coo_to_csr(self, rows: Any, cols: Any, vals: Any, shape: tuple[int, int]) -> SparseMatrix:
         """Host-side CSR; sparse algebra stays on the CPU in v1."""
         coo = scipy.sparse.coo_array(
             (np.asarray(vals), (np.asarray(rows), np.asarray(cols))), shape=shape
         )
-        return _ScipyCsr(coo.tocsr())
+        return ScipyCsr(coo.tocsr())
 
     def csr_from_parts(
         self, data: Any, indices: Any, indptr: Any, shape: tuple[int, int]
     ) -> SparseMatrix:
         """Host-side CSR from prebuilt arrays; converts device data once."""
-        return _ScipyCsr(
+        return ScipyCsr(
             scipy.sparse.csr_array(
                 (np.asarray(data), np.asarray(indices), np.asarray(indptr)), shape=shape
             )

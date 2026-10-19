@@ -12,13 +12,14 @@ standard 4-point degree-2 tetrahedron rule, evaluating the isoparametric
 Jacobian from the full 10-node map at each Gauss point so curved (non
 straight-edge) elements are handled correctly.
 
-Engineering-strain row order mirrors ``fem._b_matrix``/``fem._d_matrix``
-exactly: ``(xx, yy, xy)`` in 2D, ``(xx, yy, zz, xy, yz, zx)`` in 3D. DOFs are
-node-major (``[u0, v0, (w0), u1, v1, (w1), ...]``). Getting the row order
-wrong produces a stiffness matrix that still passes energy-only checks for
-isotropic materials (D's normal-strain and shear blocks are individually
-permutation-symmetric) but yields wrong per-component stress -- callers
-needing stress must use this exact convention.
+Engineering-strain row order is ``(xx, yy, xy)`` in 2D and ``(xx, yy, zz, xy,
+yz, zx)`` in 3D, matching ``fem._d_matrix``; ``b_stack`` builds the grid
+model's B matrix too. DOFs are node-major (``[u0, v0, (w0), u1, v1, (w1),
+...]``). Getting the row order wrong produces a stiffness matrix that still
+passes energy-only checks for isotropic materials (D's normal-strain and
+shear blocks are individually permutation-symmetric) but yields wrong
+per-component stress -- callers needing stress must use this exact
+convention.
 """
 
 from __future__ import annotations
@@ -26,13 +27,12 @@ from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 
-from topokit.fem import FemError
+from topokit.exceptions import FemError
 
 _F64 = npt.NDArray[np.float64]
 _I64 = npt.NDArray[np.int64]
 
 NDOF: dict[str, int] = {"tri3": 6, "tet4": 12, "tet10": 30}
-NODES_PER_FACE: dict[str, int] = {"tri3": 2, "tet4": 3, "tet10": 6}
 
 # Consistent nodal weights for constant traction on a straight boundary face
 # (shape-function integration); multiply by traction * face area. tet10's
@@ -122,12 +122,12 @@ def _apply_d(b: _F64, d: _F64) -> _F64:
     return np.asarray(np.einsum("eri,rs,esj->eij", b, d, b))
 
 
-def _b_stack(grad: _F64, dim: int) -> _F64:
+def b_stack(grad: _F64, dim: int) -> _F64:
     """Strain-displacement stack from physical shape-function gradients.
 
-    ``grad`` has shape ``(n_el, nen, dim)``; DOFs are node-major. Row order
-    mirrors ``fem._b_matrix``: ``(xx, yy, xy)`` in 2D, ``(xx, yy, zz, xy, yz,
-    zx)`` in 3D.
+    ``grad`` has shape ``(n_el, nen, dim)``; DOFs are node-major and the rows
+    are the engineering strains documented above. A grid's single B matrix is
+    a one-element stack, so ``fem`` builds it here too.
     """
     n_el, nen, _ = grad.shape
     if dim == 2:
@@ -230,11 +230,11 @@ def stiffness_stack(
     """
     if kind == "tri3":
         area, grad = _tri3_measure_and_grad(nodes, elements)
-        b = _b_stack(grad, dim=2)
+        b = b_stack(grad, dim=2)
         return area[:, None, None] * _apply_d(b, d)
     if kind == "tet4":
         volume, grad = _tet4_measure_and_grad(nodes, elements)
-        b = _b_stack(grad, dim=3)
+        b = b_stack(grad, dim=3)
         return volume[:, None, None] * _apply_d(b, d)
     if kind == "tet10":
         n_el = elements.shape[0]
@@ -255,7 +255,7 @@ def stiffness_stack(
                 raise FemError(
                     f"non-positive det(J) at a Gauss point for tet10 element ids {ids.tolist()}"
                 )
-            b = _b_stack(grad, dim=3)
+            b = b_stack(grad, dim=3)
             ke += _TET10_GAUSS_WEIGHT * det_j[:, None, None] * _apply_d(b, d)
         return ke
     raise FemError(f"unsupported element kind {kind!r}; supported: {sorted(NDOF)}")
@@ -270,12 +270,12 @@ def centroid_b_stack(kind: str, nodes: _F64, elements: _I64) -> _F64:
     """
     if kind == "tri3":
         _, grad = _tri3_measure_and_grad(nodes, elements)
-        return _b_stack(grad, dim=2)
+        return b_stack(grad, dim=2)
     if kind == "tet4":
         _, grad = _tet4_measure_and_grad(nodes, elements)
-        return _b_stack(grad, dim=3)
+        return b_stack(grad, dim=3)
     if kind == "tet10":
         dn_ref = _tet10_dn_ref(0.25, 0.25, 0.25)
         grad, _ = _tet10_grad_and_detj(nodes, elements, dn_ref)
-        return _b_stack(grad, dim=3)
+        return b_stack(grad, dim=3)
     raise FemError(f"unsupported element kind {kind!r}; supported: {sorted(NDOF)}")

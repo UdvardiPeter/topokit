@@ -2,6 +2,8 @@
 
 A full worked physics module outside elasticity: heat conduction, with a RAMP terminal link and stock `Compliance` reused unmodified as thermal compliance. Nothing in `topokit`'s core changes; both pieces are ordinary implementations of the `LinkSpec` and `PhysicsModel` extension points, the same ones [Custom chain link](custom-link.md) and [Extend](index.md) describe.
 
+Conduction needs its own model because its DOFs, its element matrix and its load vector are all different. If instead you are staying inside linear elasticity and only changing the *element* — a new element family, a different quadrature, an anisotropic material matrix — start from `ElasticityBase` in `topokit.fem` and skip to [Changing only the element](#changing-only-the-element) at the bottom of this page.
+
 ## A terminal link for conductivity
 
 `RampConductivity` is a RAMP-style interpolation (Rational Approximation of Material Properties), a common SIMP alternative that keeps a nonzero gradient at `rho = 0`. It plays the terminal role `SIMP` plays for elasticity: `is_terminal = True` on the spec, `out_field` on the bound form, here a new `FieldSpec("conductivity_scale")` rather than `SIMP`'s `stiffness_scale`.
@@ -177,6 +179,25 @@ assert_gradient_matches(
 )
 print("thermal compliance gradient verified through chain, model, and solver")
 ```
+
+## Changing only the element
+
+`HeatConduction` above is a model from scratch, which is the right shape of work when the physics is new. When the physics is still linear elasticity, almost none of a model is about the element: the condensed DOF numbering over active nodes, the support reduction, the consistent load vectors, the CSR assembly pattern and its kernel, the energy and stress contractions, the nodal field expansion and the rigid-body-mode hint are all mesh-generic. `ElasticityBase` owns them and leaves one hook:
+
+<!-- no-run -->
+```python
+def _build_elements(self, conn):
+    """conn is the connectivity of the active elements, (n_ae, nodes_per_element)."""
+    return ke, centroid_b, face_weights, body_weights
+```
+
+- `ke` — the element stiffness: one `(m, m)` matrix if every element shares it, or an `(n_ae, m, m)` stack if they do not, with `m` the element DOF count and node-major DOF order (`[u0, v0, w0, u1, ...]`). The base reshapes it pair-major for the assembly kernel, so both layouts go through the same code.
+- `centroid_b` — the strain-displacement matrix at the element centroid, `(n_strain, m)` or `(n_ae, n_strain, m)`, for `element_stress`. Engineering-strain row order: `(xx, yy, xy)` in 2D, `(xx, yy, zz, xy, yz, zx)` in 3D.
+- `face_weights`, `body_weights` — each node's share of a boundary face's `traction * area` and of an element's `vector * volume`. Equal splits for a grid or a constant-strain simplex; the shape-function integrals otherwise (tet10's body weights are negative at the vertices).
+
+`self.mesh`, `self.material`, `self.mode` and `self._d` (the material matrix) are set before the hook runs, and element-kind validation belongs in it. The two shipped models are this and nothing else — `LinearElasticity` builds one matrix from the grid spacing, `UnstructuredElasticity` a per-element stack from the simplex kernels — so the shortest way to a new element family is to read those two and write a third.
+
+The base is generic in the mesh type it accepts: `class MyModel(ElasticityBase[StructuredGrid])` gives `self.mesh` the narrower type inside the hook, where you need the grid's `spacing`. `ElasticityBase[Mesh]` accepts anything satisfying the protocol, including a [custom mesh](custom-mesh.md).
 
 ## Next
 

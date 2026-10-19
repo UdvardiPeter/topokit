@@ -4,7 +4,7 @@ Open-source topology optimization for engineers
 
 [![Docs](https://app.readthedocs.org/projects/topokit/badge/?version=latest)](https://topokit.readthedocs.io/en/latest/)
 
-- Python ≥3.12 · MIT · Nx + uv monorepo
+- Python ≥3.12 · MIT · uv workspace
 - Docs: [topokit.readthedocs.io](https://topokit.readthedocs.io/)
 - Dev setup: see [CONTRIBUTING.md](CONTRIBUTING.md)
 - Architecture overview: see [ARCHITECTURE.md](ARCHITECTURE.md)
@@ -68,13 +68,12 @@ Pre-alpha. The numerical core runs end to end (2D and 3D)
 | `topokit.testing` FD gradient verification | done |
 | `topokit.fem` linear elasticity, loads, materials | done |
 | `topokit.solvers` direct + AMG-preconditioned CG | done |
-| `topokit.parametrization` the unified SIMP chain | done |
+| `topokit.parametrization` the unified SIMP chain, radial density filter | done |
 | `topokit.responses` compliance, volume, constraints | done |
 | `topokit.optimizers` OC + clean-room MMA | done |
 | `topokit.problem` Problem + Study, continuation, checkpoint/restart | done |
 | `topokit.checkpoint` single-file `.topo` save/resume | done |
 | `benchmarks` 2D reference regression — MBB + cantilever vs 88-line (Phase 1 gate) | done |
-| `topokit.parametrization` radial density filter | done |
 | `benchmarks` 3D regression — cantilever + Michell + robustness sweep (nightly) | done |
 | `benchmarks` perf scaling-study baseline + `nightly.yml` cron | done |
 | `topokit.viz` convergence curves, density views, slices, LiveView (`[viz]` extra) | done |
@@ -89,7 +88,8 @@ Pre-alpha. The numerical core runs end to end (2D and 3D)
 ## Dev quick start
 
 ```
-npm ci
 uv sync --all-packages
-npx nx run-many -t lint typecheck boundaries test test-fd
+uv run --directory topokit pytest
 ```
+
+Every gate the PR workflow runs is listed in [CONTRIBUTING.md](CONTRIBUTING.md).

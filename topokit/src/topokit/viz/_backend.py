@@ -8,6 +8,7 @@ them only when a view is actually built, and fail with an actionable message.
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import sys
@@ -29,11 +30,13 @@ def require_matplotlib() -> ModuleType:
 
 def require_pyvista() -> ModuleType:
     """Import PyVista or raise with the ``[viz]`` install hint."""
+    # import_module rather than a plain import: it is declared to return a
+    # ModuleType, so this typechecks the same whether or not the [viz] extra
+    # is installed in the checking environment
     try:
-        import pyvista
+        return importlib.import_module("pyvista")
     except ImportError as exc:  # pragma: no cover - exercised without the extra
         raise ImportError(VIZ_HINT) from exc
-    return pyvista
 
 
 def has_display() -> bool:

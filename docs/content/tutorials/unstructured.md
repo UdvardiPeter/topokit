@@ -136,10 +136,10 @@ second-order mesh.
 
 ## What's still structured-only
 
-`DensityFilter` and `RadialDensityFilter` work unchanged on an unstructured
-mesh: `radius` stays a physical length, and both switch to an exact
-sparse-matrix implementation internally rather than the structured grid's
-separable convolution. `SymmetryMap`, `view_slices`, and `LiveView` are
+`DensityFilter` works unchanged on an unstructured mesh: `radius` stays a
+physical length, and the same radial kernel is applied through a sparse
+matrix over element centroids rather than the structured grid's array
+correlation. `view_slices` and `LiveView` are
 structured-grid-only for now; each raises rather than running silently
 wrong on an unstructured mesh.
 

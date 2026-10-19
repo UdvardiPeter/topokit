@@ -73,7 +73,6 @@ def test_optimization_produces_sane_design(build: Builder, volfrac: float) -> No
 
 
 def test_cantilever_3d_builds_and_runs() -> None:
-    from topokit.problem import Schedule, Study
 
     from topokit_bench.problems import cantilever_3d, make_optimizer
 
@@ -86,7 +85,6 @@ def test_cantilever_3d_builds_and_runs() -> None:
 
 
 def test_michell_builds_and_is_symmetric() -> None:
-    from topokit.problem import Schedule, Study
 
     from topokit_bench.problems import make_optimizer, michell
 

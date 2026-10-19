@@ -2,23 +2,17 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tests for typed field containers."""
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from topokit.fields import DesignField, ElementField, FieldError, NodeField
+from topokit.mesh import StructuredGrid
 
-
-@dataclass(frozen=True)
-class FakeMesh:
-    n_nodes: int = 12
-    n_elements: int = 6
-    dim: int = 2
-
-
-MESH = FakeMesh()
+# a real mesh, since the field containers now take the Mesh protocol:
+# a 3x2 grid is 6 elements and 12 nodes, which is what these shapes assume
+MESH = StructuredGrid(shape=(3, 2), spacing=(1.0, 1.0))
 
 
 def test_design_field_validates_length() -> None:
@@ -61,7 +55,7 @@ def test_load_rejects_mismatched_mesh(tmp_path: Path) -> None:
     p = tmp_path / "rho.npz"
     f.save(p)
     with pytest.raises(FieldError, match="mesh"):
-        DesignField.load(p, FakeMesh(n_nodes=4, n_elements=2))
+        DesignField.load(p, StructuredGrid(shape=(2, 1), spacing=(1.0, 1.0)))
 
 
 def test_field_spec_compares_by_value() -> None:

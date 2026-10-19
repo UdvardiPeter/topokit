@@ -57,10 +57,12 @@ dev = [
   "ruff>=0.9",
   "import-linter>=2.1",
   "scipy-stubs>=1.17",
+  # pyamg, matplotlib and meshio stay: the AmgCG path, the 2D views and the
+  # gmsh reader are exercised by the default suite. pyvista and jax are not,
+  # so they live only in the [viz] and [jax] extras; without those extras
+  # test_viz.py and test_jax.py skip. CI installs both, so CI runs everything.
   "pyamg>=5",
-  "pyvista>=0.44",
   "matplotlib>=3.8",
-  "jax>=0.10",
   "meshio>=5.3",
 ]
 
@@ -90,15 +92,20 @@ warn_unreachable = true
 cache_dir = "../.mypy_cache"
 
 [[tool.mypy.overrides]]
-module = "meshio.*"
+# These live behind optional extras, so a lean dev install has none of them.
+# Typecheck has to pass there or "green locally means green in CI" is false.
+module = ["meshio.*", "pyvista.*", "jax.*", "jaxlib.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Without the jax extra, jax resolves to Any and this module's narrowing
+# ignores read as unused. They are correct when jax is installed.
+module = "topokit.jax"
+warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = [
-  "fd: Tier-2 finite-difference sensitivity verification tests",
-]
 
 [tool.importlinter]
 root_package = "topokit"
@@ -111,9 +118,9 @@ layers = [
   "topokit.problem",
   "topokit.responses",
   "topokit.fem : topokit.solvers : topokit.parametrization : topokit.optimizers",
-  "topokit.selection : topokit.jax",
+  "topokit.selection : topokit.jax : topokit.fields",
   "topokit.mesh",
-  "topokit.backend : topokit.events : topokit.fields : topokit.testing : topokit.checkpoint",
+  "topokit.backend : topokit.events : topokit.testing : topokit.checkpoint",
   "topokit.registry",
   "topokit.exceptions",
 ]

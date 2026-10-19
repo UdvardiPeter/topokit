@@ -22,8 +22,7 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-import warnings
-from collections.abc import Iterator
+from collections.abc import Generator
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -42,7 +41,7 @@ from topokit.events import (
 from topokit.exceptions import TopoKitError
 from topokit.fem import PhysicsModel
 from topokit.fields import DesignField
-from topokit.mesh import Mesh, StructuredGrid
+from topokit.mesh import Mesh
 from topokit.optimizers import OC, Optimizer
 from topokit.parametrization import SIMP, BoundChain, Chain, Heaviside, LinkSpec
 from topokit.responses import Compliance, Constraint, Response, Solution
@@ -119,67 +118,20 @@ def _staged_spec(spec: Chain, *, p: float, beta: float) -> Chain:
     return Chain(links)
 
 
-def _staged_chain(spec: Chain, mesh: Mesh, *, p: float, beta: float) -> BoundChain:
-    """Rebind ``spec`` with the stage's SIMP ``p``/Heaviside ``beta`` (Option A)."""
-    return _staged_spec(spec, p=p, beta=beta).bind(mesh)
+def _mesh_digest(mesh: Mesh) -> str:
+    """Hex digest of everything about a mesh the design vector is indexed by.
 
-
-_NODES_PER_ELEMENT = {"quad4": 4, "hex8": 8, "tri3": 3, "tet4": 4, "tet10": 10}
-
-
-def _geometry_digest(mesh: Mesh) -> str:
-    """Hex digest of a mesh's node coordinates and connectivity.
-
-    The non-grid half of the checkpoint fingerprint: element counts alone
-    cannot tell two meshes over the same nodes apart.
+    Node coordinates, connectivity and the solid/void masks. Counts alone
+    cannot tell two meshes apart: re-splitting a quad along the other
+    diagonal keeps every count and every coordinate while making element 0 a
+    different triangle, moving a tet10 midside node leaves every centroid
+    unchanged, and swapping which element is solid changes neither n_dof nor
+    the design-variable count.
     """
     digest = hashlib.sha256()
-    digest.update(mesh.nodes.tobytes())
-    digest.update(mesh.element_nodes.tobytes())
+    for part in (mesh.nodes, mesh.element_nodes, mesh.solid, mesh.void):
+        digest.update(np.ascontiguousarray(part).tobytes())
     return digest.hexdigest()
-
-
-def _mask_digest(mesh: Mesh) -> str:
-    """Hex digest of a mesh's solid and void masks.
-
-    Which elements are fixed material and which are removed is part of the
-    problem's identity, and neither the element counts nor ``n_dof`` can see
-    a swap that keeps them equal (moving the solid element from one end of
-    the grid to the other, say).
-    """
-    digest = hashlib.sha256()
-    digest.update(np.asarray(mesh.solid).tobytes())
-    digest.update(np.asarray(mesh.void).tobytes())
-    return digest.hexdigest()
-
-
-def _estimate_stiffness_bytes(n_dof: int, nnz: int) -> int:
-    """Rough CSR float64 stiffness-matrix size: data + indices + indptr."""
-    return nnz * (8 + 4) + (n_dof + 1) * 4
-
-
-def _available_ram_bytes() -> int | None:
-    """Best-effort total RAM in bytes, or None if undetectable."""
-    try:
-        return int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
-    except (ValueError, OSError, AttributeError):
-        return None
-
-
-def _warn_if_memory_tight(model: PhysicsModel) -> None:
-    """Warn (with numbers) if the estimated stiffness matrix may strain RAM."""
-    nen = _NODES_PER_ELEMENT.get(model.mesh.element_kind)
-    if nen is None:
-        return
-    nnz = model.mesh.n_elements * (nen * model.mesh.dim) ** 2
-    estimate = _estimate_stiffness_bytes(model.n_dof, nnz)
-    ram = _available_ram_bytes()
-    if ram is not None and estimate > 0.5 * ram:
-        warnings.warn(
-            f"estimated stiffness matrix ~{estimate / 1e9:.1f} GB may strain available "
-            f"RAM ~{ram / 1e9:.1f} GB; consider a coarser mesh or the AmgCG solver",
-            stacklevel=3,
-        )
 
 
 def _schedule_to_json(schedule: Schedule) -> list[dict[str, float]]:
@@ -293,7 +245,6 @@ class Problem:
         # without the pairing is simply left alone).
         if hasattr(self.solver, "set_near_nullspace") and hasattr(model, "near_nullspace"):
             self.solver.set_near_nullspace(model.near_nullspace())
-        _warn_if_memory_tight(model)
 
     def default_volume_fraction(self) -> float:
         """Guess an initial design density from the first volume constraint."""
@@ -375,6 +326,54 @@ class _Resume:
     best_feasible: bool
     converged: bool
     reason: str
+
+
+@dataclass
+class _RunState:
+    """Everything a run accumulates, in one place.
+
+    ``iterate`` used to hang these off ``self``, which meant ``run`` and
+    ``_checkpoint`` read ten attributes that nothing in ``__init__`` created.
+    """
+
+    history: dict[str, list[float]]
+    converged: bool = False
+    reason: str = "max iterations reached"
+    best_feasible: bool = False
+    best_x: _F64 = field(default_factory=lambda: np.zeros(0))
+    best_objective: float = float("inf")
+    best_g: float = float("inf")
+    timing: float = 0.0
+    final: IterationState | None = None
+    final_chain: BoundChain | None = None
+
+    def offer(self, x: _F64, objective: float, max_g: float) -> None:
+        """Keep ``x`` if it is the best iterate of this stage so far.
+
+        Feasible beats infeasible; among feasible, lowest objective; among
+        infeasible, least violation.
+        """
+        if max_g <= 1e-4 and (not self.best_feasible or objective < self.best_objective):
+            self.best_feasible, self.best_x, self.best_objective, self.best_g = (
+                True,
+                x.copy(),
+                objective,
+                max_g,
+            )
+        elif not self.best_feasible and max_g < self.best_g:
+            self.best_x, self.best_objective, self.best_g = x.copy(), objective, max_g
+
+    def reset_best(self, x: _F64) -> None:
+        """Forget the previous stage's best.
+
+        Compliance is not comparable across stages (different ``p``) and early
+        grey stages are not valid topologies, so "best" means the best iterate
+        of the current stage.
+        """
+        self.best_feasible = False
+        self.best_x = x.copy()
+        self.best_objective = float("inf")
+        self.best_g = float("inf")
 
 
 @dataclass
@@ -486,10 +485,7 @@ class Study:
 
     def _initial_x(self) -> _F64:
         if self.x0 is not None:
-            x0 = np.asarray(self.x0, dtype=np.float64)
-            if x0.shape != (self.problem.chain.n_vars,):
-                raise ProblemError(f"x0 shape {x0.shape} != ({self.problem.chain.n_vars},)")
-            return x0
+            return np.asarray(self.x0, dtype=np.float64)  # shape checked in __post_init__
         return self.problem.chain.initial_design(self.problem.default_volume_fraction())
 
     def _evaluate(
@@ -530,18 +526,14 @@ class Study:
         path: str,
         *,
         events: EventBus | None = None,
-        schedule: Schedule | None = None,
     ) -> Study:
         """Reconstruct a Study from a ``.topo`` and continue; ``problem`` must match.
 
-        Pass ``schedule`` to continue under a different one, which is how a run
-        that reached the end of its schedule is extended (a larger per-stage
-        ``max_iter``, or more stages). The problem itself must match the
-        checkpoint either way: the fingerprint is always verified against the
-        schedule the checkpoint was written with, so the override relaxes the
-        run parameters and never the problem identity. Stages the checkpoint
-        already completed are history and are not re-run, so the override
-        governs only what remains.
+        The run continues under the schedule the checkpoint was written with,
+        from the iteration its last checkpoint recorded, and the problem's
+        fingerprint is verified against the one stored in the file. To run
+        further than that schedule allows, start a new study from the result:
+        ``Study(problem, schedule=longer, x0=result.x)``.
         """
         manifest, arrays = read_topo(path)
         if int(manifest.get("schema", -1)) != SCHEMA_VERSION:
@@ -555,14 +547,6 @@ class Study:
         if config_fingerprint(study._config_parts()) != manifest["fingerprint"]:
             raise ProblemError("checkpoint was written for a different problem")
         stage_index = int(manifest["stage_index"])
-        if schedule is not None:
-            if stage_index >= len(schedule.stages):
-                raise ProblemError(
-                    f"the checkpoint resumes at stage {stage_index}, but the given schedule "
-                    f"has only {len(schedule.stages)} stage(s); it must keep at least the "
-                    "stages the run already reached"
-                )
-            study.schedule = schedule
         opt_state: dict[str, object] = dict(manifest["opt_scalars"])
         for name in manifest["opt_none"]:
             opt_state[name] = None
@@ -591,38 +575,11 @@ class Study:
         p = self.problem
         assert self.schedule is not None
         mesh = p.model.mesh
-        # This tuple is repr()-hashed into the checkpoint fingerprint. The
-        # grid case unpacks shape/spacing flat, which is also the layout every
-        # earlier checkpoint used; the mask digest below changes the hash for
-        # both kinds anyway, which is what SCHEMA_VERSION 2 announces. The
-        # non-grid
-        # branch is new territory with no prior checkpoints and is free to
-        # pick its own shape: it adds a geometry digest over the node
-        # coordinates AND the connectivity, so a mesh with the same
-        # dim/n_elements/n_nodes but moved nodes or a different element
-        # topology (neither of which the counts can see) is still rejected on
-        # resume. Connectivity matters as much as coordinates: re-splitting a
-        # quad along the other diagonal keeps every count and every node
-        # coordinate, yet element 0 is a different triangle, so the stored
-        # design vector would resume onto the wrong elements. Hashing the raw
-        # node array (not per-element centroids) also catches a moved tet10
-        # midside node: centroids are corner-only and a midside move leaves
-        # every centroid unchanged.
-        mesh_parts: tuple[object, ...] = (
-            (tuple(mesh.shape), tuple(float(s) for s in mesh.spacing))
-            if isinstance(mesh, StructuredGrid)
-            else (
-                (
-                    mesh.dim,
-                    mesh.n_elements,
-                    mesh.n_nodes,
-                    _geometry_digest(mesh),
-                ),
-            )
-        )
+        # repr()-hashed into the checkpoint fingerprint. One digest covers every
+        # mesh kind: the grid's shape and spacing are implied by its nodes, and
+        # SCHEMA_VERSION 3 announces that the layout changed.
         return (
-            *mesh_parts,
-            _mask_digest(mesh),
+            _mesh_digest(mesh),
             int(p.model.n_dof),
             repr(p.chain.spec),
             p.objective.name,
@@ -632,7 +589,13 @@ class Study:
         )
 
     def _checkpoint(
-        self, stage_index: int, iter_in_stage: int, iteration: int, x: _F64, c0: float | None
+        self,
+        state: _RunState,
+        stage_index: int,
+        iter_in_stage: int,
+        iteration: int,
+        x: _F64,
+        c0: float | None,
     ) -> None:
         """Write the resumable state to ``checkpoint_path`` (atomic .topo)."""
         if self.checkpoint_path is None:
@@ -657,44 +620,56 @@ class Study:
             "iter_in_stage": iter_in_stage,
             "iteration": iteration,
             "c0": c0,
-            "converged": self._converged,
-            "reason": self._reason,
-            "history": self._history,
-            "best_objective": self._best_obj,
-            "best_g": self._best_g,
-            "best_feasible": self._best_feasible,
+            "converged": state.converged,
+            "reason": state.reason,
+            "history": state.history,
+            "best_objective": state.best_objective,
+            "best_g": state.best_g,
+            "best_feasible": state.best_feasible,
             "opt_scalars": opt_scalars,
             "opt_none": opt_none,
         }
-        arrays = {"x": np.asarray(x), "best_x": np.asarray(self._best_x), **opt_arrays}
+        arrays = {"x": np.asarray(x), "best_x": np.asarray(state.best_x), **opt_arrays}
         write_topo(self.checkpoint_path, manifest, arrays)
 
     def run(self) -> Result:
         """Run every continuation stage to convergence or the cap, firing events."""
-        for _ in self.iterate():
-            pass
-        x = self._final.x  # the evaluated design (paired with self._final.objective)
+        gen = self.iterate()
+        while True:
+            try:
+                next(gen)
+            except StopIteration as stop:
+                final: Result = stop.value
+                return final
+
+    def _result(self, state: _RunState, iterations: int) -> Result:
+        """Package a finished run."""
+        assert state.final is not None and state.final_chain is not None
         mesh = self.problem.model.mesh
+        x = state.final.x  # the evaluated design, paired with state.final.objective
         return Result(
-            design=DesignField(self._final_chain.physical_density(x), mesh, name="density"),
+            design=DesignField(state.final_chain.physical_density(x), mesh, name="density"),
             x=x,
-            objective=self._final.objective,
+            objective=state.final.objective,
             best_design=DesignField(
-                self._final_chain.physical_density(self._best_x), mesh, name="density"
+                state.final_chain.physical_density(state.best_x), mesh, name="density"
             ),
-            best_x=self._best_x,
-            best_objective=self._best_obj,
-            history=self._history,
-            iterations=self._final.iteration,
-            stages_run=len({int(s) for s in self._history["stage"]}),
-            converged=self._converged,
-            reason=self._reason,
-            timing=self._timing,
-            kkt=self._final.kkt,
+            best_x=state.best_x,
+            best_objective=state.best_objective,
+            history=state.history,
+            iterations=iterations,
+            stages_run=len({int(v) for v in state.history["stage"]}),
+            converged=state.converged,
+            reason=state.reason,
+            timing=state.timing,
+            kkt=state.final.kkt,
         )
 
-    def iterate(self) -> Iterator[IterationState]:
+    def iterate(self) -> Generator[IterationState, None, Result]:
         """Yield one :class:`IterationState` per iteration across all stages.
+
+        Returns the :class:`Result` when the generator finishes, which is
+        what :meth:`run` collects.
 
         Each yielded state pairs the *evaluated* design ``x`` with the
         objective measured at that ``x``. Stages override the chain's SIMP
@@ -707,39 +682,44 @@ class Study:
         self._resume = None  # consume; a re-run starts fresh
         if resume is None:
             x = self._initial_x()
-            self._history: dict[str, list[float]] = {
+            history: dict[str, list[float]] = {
                 "objective": [],
                 "change": [],
                 "kkt": [],
                 "stage": [],
             }
             for c in p.constraints:
-                self._history[c.report_key] = []
-            self._converged = False
-            self._reason = "max iterations reached"
+                history[c.report_key] = []
+            state = _RunState(history=history)
             iteration = 0
             start_stage, start_j = 0, 1
         else:
             x = resume.x
-            self._history = resume.history
-            self._converged = resume.converged
-            self._reason = resume.reason
+            state = _RunState(
+                history=resume.history, converged=resume.converged, reason=resume.reason
+            )
             iteration = resume.iteration
             start_stage, start_j = resume.stage_index, resume.iter_in_stage
         t0 = time.perf_counter()
         self.events.publish(StudyStarted(config={"stages": len(self.schedule.stages)}))
 
-        ran_any = False
-        prev_spec: Chain | None = None
-        for stage_index, stage in enumerate(self.schedule.stages):
-            if stage_index < start_stage:
+        # Decide which stages run before running any: a stage whose staged spec
+        # repeats the previous one changes nothing, and resolving that here
+        # means no skipped stage index can leak into a checkpoint cursor.
+        planned: list[tuple[int, Stage, Chain]] = []
+        for index, stage in enumerate(self.schedule.stages):
+            if index < start_stage:
                 continue  # already completed in a prior session (resume)
             staged = _staged_spec(p.chain.spec, p=stage.p, beta=stage.beta)
-            if staged == prev_spec:
-                continue  # dedup: identical to the previous executed stage (no bind paid)
-            prev_spec = staged
+            if planned and staged == planned[-1][2]:
+                continue  # identical to the previous executed stage: no bind paid
+            planned.append((index, stage, staged))
+
+        ran_any = False
+        final_cursor: tuple[int, int, float | None] | None = None
+        for stage_index, stage, staged in planned:
             chain = staged.bind(p.model.mesh)
-            self._final_chain = chain
+            state.final_chain = chain
             p.optimizer.setup(chain.n_vars, np.zeros(chain.n_vars), np.ones(chain.n_vars))
             c0: float | None = None
             stage_reason = "stage max iterations reached"
@@ -748,24 +728,20 @@ class Study:
                 # state, c0, and best are all restored)
                 p.optimizer.load_state(resume.opt_state)
                 c0 = resume.c0
-                self._best_feasible = resume.best_feasible
-                self._best_x = resume.best_x
-                self._best_obj = resume.best_obj
-                self._best_g = resume.best_g
+                state.best_feasible = resume.best_feasible
+                state.best_x = resume.best_x
+                state.best_objective = resume.best_obj
+                state.best_g = resume.best_g
                 j_start = start_j
             else:
-                # best-feasible tracking, reset per stage: compliance across stages
-                # is not comparable (different p), and early grey stages are not
-                # valid topologies, so "best" means the best iterate of this stage.
-                self._best_feasible = False
-                self._best_x = x.copy()
-                self._best_obj = float("inf")
-                self._best_g = float("inf")
+                state.reset_best(x)
                 j_start = 1
-            self._converged = False
+            state.converged = False
 
+            reached = 0  # the last iteration this stage actually ran
             for j in range(j_start, stage.max_iter + 1):
                 iteration += 1
+                reached = j
                 ran_any = True
                 sol, f0, df0, gvals, dgs, responses = self._evaluate(x, chain)
                 if c0 is None:
@@ -773,23 +749,15 @@ class Study:
                 step = p.optimizer.step(x, f0 / c0, df0 / c0, gvals, dgs)
 
                 maxg = float(gvals.max()) if gvals.size else 0.0
-                if maxg <= 1e-4 and (not self._best_feasible or f0 < self._best_obj):
-                    self._best_feasible, self._best_x, self._best_obj, self._best_g = (
-                        True,
-                        x.copy(),
-                        f0,
-                        maxg,
-                    )
-                elif not self._best_feasible and maxg < self._best_g:
-                    self._best_x, self._best_obj, self._best_g = x.copy(), f0, maxg
+                state.offer(x, f0, maxg)
 
-                self._history["objective"].append(f0)
-                self._history["change"].append(step.change)
-                self._history["kkt"].append(step.kkt)
-                self._history["stage"].append(float(stage_index))
+                state.history["objective"].append(f0)
+                state.history["change"].append(step.change)
+                state.history["kkt"].append(step.kkt)
+                state.history["stage"].append(float(stage_index))
                 for name, val in responses.items():
                     if name != p.objective.name:
-                        self._history[name].append(val)
+                        state.history[name].append(val)
                 self.events.publish(
                     IterationFinished(
                         iteration=iteration,
@@ -805,7 +773,7 @@ class Study:
                         FieldSnapshot(iteration=iteration, rho=sol.density, mesh=sol.mesh)
                     )
 
-                self._final = IterationState(
+                state.final = IterationState(
                     iteration=iteration,
                     x=x.copy(),
                     objective=f0,
@@ -813,10 +781,10 @@ class Study:
                     kkt=step.kkt,
                     stage=stage_index,
                 )
-                yield self._final
+                yield state.final
 
                 if step.change < stage.tol:
-                    self._converged = True
+                    state.converged = True
                     stage_reason = f"design change {step.change:.2e} < tol {stage.tol:g}"
                     break
                 x = step.x_next
@@ -828,22 +796,27 @@ class Study:
                     and self.checkpoint_every > 0
                     and iteration % self.checkpoint_every == 0
                 ):
-                    self._checkpoint(stage_index, j + 1, iteration, x, c0)
+                    self._checkpoint(state, stage_index, j + 1, iteration, x, c0)
 
-            self._reason = stage_reason
+            state.reason = stage_reason
+            if reached:
+                # resuming at the end of a stage leaves the range empty, so only
+                # a stage that ran can name the cursor to resume from
+                final_cursor = (stage_index, reached + 1, c0)
             self.events.publish(StageFinished(stage=stage_index, reason=stage_reason))
 
-        if not ran_any:
+        if not ran_any or final_cursor is None:
             raise ProblemError(
-                "nothing to resume: the checkpoint is already at the end of its schedule; "
-                "continue it with Study.resume(problem, path, schedule=...) carrying a "
-                "larger per-stage max_iter or more stages"
+                "nothing to resume: the checkpoint is already at the end of its schedule. "
+                "Start a new study from the result instead: "
+                "Study(problem, schedule=longer, x0=result.x)"
             )
-        self._checkpoint(stage_index, j + 1, iteration, x, c0)
-        self._timing = time.perf_counter() - t0
+        self._checkpoint(state, *final_cursor[:2], iteration, x, final_cursor[2])
+        state.timing = time.perf_counter() - t0
         self.events.publish(
             StudyFinished(
-                reason=self._reason,
-                summary={"iterations": iteration, "converged": self._converged},
+                reason=state.reason,
+                summary={"iterations": iteration, "converged": state.converged},
             )
         )
+        return self._result(state, iteration)

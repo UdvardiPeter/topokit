@@ -13,12 +13,12 @@ from topokit import (
     SIMP,
     Box,
     Compliance,
+    DensityFilter,
     LinearElasticity,
     Material,
     NearPoint,
     PointLoad,
     Problem,
-    RadialDensityFilter,
     Schedule,
     StructuredGrid,
     Study,
@@ -27,7 +27,7 @@ from topokit import (
 
 nelx, nely = 90, 30
 mesh = StructuredGrid.box(size=(float(nelx), float(nely)), shape=(nelx, nely))
-band = Box((0.0, nely / 3.0), (0.0, 2.0 * nely / 3.0), tol=1e-9)
+band = Box((0.0, nely / 3.0), (0.0, 2.0 * nely / 3.0))
 mid_right = NearPoint((float(nelx), nely / 2.0))
 model = LinearElasticity(
     mesh,
@@ -35,7 +35,7 @@ model = LinearElasticity(
     supports=[(band, "all")],
     loads=[PointLoad(mid_right, force=(0.0, -1.0))],
 )
-chain = RadialDensityFilter(radius=2.4) | SIMP(p=3.0)
+chain = DensityFilter(radius=2.4) | SIMP(p=3.0)
 problem = Problem(
     model, chain, objective=Compliance(), constraints=[Volume() <= 0.5], optimizer=MMA()
 )

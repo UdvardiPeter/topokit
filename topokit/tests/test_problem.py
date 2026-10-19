@@ -3,11 +3,19 @@
 """Tests for the Problem/Study orchestration layer."""
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from tests.conftest import (
+    CORNER_TET10_ELEMENTS,
+    CORNER_TET10_NODES,
+    LEFT_EDGE_2D,
+    UNIT_MATERIAL,
+    named_backend,
+)
 from topokit.checkpoint import read_topo, write_topo
 from topokit.events import (
     FieldSnapshot,
@@ -19,7 +27,6 @@ from topokit.events import (
 from topokit.fem import (
     BodyForce,
     LinearElasticity,
-    Material,
     PointLoad,
     SurfaceTraction,
     UnstructuredElasticity,
@@ -32,22 +39,20 @@ from topokit.parametrization import (
     DensityFilter,
     Heaviside,
     ParametrizationError,
-    SymmetryMap,
 )
 from topokit.problem import Problem, ProblemError, Schedule, Stage, Study
 from topokit.responses import Compliance, Constraint, Volume
-from topokit.selection import Box, NearPoint, PlaneSlab
+from topokit.selection import Box, NearPoint
 from topokit.solvers import AmgCG, Direct, LinearSolver
 
 
 def _cantilever(shape: tuple[int, int] = (20, 10)) -> LinearElasticity:
     g = StructuredGrid.box(size=(float(shape[0]), float(shape[1])), shape=shape)
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     tip = Box((float(shape[0]), 0.0), (float(shape[0]), 0.0), tol=0.6)
     return LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(tip, (0.0, -1.0))],
     )
 
@@ -301,13 +306,11 @@ def test_max_iter_must_be_positive() -> None:
 
 def test_multi_load_runs() -> None:
     g = StructuredGrid.box(size=(10.0, 10.0), shape=(10, 10))
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
-    from topokit.selection import NearPoint
 
     model = LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[
             [PointLoad(NearPoint((10.0, 10.0)), (0.0, -1.0))],
             [PointLoad(NearPoint((10.0, 0.0)), (0.0, -1.0))],
@@ -347,18 +350,20 @@ def test_study_writes_checkpoint(tmp_path: Path) -> None:
     assert "x" in a and "fingerprint" in m and "c0" in m
 
 
-def test_config_parts_keeps_grid_descriptor_flat() -> None:
-    # _config_parts() is repr()-hashed into the checkpoint fingerprint; a grid
-    # problem must place shape/spacing as flat elements 0 and 1 of the outer
-    # tuple (not nested under a wrapper), or every .topo file written for an
-    # unmodified structured-grid problem before a refactor starts failing
-    # resume with "checkpoint was written for a different problem".
-    study = Study(_problem())
-    parts = study._config_parts()
-    mesh = study.problem.model.mesh
-    assert isinstance(mesh, StructuredGrid)
-    assert parts[0] == tuple(mesh.shape)
-    assert parts[1] == tuple(float(s) for s in mesh.spacing)
+def test_the_fingerprint_sees_a_grid_respaced_or_reshaped() -> None:
+    # one digest covers every mesh kind; for a grid, shape and spacing are
+    # implied by its node coordinates
+    from topokit.problem import _mesh_digest
+
+    base = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0))
+    assert _mesh_digest(base) != _mesh_digest(StructuredGrid(shape=(2, 4), spacing=(1.0, 1.0)))
+    assert _mesh_digest(base) != _mesh_digest(StructuredGrid(shape=(4, 2), spacing=(1.0, 0.5)))
+    solid = np.zeros(8, dtype=bool)
+    solid[0] = True
+    assert _mesh_digest(base) != _mesh_digest(
+        StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
+    )
+    assert _mesh_digest(base) == _mesh_digest(StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0)))
 
 
 def _tri3_mesh(node2: tuple[float, float], *, other_diagonal: bool = False) -> UnstructuredMesh:
@@ -372,18 +377,17 @@ def _tri3_mesh(node2: tuple[float, float], *, other_diagonal: bool = False) -> U
 
 def _expected_digest(mesh: UnstructuredMesh) -> str:
     digest = hashlib.sha256()
-    digest.update(mesh.nodes.tobytes())
-    digest.update(mesh.element_nodes.tobytes())
+    for part in (mesh.nodes, mesh.element_nodes, mesh.solid, mesh.void):
+        digest.update(np.ascontiguousarray(part).tobytes())
     return digest.hexdigest()
 
 
 def _unstructured_problem(mesh: UnstructuredMesh, optimizer: Optimizer | None = None) -> Problem:
-    left = PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9)
     right = Box((1.0, 0.0), (1.0, 1.2), tol=1e-9)
     model = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(left, "x"), (NearPoint((0.0, 0.0)), "y")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "x"), (NearPoint((0.0, 0.0)), "y")],
         loads=[SurfaceTraction(right, traction=(1.0, 0.0))],
     )
     return Problem(
@@ -404,7 +408,7 @@ def test_config_parts_non_grid_carries_a_node_digest_and_resume_sees_moved_nodes
     mesh = _tri3_mesh((1.0, 1.0))
     study = Study(_unstructured_problem(mesh))
     parts = study._config_parts()
-    assert parts[0] == (mesh.dim, mesh.n_elements, mesh.n_nodes, _expected_digest(mesh))
+    assert parts[0] == _expected_digest(mesh)
 
     # round trip: resuming against the identical mesh continues the run
     full = Study(
@@ -446,23 +450,9 @@ def test_config_parts_non_grid_carries_a_node_digest_and_resume_sees_moved_nodes
 
 def _tet10_single(mid_shift: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> UnstructuredMesh:
     """Single right-angle tet10; ``mid_shift`` perturbs midside node 5 (mid(1,2)) only."""
-    nodes = np.array(
-        [
-            [0.0, 0.0, 0.0],  # 0
-            [1.0, 0.0, 0.0],  # 1
-            [0.0, 1.0, 0.0],  # 2
-            [0.0, 0.0, 1.0],  # 3
-            [0.5, 0.0, 0.0],  # 4 mid(0,1)
-            [0.5, 0.5, 0.0],  # 5 mid(1,2)
-            [0.0, 0.5, 0.0],  # 6 mid(2,0)
-            [0.0, 0.0, 0.5],  # 7 mid(0,3)
-            [0.5, 0.0, 0.5],  # 8 mid(1,3)
-            [0.0, 0.5, 0.5],  # 9 mid(2,3)
-        ]
-    )
+    nodes = CORNER_TET10_NODES.copy()
     nodes[5] = nodes[5] + np.array(mid_shift)
-    elements = np.array([list(range(10))])
-    return UnstructuredMesh(nodes, elements, "tet10")
+    return UnstructuredMesh(nodes, CORNER_TET10_ELEMENTS, "tet10")
 
 
 def _unstructured_tet10_problem(
@@ -472,7 +462,7 @@ def _unstructured_tet10_problem(
     # modes of the single element without relying on a face selector.
     model = UnstructuredElasticity(
         mesh,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[
             (NearPoint((0.0, 0.0, 0.0)), "all"),
             (NearPoint((1.0, 0.0, 0.0)), ("y", "z")),
@@ -539,22 +529,6 @@ def test_resume_matches_uninterrupted(tmp_path: Path) -> None:
     np.testing.assert_array_equal(out.x, full.x)
 
 
-def test_estimate_stiffness_bytes() -> None:
-    from topokit.problem import _estimate_stiffness_bytes
-
-    assert _estimate_stiffness_bytes(n_dof=1_000_000, nnz=80_000_000) == (
-        80_000_000 * 12 + 1_000_001 * 4
-    )
-
-
-def test_small_problem_does_not_warn() -> None:
-    import warnings
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")  # any memory warning would fail the test
-        _problem(OC(move=0.2))  # the 20x10 cantilever is tiny
-
-
 def test_checkpoint_every_zero_writes_only_final(tmp_path: Path) -> None:
     # checkpoint_every <= 0 must not divide-by-zero; the final write still happens
     path = tmp_path / "run.topo"
@@ -592,7 +566,6 @@ def test_resume_multistage_matches_uninterrupted(tmp_path: Path) -> None:
 
 
 def test_resume_rejects_unknown_schema(tmp_path: Path) -> None:
-    from topokit.checkpoint import write_topo
 
     path = tmp_path / "run.topo"
     write_topo(str(path), {"schema": 999}, {"x": np.zeros(4)})
@@ -622,20 +595,6 @@ def test_resume_completed_run_raises(tmp_path: Path) -> None:
         resumed.run()
 
 
-def test_resume_rejects_changed_optimizer_params(tmp_path: Path) -> None:
-    path = tmp_path / "run.topo"
-    Study(
-        _problem(OC(move=0.2)),
-        schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0),
-        checkpoint_path=str(path),
-        checkpoint_every=5,
-    ).run()
-    # same chain/objective, but a different optimizer hyperparameter
-    other = _problem(OC(move=0.5))
-    with pytest.raises(ProblemError, match="different problem"):
-        Study.resume(other, str(path))
-
-
 def test_continuation_sharpens_vs_single_stage() -> None:
     # the point of continuation: ramping Heaviside beta drives the design toward
     # 0/1, so the grey fraction is lower than a fixed-beta single stage.
@@ -649,7 +608,16 @@ def test_continuation_sharpens_vs_single_stage() -> None:
     assert grey(cont.design.values) < grey(single.design.values)
 
 
-def test_resume_rejects_wrong_problem(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "other",
+    [
+        # a different chain (Heaviside added), and the same chain with one
+        # optimizer hyperparameter changed: both are a different problem
+        pytest.param(lambda: _problem_proj(OC(move=0.2)), id="chain"),
+        pytest.param(lambda: _problem(OC(move=0.5)), id="optimizer_params"),
+    ],
+)
+def test_resume_rejects_a_different_problem(other: Callable[[], Problem], tmp_path: Path) -> None:
     path = tmp_path / "run.topo"
     Study(
         _problem(OC(move=0.2)),
@@ -657,9 +625,8 @@ def test_resume_rejects_wrong_problem(tmp_path: Path) -> None:
         checkpoint_path=str(path),
         checkpoint_every=5,
     ).run()
-    other = _problem_proj(OC(move=0.2))  # different chain (has Heaviside)
     with pytest.raises(ProblemError, match="different problem"):
-        Study.resume(other, str(path))
+        Study.resume(other(), str(path))
 
 
 def test_amg_solver_runs() -> None:
@@ -669,47 +636,25 @@ def test_amg_solver_runs() -> None:
     assert result.objective > 0.0
 
 
-def test_symmetry_runs_in_reduced_space() -> None:
-    # SymmetryMap is a reduced-input link: the optimizer works in the reduced
-    # space, so n_vars < design-element count. Confirms the reduced gradient
-    # size flows through optimizer.setup/step and the design vars stay reduced.
-    model = _cantilever()
-    chain = SymmetryMap(planes=("x",)) | DensityFilter(radius=1.5) | SIMP(p=3.0)
-    p = Problem(
-        model,
-        chain,
-        objective=Compliance(),
-        constraints=[Volume() <= 0.4],
-        optimizer=OC(move=0.2),
-    )
-    assert p.chain.n_vars < int(model.mesh.design.sum())  # space genuinely reduced
-    result = Study(p, schedule=Schedule.single(p=3.0, max_iter=30, tol=1e-3)).run()
-    assert result.x.size == p.chain.n_vars
-    assert result.history["objective"][-1] < result.history["objective"][0]
-    assert result.history["volume"][-1] == pytest.approx(0.4, abs=1e-3)
+def test_staged_spec_overrides_p_and_beta() -> None:
+    from topokit.problem import _staged_spec
 
-
-def test_staged_chain_overrides_p_and_beta() -> None:
-    from topokit.problem import _staged_chain
-
-    model = _cantilever()
     spec = DensityFilter(radius=1.5) | Heaviside(beta=1.0) | SIMP(p=3.0)
-    staged = _staged_chain(spec, model.mesh, p=2.0, beta=8.0)
-    simp = next(link for link in staged.spec.links if isinstance(link, SIMP))
-    heav = next(link for link in staged.spec.links if isinstance(link, Heaviside))
+    staged = _staged_spec(spec, p=2.0, beta=8.0)
+    simp = next(link for link in staged.links if isinstance(link, SIMP))
+    heav = next(link for link in staged.links if isinstance(link, Heaviside))
     assert simp.p == 2.0
     assert heav.beta == 8.0
 
 
-def test_staged_chains_equal_when_params_unchanged() -> None:
+def test_staged_specs_equal_when_params_unchanged() -> None:
     # a chain without Heaviside: beta changes produce identical specs (dedup)
-    from topokit.problem import _staged_chain
+    from topokit.problem import _staged_spec
 
-    model = _cantilever()
     spec = DensityFilter(radius=1.5) | SIMP(p=3.0)
-    a = _staged_chain(spec, model.mesh, p=3.0, beta=1.0)
-    b = _staged_chain(spec, model.mesh, p=3.0, beta=32.0)
-    assert a.spec == b.spec  # frozen-dataclass equality -> dedup
+    a = _staged_spec(spec, p=3.0, beta=1.0)
+    b = _staged_spec(spec, p=3.0, beta=32.0)
+    assert a == b  # frozen-dataclass equality -> dedup
 
 
 def test_study_reports_kkt() -> None:
@@ -747,7 +692,6 @@ def test_compliance_weights_validated_at_construction() -> None:
 
 def test_problem_wires_near_nullspace_into_solver() -> None:
     pytest.importorskip("pyamg")
-    from topokit.solvers import AmgCG
 
     class Spy(AmgCG):
         def __init__(self) -> None:
@@ -780,35 +724,30 @@ def test_problem_direct_solver_needs_no_modes() -> None:
 
 
 def test_iteration_shares_one_filter_forward_pass() -> None:
-    from topokit.backend import NumpyBackend, register_kernel, use_backend
-    from topokit.parametrization import _separable_correlate
-
-    class Named(NumpyBackend):
-        @property
-        def name(self) -> str:
-            return "fwd_count"
+    from topokit.backend import register_kernel, use_backend
+    from topokit.parametrization import _radial_correlate
 
     calls: list[int] = []
 
-    def counting(grid: np.ndarray, weights: list[np.ndarray]) -> np.ndarray:
+    def counting(grid: np.ndarray, kernel: np.ndarray) -> np.ndarray:
         calls.append(1)
-        return _separable_correlate(grid, weights)
+        return _radial_correlate(grid, kernel)
 
-    register_kernel("separable_correlate", "fwd_count", counting)
+    register_kernel("radial_correlate", "fwd_count", counting)
     problem = _problem()  # DensityFilter chain, Compliance objective, Volume <= 0.4, OC
     study = Study(problem, schedule=Schedule.single(max_iter=2, tol=0.0), snapshot_every=0)
     it = study.iterate()
     next(it)  # prime: consumes the per-stage chain (re)bind, unrelated to _evaluate
-    with use_backend(Named()):
+    with use_backend(named_backend("fwd_count")):
         next(it)  # second iteration reuses the already-bound chain
     # 1 shared forward + 1 backward for the compliance pullback
     # + 1 backward for the volume pullback_density
     assert len(calls) == 3
 
 
-def test_resume_with_extended_schedule_continues(tmp_path: Path) -> None:
-    # the "nothing to resume" error tells the user to extend the schedule; this
-    # is the API that makes that possible
+def test_a_finished_run_is_extended_by_a_new_study_from_its_result(tmp_path: Path) -> None:
+    # resume continues a checkpoint under its own schedule; running further is a
+    # new study seeded with the result, which is what the error message says
     path = tmp_path / "run.topo"
     done = Study(
         _problem(OC(move=0.2)),
@@ -817,49 +756,16 @@ def test_resume_with_extended_schedule_continues(tmp_path: Path) -> None:
         checkpoint_every=8,
     ).run()
     assert done.iterations == 8
-    resumed = Study.resume(
+    with pytest.raises(ProblemError, match="nothing to resume"):
+        Study.resume(_problem(OC(move=0.2)), str(path)).run()
+
+    longer = Study(
         _problem(OC(move=0.2)),
-        str(path),
         schedule=Schedule.single(p=3.0, max_iter=16, tol=0.0),
+        x0=done.x,
     ).run()
-    assert resumed.iterations == 16
-
-
-def test_resume_schedule_override_still_rejects_a_different_problem(tmp_path: Path) -> None:
-    # the override relaxes the run parameters, never the problem identity check
-    path = tmp_path / "run.topo"
-    Study(
-        _problem(OC(move=0.2)),
-        schedule=Schedule.single(p=3.0, max_iter=5, tol=0.0),
-        checkpoint_path=str(path),
-        checkpoint_every=5,
-    ).run()
-    with pytest.raises(ProblemError, match="different problem"):
-        Study.resume(
-            _problem_proj(OC(move=0.2)),
-            str(path),
-            schedule=Schedule.single(p=3.0, max_iter=50, tol=0.0),
-        )
-
-
-def test_resume_schedule_override_rejects_a_shorter_schedule(tmp_path: Path) -> None:
-    # the checkpoint cursor points at stage 1; a one-stage schedule cannot host it
-    path = tmp_path / "run.topo"
-    two = Schedule(
-        (Stage(p=1.0, beta=1.0, max_iter=4, tol=0.0), Stage(p=3.0, beta=1.0, max_iter=4, tol=0.0))
-    )
-    Study(
-        _problem(OC(move=0.2)),
-        schedule=two,
-        checkpoint_path=str(path),
-        checkpoint_every=4,
-    ).run()
-    with pytest.raises(ProblemError, match="stage"):
-        Study.resume(
-            _problem(OC(move=0.2)),
-            str(path),
-            schedule=Schedule.single(p=3.0, max_iter=99, tol=0.0),
-        )
+    assert longer.iterations == 16
+    assert longer.objective <= done.objective
 
 
 def test_problem_rejects_non_protocol_components() -> None:
@@ -1029,8 +935,8 @@ def _masked_problem(solid_element: int) -> Problem:
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.0), solid=solid)
     model = LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
-        supports=[(PlaneSlab(point=(0.0, 0.0), normal=(1.0, 0.0), tol=1e-9), "all")],
+        UNIT_MATERIAL,
+        supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(NearPoint((4.0, 1.0)), (0.0, -1.0))],
     )
     return Problem(

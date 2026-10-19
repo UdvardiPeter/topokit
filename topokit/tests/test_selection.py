@@ -9,7 +9,6 @@ from topokit.mesh import StructuredGrid
 from topokit.selection import (
     Box,
     Cylinder,
-    FaceSetSelector,
     NearPoint,
     OnBoundary,
     PlaneSlab,
@@ -32,6 +31,25 @@ def test_default_tolerance_from_element_volumes() -> None:
 
 def test_box_nodes_with_default_tol() -> None:
     np.testing.assert_array_equal(Box((0.0, 0.0), (0.0, 2.0)).nodes(G22), [0, 3, 6])
+
+
+def test_containment_selectors_are_exact_by_default() -> None:
+    # the box and the disk span no node, so exact containment selects nothing;
+    # an element-scale tolerance reaches half an element past every face
+    assert Box((1.2, 0.0), (1.8, 2.0)).nodes(G22).size == 0
+    np.testing.assert_array_equal(
+        Box((1.2, 0.0), (1.8, 2.0), tol=0.5).nodes(G22), [1, 2, 4, 5, 7, 8]
+    )
+    assert Sphere((1.5, 1.5), 0.2).nodes(G22).size == 0
+    np.testing.assert_array_equal(Sphere((1.5, 1.5), 0.2, tol=0.6).nodes(G22), [4, 5, 7, 8])
+
+
+def test_plane_slab_keeps_the_element_scale_default() -> None:
+    # a zero-thickness plane would select nothing, so PlaneSlab is the one
+    # selector whose default tolerance is still default_tolerance(mesh)
+    np.testing.assert_array_equal(
+        PlaneSlab(point=(1.0, 0.0), normal=(1.0, 0.0)).nodes(G22), [1, 4, 7]
+    )
 
 
 def test_box_elements() -> None:
@@ -76,23 +94,6 @@ def test_on_boundary_with_void_interface() -> None:
 def test_predicate() -> None:
     sel = Predicate(lambda c: c[:, 0] > 1.4)
     np.testing.assert_array_equal(sel.elements(G22), [1, 3])
-
-
-def test_face_set_selector() -> None:
-    g = StructuredGrid(shape=(1, 1), spacing=(1.0, 1.0))
-    f = g.boundary_faces()
-    minus_x = int(np.flatnonzero(f.normal[:, 0] < -0.5)[0])
-    minus_y = int(np.flatnonzero(f.normal[:, 1] < -0.5)[0])
-    sel = FaceSetSelector((minus_x, minus_y))
-    np.testing.assert_array_equal(sel.faces(g), sorted([minus_x, minus_y]))
-    np.testing.assert_array_equal(sel.nodes(g), [0, 1, 2])
-    np.testing.assert_array_equal(sel.elements(g), [0])
-
-
-def test_face_set_selector_out_of_range() -> None:
-    g = StructuredGrid(shape=(1, 1), spacing=(1.0, 1.0))
-    with pytest.raises(SelectionError, match="face id"):
-        FaceSetSelector((9,)).faces(g)
 
 
 def test_combinators_on_elements() -> None:
@@ -163,8 +164,6 @@ def test_list_arguments_coerce_to_canonical_tuples() -> None:
     assert a == b
     assert hash(a) == hash(b)
     np.testing.assert_array_equal(a.elements(G22), b.elements(G22))
-    f = FaceSetSelector(np.array([0, 1]))  # type: ignore[arg-type]
-    assert f.face_ids == (0, 1)
 
 
 def test_selectors_pickle() -> None:
