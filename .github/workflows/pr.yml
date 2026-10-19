@@ -44,3 +44,8 @@ jobs:
         run: npx nx affected -t build
       - name: Docs build
         run: npx nx affected -t docs-build
+      # Executes the code blocks in the documentation. The docs project depends
+      # on topokit, so a library change runs this too -- a page that drifts from
+      # the API fails here instead of in the next nightly.
+      - name: Docs pages execute
+        run: npx nx affected -t docs-pages

@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
 """Tier-1 tests for topokit.viz (headless: asserts on data/geometry, not pixels)."""
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -523,3 +524,42 @@ def test_result_view_methods_are_typed_as_the_figures_they_return(tmp_path: Path
 
     slices = _result(_design_3d()).view_slices()
     slices.savefig(tmp_path / "slices.png")
+
+
+def test_liveview_skips_empty_3d_frames_and_says_so_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import topokit.viz._live as live_mod
+    from topokit.events import EventBus, FieldSnapshot
+    from topokit.viz import LiveView
+
+    monkeypatch.setattr(live_mod, "has_display", lambda: True)
+    live = LiveView(iso=0.5)
+    bus = EventBus()
+    bus.subscribe(FieldSnapshot, live)
+    grid = _design_3d(4).mesh
+    uniform = np.full(grid.n_elements, 0.4)  # a run's opening density: below iso
+
+    with caplog.at_level(logging.INFO, logger="topokit.viz"):
+        for iteration in (5, 10, 15):
+            bus.publish(FieldSnapshot(iteration=iteration, rho=uniform, mesh=grid))
+
+    assert live.skipped == 3
+    assert live.rendered == 0
+    # one note for the run, not one traceback per snapshot
+    empty_records = [r for r in caplog.records if "Skipping frames" in r.message]
+    assert len(empty_records) == 1
+    assert "does not cross" in empty_records[0].message
+
+
+def test_liveview_still_surfaces_a_real_misuse() -> None:
+    # the skip is for EmptySceneError only; an unstructured snapshot is a
+    # mistake to fix, so it must not be swallowed as a skipped frame
+    from topokit.events import FieldSnapshot
+    from topokit.viz import LiveView, VizError
+
+    live = LiveView()
+    snapshot = FieldSnapshot(iteration=1, rho=np.array([0.5, 0.5]), mesh=_tet_pair())
+    with pytest.raises(VizError, match="structured grids only"):
+        live._draw(snapshot)
+    assert live.skipped == 0

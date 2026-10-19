@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from topokit.events import Event, FieldSnapshot, IterationFinished
 from topokit.mesh import StructuredGrid
 from topokit.viz._backend import has_display
-from topokit.viz._density import VizError
+from topokit.viz._density import EmptySceneError, VizError
 
 if TYPE_CHECKING:
     from topokit.problem import Study
@@ -38,6 +38,8 @@ class LiveView:
     def __init__(self, *, iso: float = 0.5) -> None:
         self.iso = iso
         self.rendered = 0
+        self.skipped = 0
+        self._reported_empty = False
         self._enabled = has_display()
         self._plotter: Any = None
         self._hud: tuple[int, dict[str, float]] | None = None
@@ -66,7 +68,17 @@ class LiveView:
             return
         if not self._enabled or not isinstance(event, FieldSnapshot):
             return
-        self._draw(event)
+        try:
+            self._draw(event)
+        except EmptySceneError as exc:
+            # Every 3D run starts uniform at the volume fraction, so the first
+            # snapshots have nothing to contour. Skipping the frame is the
+            # right answer; one note is enough for the whole run.
+            if not self._reported_empty:
+                self._reported_empty = True
+                _log.info("LiveView: %s. Skipping frames until the design crosses it", exc)
+            self.skipped += 1
+            return
         self.rendered += 1
 
     def _hud_title(self) -> str:
