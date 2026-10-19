@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import scipy.sparse
 
-from tests.conftest import LEFT_EDGE_2D, LEFT_EDGE_3D, ones, solve
+from tests.conftest import LEFT_EDGE_2D, LEFT_EDGE_3D, UNIT_MATERIAL, ones, solve
 from topokit.fem import (
     ALUMINUM_6061,
     STEEL,
@@ -458,7 +458,7 @@ def test_near_nullspace_matches_rigid_body_fields() -> None:
     g = StructuredGrid(shape=(4, 2), spacing=(1.0, 1.5), void=void)
     model = LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[(LEFT_EDGE_2D, "all")],
         loads=[PointLoad(NearPoint((4.0, 1.5)), (0.0, -1.0))],
     )
@@ -481,7 +481,7 @@ def test_near_nullspace_3d_shape() -> None:
     g = StructuredGrid.box(size=(4.0, 2.0, 2.0), shape=(4, 2, 2))
     model = LinearElasticity(
         g,
-        Material(E=1.0, nu=0.3, rho=1.0),
+        UNIT_MATERIAL,
         supports=[(LEFT_EDGE_3D, "all")],
         loads=[PointLoad(NearPoint((4.0, 1.0, 1.0)), (0.0, -1.0, 0.0))],
     )
