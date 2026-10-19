@@ -12,13 +12,21 @@ from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
+import pyvista as pv
 from matplotlib.figure import Figure
 
+import topokit.viz._live as live_mod
 from tests.conftest import UNIT_MATERIAL, corner_tet10, tri3_square
+from topokit.events import EventBus, FieldSnapshot, IterationFinished
+from topokit.fem import PointLoad, UnstructuredElasticity
 from topokit.fields import DesignField
 from topokit.mesh import StructuredGrid, UnstructuredMesh
-from topokit.problem import Result
-from topokit.viz import _backend
+from topokit.parametrization import SIMP, DensityFilter
+from topokit.problem import Problem, Result, Study
+from topokit.responses import Compliance, Volume
+from topokit.selection import NearPoint, PlaneSlab
+from topokit.viz import LiveView, VizError, _backend, plot_convergence, view, view_slices
+from topokit.viz._density import _unstructured_grid
 
 
 def _design_2d(nelx: int = 4, nely: int = 3) -> DesignField:
@@ -38,9 +46,6 @@ def test_require_matplotlib_returns_module() -> None:
 
 
 def test_plot_convergence_plots_objective_and_change() -> None:
-    from types import SimpleNamespace
-
-    from topokit.viz import plot_convergence
 
     history = {
         "objective": [10.0, 6.0, 5.0],
@@ -64,9 +69,6 @@ def test_plot_convergence_plots_objective_and_change() -> None:
 
 
 def test_plot_convergence_keys_select_subplots() -> None:
-    from types import SimpleNamespace
-
-    from topokit.viz import plot_convergence
 
     history = {"objective": [10.0, 6.0], "change": [1.0, 0.3]}
     fig = plot_convergence(SimpleNamespace(history=history), keys=["change"])
@@ -74,9 +76,6 @@ def test_plot_convergence_keys_select_subplots() -> None:
 
 
 def test_plot_convergence_marks_stage_boundaries() -> None:
-    from types import SimpleNamespace
-
-    from topokit.viz import plot_convergence
 
     history = {
         "objective": [10.0, 6.0, 5.0, 4.0],
@@ -90,9 +89,6 @@ def test_plot_convergence_marks_stage_boundaries() -> None:
 
 
 def test_view_2d_returns_figure_with_correct_orientation() -> None:
-    from matplotlib.figure import Figure
-
-    from topokit.viz import view
 
     design = _design_2d(4, 3)
     fig = view(design)
@@ -103,9 +99,6 @@ def test_view_2d_returns_figure_with_correct_orientation() -> None:
 
 
 def test_view_3d_returns_isosurface_with_points() -> None:
-    import pyvista as pv
-
-    from topokit.viz import view
 
     design = _design_3d(6)
     plotter = view(design, iso=0.5, off_screen=True)
@@ -114,7 +107,6 @@ def test_view_3d_returns_isosurface_with_points() -> None:
 
 
 def test_view_3d_raises_when_field_stays_below_iso() -> None:
-    from topokit.viz import VizError, view
 
     grid = StructuredGrid.box(size=(4.0, 4.0, 4.0), shape=(4, 4, 4))
     design = DesignField(np.zeros(grid.n_elements), grid, name="density")
@@ -126,7 +118,6 @@ def test_view_3d_raises_when_field_stays_below_iso() -> None:
 
 
 def test_view_3d_raises_when_field_stays_above_iso() -> None:
-    from topokit.viz import VizError, view
 
     grid = StructuredGrid.box(size=(4.0, 4.0, 4.0), shape=(4, 4, 4))
     design = DesignField(np.ones(grid.n_elements), grid, name="density")
@@ -135,9 +126,6 @@ def test_view_3d_raises_when_field_stays_above_iso() -> None:
 
 
 def test_view_slices_3d_returns_n_subplots() -> None:
-    from matplotlib.figure import Figure
-
-    from topokit.viz import view_slices
 
     fig = view_slices(_design_3d(6), axis="z", n=3)
     assert isinstance(fig, Figure)
@@ -145,14 +133,12 @@ def test_view_slices_3d_returns_n_subplots() -> None:
 
 
 def test_view_slices_2d_raises() -> None:
-    from topokit.viz import VizError, view_slices
 
     with pytest.raises(VizError, match="2D"):
         view_slices(_design_2d(4, 3))
 
 
 def test_view_slices_rejects_bad_axis_and_n() -> None:
-    from topokit.viz import VizError, view_slices
 
     with pytest.raises(VizError, match="axis"):
         view_slices(_design_3d(6), axis="w")
@@ -161,9 +147,6 @@ def test_view_slices_rejects_bad_axis_and_n() -> None:
 
 
 def test_liveview_headless_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
-    import topokit.viz._live as live_mod
-    from topokit.events import EventBus, FieldSnapshot
-    from topokit.viz import LiveView
 
     monkeypatch.setattr(live_mod, "has_display", lambda: False)
     bus = EventBus()
@@ -175,9 +158,6 @@ def test_liveview_headless_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_liveview_broken_render_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None:
-    import topokit.viz._live as live_mod
-    from topokit.events import EventBus, FieldSnapshot
-    from topokit.viz import LiveView
 
     monkeypatch.setattr(live_mod, "has_display", lambda: True)
     lv = LiveView()
@@ -190,9 +170,6 @@ def test_liveview_broken_render_does_not_raise(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_liveview_tracks_iteration_hud(monkeypatch: pytest.MonkeyPatch) -> None:
-    import topokit.viz._live as live_mod
-    from topokit.events import EventBus, IterationFinished
-    from topokit.viz import LiveView
 
     monkeypatch.setattr(live_mod, "has_display", lambda: False)  # HUD tracks even headless
     lv = LiveView()
@@ -209,7 +186,6 @@ def test_liveview_tracks_iteration_hud(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_liveview_3d_empty_isosurface_raises_actionable_error() -> None:
-    from topokit.viz import LiveView, VizError
 
     # A run starts uniform at the volume fraction, so the first 3D snapshot has
     # nothing to contour at the default iso. It must say so (and before any
@@ -237,9 +213,6 @@ def _tet_pair() -> UnstructuredMesh:
 
 
 def test_view_renders_2d_unstructured_as_tripcolor_figure() -> None:
-    from matplotlib.figure import Figure
-
-    from topokit.viz import view
 
     mesh = tri3_square()
     values = np.array([0.2, 0.9])
@@ -257,10 +230,6 @@ def test_view_renders_2d_unstructured_as_tripcolor_figure() -> None:
 
 
 def test_view_renders_3d_unstructured_as_thresholded_plotter() -> None:
-    import pyvista as pv
-
-    from topokit.viz import view
-    from topokit.viz._density import _unstructured_grid
 
     mesh = _tet_pair()
     values = np.array([0.1, 0.9])
@@ -274,7 +243,6 @@ def test_view_renders_3d_unstructured_as_thresholded_plotter() -> None:
 
 
 def test_view_3d_unstructured_raises_when_nothing_meets_iso() -> None:
-    from topokit.viz import VizError, view
 
     mesh = _tet_pair()
     field = DesignField(np.array([0.1, 0.2]), mesh, name="density")
@@ -287,9 +255,6 @@ def test_view_3d_unstructured_raises_when_nothing_meets_iso() -> None:
 def test_view_3d_empty_scene_raises_before_a_plotter_exists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pyvista as pv
-
-    from topokit.viz import VizError, view
 
     def _no_plotter(*args: object, **kwargs: object) -> None:
         raise AssertionError("an empty scene must raise before a render window is created")
@@ -304,7 +269,6 @@ def test_view_3d_empty_scene_raises_before_a_plotter_exists(
 
 
 def test_unstructured_grid_uses_vtk_cell_types() -> None:
-    from topokit.viz._density import _unstructured_grid
 
     grid2 = _unstructured_grid(np.array([0.5, 0.5]), tri3_square())
     assert set(grid2.celltypes) == {5}
@@ -314,14 +278,12 @@ def test_unstructured_grid_uses_vtk_cell_types() -> None:
 
 
 def test_unstructured_grid_uses_vtk_cell_types_tet10() -> None:
-    from topokit.viz._density import _unstructured_grid
 
     grid = _unstructured_grid(np.array([0.5]), corner_tet10())
     assert set(grid.celltypes) == {24}
 
 
 def test_view_slices_rejects_unstructured() -> None:
-    from topokit.viz import VizError, view_slices
 
     field = DesignField(np.array([0.5, 0.5]), _tet_pair(), name="density")
     with pytest.raises(VizError, match="structured grids only"):
@@ -329,15 +291,6 @@ def test_view_slices_rejects_unstructured() -> None:
 
 
 def test_liveview_attach_rejects_unstructured_study(caplog: pytest.LogCaptureFixture) -> None:
-    import logging
-
-    from topokit.events import FieldSnapshot
-    from topokit.fem import PointLoad, UnstructuredElasticity
-    from topokit.parametrization import SIMP, DensityFilter
-    from topokit.problem import Problem, Study
-    from topokit.responses import Compliance, Volume
-    from topokit.selection import NearPoint, PlaneSlab
-    from topokit.viz import LiveView, VizError
 
     mesh = tri3_square()
     model = UnstructuredElasticity(
@@ -367,13 +320,9 @@ def test_view_3d_offscreen_screenshot_renders() -> None:
     # OSMesa/xvfb) VTK can HARD-CRASH (segfault) here — uncatchable by try/except — so
     # skip before rendering when there is no display. The VTK geometry pipeline is
     # covered headless by test_view_3d_returns_isosurface_with_points.
-    from topokit.viz import _backend
 
     if not _backend.has_display():
         pytest.skip("off-screen 3D rendering needs a display or virtual framebuffer (xvfb/OSMesa)")
-    import pyvista as pv
-
-    from topokit.viz import view
 
     plotter = view(_design_3d(6), iso=0.5, off_screen=True)
     assert isinstance(plotter, pv.Plotter)
@@ -384,7 +333,6 @@ def test_view_3d_offscreen_screenshot_renders() -> None:
 def test_unstructured_cells_carry_the_mesh_geometry() -> None:
     # Area/volume comes out wrong if the VTK cell type or the node order is wrong: a
     # tet10 with its last two midsides swapped (the gmsh order) measures 1/24, not 1/6.
-    from topokit.viz._density import _unstructured_grid
 
     for mesh in (tri3_square(), _tet_pair(), corner_tet10()):
         grid = _unstructured_grid(np.full(mesh.n_elements, 0.5), mesh)
@@ -406,14 +354,12 @@ def _foreign_field(kind: str, dim: int) -> Any:
 
 
 def test_view_2d_rejects_unrenderable_element_kind() -> None:
-    from topokit.viz import VizError, view
 
     with pytest.raises(VizError, match=r"unsupported element kind 'quad4'.*\['tri3'\]"):
         view(_foreign_field("quad4", dim=2))
 
 
 def test_view_3d_rejects_unrenderable_element_kind() -> None:
-    from topokit.viz import VizError, view
 
     with pytest.raises(VizError, match="unsupported element kind 'hex8'"):
         view(_foreign_field("hex8", dim=3), off_screen=True)
@@ -422,7 +368,6 @@ def test_view_3d_rejects_unrenderable_element_kind() -> None:
 def test_view_slices_keeps_its_dim_and_axis_errors_for_unstructured() -> None:
     # The structured-only guard sits behind the argument checks, so a bad call on an
     # unstructured mesh still gets the error naming what is actually wrong with it.
-    from topokit.viz import VizError, view_slices
 
     with pytest.raises(VizError, match="needs a 3D field"):
         view_slices(DesignField(np.array([0.5, 0.5]), tri3_square(), name="density"))
@@ -431,8 +376,6 @@ def test_view_slices_keeps_its_dim_and_axis_errors_for_unstructured() -> None:
 
 
 def test_liveview_draw_rejects_an_unstructured_snapshot() -> None:
-    from topokit.events import FieldSnapshot
-    from topokit.viz import LiveView, VizError
 
     mesh = tri3_square()
     with pytest.raises(VizError, match="structured grids only"):
@@ -477,9 +420,6 @@ def test_result_view_methods_are_typed_as_the_figures_they_return(tmp_path: Path
 def test_liveview_skips_empty_3d_frames_and_says_so_once(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    import topokit.viz._live as live_mod
-    from topokit.events import EventBus, FieldSnapshot
-    from topokit.viz import LiveView
 
     monkeypatch.setattr(live_mod, "has_display", lambda: True)
     live = LiveView(iso=0.5)
@@ -503,8 +443,6 @@ def test_liveview_skips_empty_3d_frames_and_says_so_once(
 def test_liveview_still_surfaces_a_real_misuse() -> None:
     # the skip is for EmptySceneError only; an unstructured snapshot is a
     # mistake to fix, so it must not be swallowed as a skipped frame
-    from topokit.events import FieldSnapshot
-    from topokit.viz import LiveView, VizError
 
     live = LiveView()
     snapshot = FieldSnapshot(iteration=1, rho=np.array([0.5, 0.5]), mesh=_tet_pair())

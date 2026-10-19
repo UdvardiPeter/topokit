@@ -305,7 +305,6 @@ def test_max_iter_must_be_positive() -> None:
 
 def test_multi_load_runs() -> None:
     g = StructuredGrid.box(size=(10.0, 10.0), shape=(10, 10))
-    from topokit.selection import NearPoint
 
     model = LinearElasticity(
         g,
@@ -566,7 +565,6 @@ def test_resume_multistage_matches_uninterrupted(tmp_path: Path) -> None:
 
 
 def test_resume_rejects_unknown_schema(tmp_path: Path) -> None:
-    from topokit.checkpoint import write_topo
 
     path = tmp_path / "run.topo"
     write_topo(str(path), {"schema": 999}, {"x": np.zeros(4)})
@@ -699,7 +697,6 @@ def test_compliance_weights_validated_at_construction() -> None:
 
 def test_problem_wires_near_nullspace_into_solver() -> None:
     pytest.importorskip("pyamg")
-    from topokit.solvers import AmgCG
 
     class Spy(AmgCG):
         def __init__(self) -> None:

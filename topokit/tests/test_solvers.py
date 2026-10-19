@@ -180,7 +180,6 @@ def test_amg_cg_multi_rhs() -> None:
 
 def _singular_system() -> tuple[SparseMatrix, np.ndarray]:
     from topokit.fem import STEEL
-    from topokit.selection import NearPoint
 
     g = StructuredGrid(shape=(2, 2), spacing=(1.0, 1.0))
     m = LinearElasticity(

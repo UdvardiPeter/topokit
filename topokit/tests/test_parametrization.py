@@ -511,7 +511,6 @@ def test_filter_dispatches_to_the_matrix_form_on_non_grid_meshes() -> None:
 
 
 def test_chain_binds_on_a_non_grid_mesh_and_fd_verifies() -> None:
-    from topokit.testing import assert_gradient_matches
 
     g = StructuredGrid(shape=(6, 4), spacing=(1.0, 1.0))
     bound = (DensityFilter(radius=1.5) | SIMP(p=3.0)).bind(_stub_from_grid(g))

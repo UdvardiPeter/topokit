@@ -13,9 +13,11 @@ from topokit.backend import (
     ArrayBackend,
     KernelError,
     NumpyBackend,
+    active_backend,
     default_backend,
     get_kernel,
     register_kernel,
+    use_backend,
 )
 from topokit.backend.conformance import ArrayBackendConformance
 
@@ -34,8 +36,6 @@ def test_default_backend_is_numpy() -> None:
 
 
 def test_kernel_exact_backend_match() -> None:
-    from topokit.backend import use_backend
-
     register_kernel("_test_exact", "testbk", lambda: "fast")
     with use_backend(named_backend("testbk")):
         assert get_kernel("_test_exact")() == "fast"
@@ -64,8 +64,6 @@ def test_numpy_backend_registered_as_builtin() -> None:
 
 
 def test_use_backend_overrides_and_restores() -> None:
-    from topokit.backend import active_backend, default_backend, use_backend
-
     assert active_backend() is default_backend()
     other = named_backend("othernp")
     with use_backend(other):
@@ -77,8 +75,6 @@ def test_use_backend_overrides_and_restores() -> None:
 
 
 def test_use_backend_resolves_strings_via_registry() -> None:
-    from topokit.backend import active_backend, default_backend, use_backend
-
     with use_backend("numpy"):  # registered by topokit/__init__
         assert active_backend() is default_backend()
 
@@ -86,20 +82,12 @@ def test_use_backend_resolves_strings_via_registry() -> None:
 def test_use_backend_is_thread_scoped() -> None:
     from concurrent.futures import ThreadPoolExecutor
 
-    from topokit.backend import active_backend, default_backend, use_backend
-
     with use_backend(named_backend("threadnp")), ThreadPoolExecutor(1) as ex:
         other = ex.submit(active_backend).result()
     assert other is default_backend()  # fresh threads start outside any context
 
 
 def test_get_kernel_keys_off_active_backend() -> None:
-    from topokit.backend import (
-        get_kernel,
-        register_kernel,
-        use_backend,
-    )
-
     register_kernel("ctx_demo", "generic", lambda: "generic")
     register_kernel("ctx_demo", "kern_test", lambda: "special")
     register_kernel("ctx_partial", "generic", lambda: "generic")
@@ -111,8 +99,6 @@ def test_get_kernel_keys_off_active_backend() -> None:
 
 
 def test_use_backend_rejects_non_backend_object() -> None:
-    from topokit.backend import use_backend
-
     with pytest.raises(TypeError, match="use_backend expects"), use_backend(object()):  # type: ignore[arg-type]
         pass
 
@@ -123,7 +109,6 @@ def test_use_backend_failing_entry_point_does_not_block_other_names(
     # a broken plugin in the backends group must not stop a healthy name resolving
     from importlib.metadata import EntryPoint
 
-    from topokit.backend import active_backend, default_backend, use_backend
     from topokit.registry import Registry
 
     broken = EntryPoint(name="failing", value="topokit_nope:BACKEND", group="topokit.backends")
