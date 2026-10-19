@@ -1,28 +1,58 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 Peter Udvardi and TopoKit contributors
-"""Tier-3 2D reference regression (pytest -m regression)."""
+"""Tier-3 reference regression: the 2D matrix (-m regression) and the full one.
+
+One `test_matches_reference` over both case matrices. The two suites were
+the same four assertions at the same tolerances against the same frozen
+`.npz` layout, differing only in which matrix they read and which marker
+they carried; the marker now rides on the parameter, so `-m regression`
+still selects the 2D smalls and `-m regression_full` the nightly 3D +
+Michell cases.
+"""
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
-from topokit.problem import Result, Schedule, Study
+from topokit.problem import Schedule, Study
 
-from topokit_bench.problems import BUILDERS, CASES, make_optimizer
+from topokit_bench.problems import BUILDERS, CASES, FULL_CASES, Builder, make_optimizer
 
 DATA = Path(__file__).resolve().parent / "data"
 
+# Every frozen reference, read off the case matrices rather than listed: a
+# hardcoded list leaves a newly added case silently ungated, which is how
+# cantilever_tri landed with an MMA reference nothing compared against.
+_RUNS = [
+    pytest.param(
+        f"{name}_{nelx}x{nely}_{opt}",
+        BUILDERS[name],
+        {"nelx": nelx, "nely": nely},
+        opt,
+        marks=pytest.mark.regression,
+        id=f"{name}_{nelx}x{nely}_{opt}",
+    )
+    for name, nelx, nely, opt in CASES
+] + [
+    pytest.param(
+        f"{case.key}_{opt}",
+        case.build,
+        dict(case.kwargs),
+        opt,
+        marks=pytest.mark.regression_full,
+        id=f"{case.key}_{opt}",
+    )
+    for case in FULL_CASES
+    for opt in case.optimizers
+]
 
-def _run(name: str, nelx: int, nely: int, opt_name: str) -> Result:
-    problem = BUILDERS[name](nelx, nely, optimizer=make_optimizer(opt_name))
-    return Study(problem, schedule=Schedule.single(p=3.0, max_iter=100, tol=1e-3)).run()
 
-
-@pytest.mark.regression
-@pytest.mark.parametrize("name,nelx,nely,opt_name", CASES)
-def test_matches_reference(name: str, nelx: int, nely: int, opt_name: str) -> None:
-    ref = np.load(DATA / f"{name}_{nelx}x{nely}_{opt_name}.npz")
-    result = _run(name, nelx, nely, opt_name)
+@pytest.mark.parametrize("stem,build,kwargs,opt", _RUNS)
+def test_matches_reference(stem: str, build: Builder, kwargs: dict[str, int], opt: str) -> None:
+    ref = np.load(DATA / f"{stem}.npz")
+    problem = build(**kwargs, optimizer=make_optimizer(opt))
+    result = Study(problem, schedule=Schedule.single(p=3.0, max_iter=100, tol=1e-3)).run()
     # 1. volume held
     assert result.history["volume"][-1] == pytest.approx(float(ref["volume"]), abs=1e-3)
     # 2. compliance within 1% of the frozen reference
@@ -33,21 +63,21 @@ def test_matches_reference(name: str, nelx: int, nely: int, opt_name: str) -> No
     assert abs(result.iterations - int(ref["iterations"])) <= 0.25 * int(ref["iterations"]) + 1
 
 
-# Every geometry in the 2D matrix, derived from CASES rather than listed: a
-# hardcoded list leaves a newly added case silently ungated, which is how
-# cantilever_tri landed with an MMA reference nothing compared against. Each 2D
-# case is frozen for both optimizers, so an OC-only addition fails here loudly
-# rather than being skipped.
-_GEOMETRIES = sorted({(name, nelx, nely) for name, nelx, nely, _ in CASES})
+# Every case frozen for both optimizers, again derived from the matrices. The
+# 2D cases are all frozen for both; among the full cases only Michell is.
+_AGREEMENT_STEMS = sorted(
+    {f"{name}_{nelx}x{nely}" for name, nelx, nely, _ in CASES}
+    | {case.key for case in FULL_CASES if {"oc", "mma"} <= set(case.optimizers)}
+)
 
 
 @pytest.mark.regression
-@pytest.mark.parametrize("name,nelx,nely", _GEOMETRIES)
-def test_oc_and_mma_agree(name: str, nelx: int, nely: int) -> None:
+@pytest.mark.parametrize("stem", _AGREEMENT_STEMS)
+def test_oc_and_mma_agree(stem: str) -> None:
     # the two optimizers reach the same optimum; checked on the frozen references
-    # so the per-PR suite does not pay a second full run per case.
-    c_oc = float(np.load(DATA / f"{name}_{nelx}x{nely}_oc.npz")["compliance"])
-    c_mma = float(np.load(DATA / f"{name}_{nelx}x{nely}_mma.npz")["compliance"])
+    # so the suite does not pay a second full run per case.
+    c_oc = float(np.load(DATA / f"{stem}_oc.npz")["compliance"])
+    c_mma = float(np.load(DATA / f"{stem}_mma.npz")["compliance"])
     assert abs(c_mma - c_oc) / c_oc < 0.05
 
 
@@ -68,3 +98,12 @@ def test_tri3_vs_quad4_cantilever_agree() -> None:
     c_quad = float(np.load(DATA / "cantilever_60x20_oc.npz")["compliance"])
     c_tri = float(np.load(DATA / "cantilever_tri_60x20_oc.npz")["compliance"])
     assert abs(c_tri - c_quad) / c_quad < 0.05
+
+
+@pytest.mark.regression_full
+def test_michell_reference_is_vertically_symmetric() -> None:
+    # topology-sanity: the committed Michell reference is mirror-symmetric about
+    # the horizontal centreline (symmetric BCs + load).
+    ref = np.load(DATA / "michell_90x30_oc.npz")
+    field: Any = ref["density"].reshape(30, 90)  # (nely, nelx), x-fastest
+    assert float(np.mean(np.abs(field - field[::-1, :]))) < 1e-2

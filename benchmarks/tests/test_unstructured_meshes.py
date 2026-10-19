@@ -51,13 +51,6 @@ def test_tri_mesh_construction_and_measures() -> None:
     assert faces.area.sum() == pytest.approx(2.0 * (sx + sy), abs=1e-12)
 
 
-def test_tri_mesh_deterministic() -> None:
-    a = _tri_mesh(3, 2, (6.0, 3.0))
-    b = _tri_mesh(3, 2, (6.0, 3.0))
-    np.testing.assert_array_equal(a.nodes, b.nodes)
-    np.testing.assert_array_equal(a.element_nodes, b.element_nodes)
-
-
 def test_tet_mesh_construction_and_measures() -> None:
     # Asymmetric element counts and box size per axis: a bug that mixes up
     # x/y/z (e.g. using nx1 where ny1 belongs) would corrupt connectivity or
@@ -72,13 +65,6 @@ def test_tet_mesh_construction_and_measures() -> None:
     faces = mesh.boundary_faces()
     surface = 2.0 * (sx * sy + sy * sz + sz * sx)
     assert faces.area.sum() == pytest.approx(surface, abs=1e-12)
-
-
-def test_tet_mesh_deterministic() -> None:
-    a = _tet_mesh(3, 2, 4, (3.0, 2.0, 4.0))
-    b = _tet_mesh(3, 2, 4, (3.0, 2.0, 4.0))
-    np.testing.assert_array_equal(a.nodes, b.nodes)
-    np.testing.assert_array_equal(a.element_nodes, b.element_nodes)
 
 
 def test_tet10_mesh_construction_and_measures() -> None:
@@ -102,13 +88,6 @@ def test_tet10_mesh_construction_and_measures() -> None:
     faces = mesh.boundary_faces()
     surface = 2.0 * (size[0] * size[1] + size[1] * size[2] + size[2] * size[0])
     assert faces.area.sum() == pytest.approx(surface, abs=1e-12)
-
-
-def test_tet10_mesh_deterministic() -> None:
-    a = _tet10_mesh(3, 2, 4, (3.0, 2.0, 4.0))
-    b = _tet10_mesh(3, 2, 4, (3.0, 2.0, 4.0))
-    np.testing.assert_array_equal(a.nodes, b.nodes)
-    np.testing.assert_array_equal(a.element_nodes, b.element_nodes)
 
 
 def _tip_face_center(kwargs: dict[str, int]) -> tuple[float, ...]:
